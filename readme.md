@@ -1,4 +1,5 @@
 <a id="readme-top"></a>
+
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]
@@ -8,31 +9,27 @@
 
 <br />
 <div align="center">
-  <a href="https://github.com/finix77/MininetOpenDayLight">
+  <a href="https://github.com/dipi-unimore/mininet-gym">
     <img src="images/logo.png" alt="Logo" width="80" height="80">
   </a>
 
-  <h3 align="center">RL-Mininet-OpenDayLight</h3>
+  <h3 align="center">MininetGym</h3>
 
   <p align="center">
     Reinforcement learning Mininet OpenDayLight
-    This project aims to provide a basic framework for DDoS mitigation using reinforcement learning (Deep and not). The network is implemented using Mininet (based on Software defined networking).
-
+    This project aims to provide a basic framework for DDoS mitigation using reinforcement learning (Deep and not).
+    The network is implemented using Mininet (based on Software defined networking).
     The design of the solution is inspired by the work "???" by Salvo Finistrella and others here.
     <br />
-    <a href="https://github.com/finix77/MininetOpenDayLight"><strong>Explore the docs »</strong></a>
+    <a href="https://github.com/dipi-unimore/mininet-gym"><strong>Explore the docs »</strong></a>
     <br />
     <br />
-    <a href="https://github.com/finix77/MininetOpenDayLight">View Demo</a>
+    <a href="https://github.com/dipi-unimore/mininet-gym/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     ·
-    <a href="https://github.com/finix77/MininetOpenDayLight/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
-    ·
-    <a href="https://github.com/finix77/MininetOpenDayLight/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
+    <a href="https://github.com/dipi-unimore/mininet-gym/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
   </p>
 </div>
 
-
-<!-- TABLE OF CONTENTS -->
 <details>
   <summary>Table of Contents</summary>
   <ol>
@@ -58,170 +55,119 @@
   </ol>
 </details>
 
-<!-- ABOUT THE PROJECT -->
 ## About The Project
 
 [![Product Screen Shot][product-screenshot]]
 [![Schema Screen Shot][schema-screenshot]]
 
-    Reinforcement learning Mininet OpenDayLight
+Reinforcement learning Mininet OpenDayLight
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Getting Started
-  Reinforcement learning Mininet OpenDayLight
+
+This section provides instructions on how to set up and run the MininetGym project.
 
 ### Prerequisites
-Python 3.11
-OpenDayLight
-Java
-Mininet [Mininet and OpenVSwitch]
+
+Ensure you have the following installed on your system:
+* **Python 3.11**
+* **Mininet**: A network emulator that creates a network of virtual hosts, switches, controllers, and links.
+* **OpenDayLight (ODL)**: A modular open-source platform for Software-Defined Networking (SDN).
+* **Java**: Required for OpenDayLight. Version 1.8.0 or later is recommended.
 
 ### Installation
-Per installare controller ODL su Ubuntu 22 seguire [ODL-Ubuntu22-installation]
-versione ODL karaf 0.8.4 [ODL-karaf-0.8.4]
-versione java 1.8.0
-echo 'export JAVA_PATH=/usr/lib/jvm/java-21-openjdk-amd64/bin/java' 
 
-Creare il venv
-#python3 -m venv MYenv11
-virtualenv --python="/usr/bin/python3.11" "MYenv11"  [use-different-python-version-with-virtualenv]
-Attivare il venv
-source MYenv11/bin/activate
+Follow these steps to get your development environment set up:
 
-install requirements.txt
+1.  **Mininet Installation**
+    Mininet is crucial for this simulation framework. It is recommended to install Mininet on a clean Ubuntu x.x LTS system. For detailed instructions, refer to the official Mininet documentation or a guide specific to your OS version. A common installation method involves:
+    ```bash
+    git clone [https://github.com/mininet/mininet](https://github.com/mininet/mininet)
+    mininet/util/install.sh -a
+    ```
 
---------------------------------------------
+2.  **OpenDayLight (ODL) Controller Installation**
+    For installing OpenDayLight controller, follow the instructions provided in the [ODL-Ubuntu22-installation] guide. This project was developed with ODL Karaf version 0.8.4 and Java 1.8.0. This is not mandatory, it depends by environment configuration.
 
-2 - Other notes
+    You might also use a Docker container for ODL. To start an OpenDayLight controller container:
+    ```bash
+    docker run -d -t -v ~/.m2:/root/.m2/ -p 6633:6633 -p 8101:8101 -p 8181:8181 --net=bridge --hostname=ovsdb-cluster-node-1 --name=opendaylight opendaylight/opendaylight:0.18.2 [https://github.com/sfuhrm/docker-opendaylight](https://github.com/sfuhrm/docker-opendaylight)
+    ```
+    To connect via SSH to the ODL controller inside the Docker container on a virtual machine (e.g., 192.168.1.226):
+    ```bash
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@192.168.1.226 -p 8101
+    ```
+    (Note: Replace `admin` with your ODL username and `192.168.1.226` with your VM's IP if different).
 
-Lista container
-docker ps -a
+3.  **Set JAVA_PATH (if using local ODL installation)**
+    Ensure your `JAVA_PATH` is correctly set, especially if you are running ODL directly and not via Docker:
+    ```bash
+    echo 'export JAVA_PATH=/usr/lib/jvm/java-21-openjdk-amd64/bin/java' >> ~/.bashrc
+    source ~/.bashrc
+    ```
+    Adjust the path to your Java installation accordingly.
 
-Per avviare container controller Opendaylight
-docker run -d -t -v ~/.m2:/root/.m2/ -p 6633:6633 -p 8101:8101 -p 8181:8181 --net=bridge --hostname=ovsdb-cluster-node-1 --name=opendaylight opendaylight/opendaylight:0.18.2
-https://github.com/sfuhrm/docker-opendaylight
+4.  **Create and Activate a Python Virtual Environment**
+    It's highly recommended to use a virtual environment to manage project dependencies.
+    ```bash
+    # Create a virtual environment named 'MYenv11' using Python 3.11
+    python3.11 -m venv MYenv11
+    # Alternatively, if you have 'virtualenv' installed:
+    # virtualenv --python="/usr/bin/python3.11" "MYenv11"
 
-Per connettersi in SSH al controller opendaylight 
-in container docker su macchina virtuale 192.168.1.226
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 8101 karaf@192.168.1.226
-password karaf
-https://brianlinkletter.com/2016/02/using-the-opendaylight-sdn-controller-with-the-mininet-network-emulator/
+    # Activate the virtual environment
+    source MYenv11/bin/activate
+    ```
+    You will see `(MYenv11)` prepended to your terminal prompt, indicating that the virtual environment is active.
 
-tutte le release https://nexus.opendaylight.org/content/repositories/opendaylight.release/org/opendaylight/integration/karaf/
+5.  **Install Python Dependencies**
+    With your virtual environment activated, install the required Python packages using `requirements.txt`.
+    ```bash
+    pip install -r requirements.txt
+    ```
+    This will install the following libraries:
+    * `Flask==3.0.3`
+    * `Flask-SocketIO==5.3.0`
+    * `Flask-Cors==4.0.0`
+    * `eventlet==0.36.1`
+    * `python-engineio==4.9.1`
+    * `python-socketio==5.11.0`
+    * `requests==2.32.3`
+    * `numpy==1.26.4`
+    * `pandas==2.2.2`
+    * `matplotlib==3.8.4`
+    * `scikit-learn==1.4.2`
+    * `scipy==1.13.1`
+    * `gymnasium==0.29.1`
+    * `stable-baselines3==2.3.0`
+    * `sb3-contrib==2.3.0`
+    * `Mininet==2.3.0`
+    * `colorama==0.4.6`
+    * `pyyaml==6.0.1`
+    * `lxml==5.2.2`
+    * `beautifulsoup4==4.12.3`
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+    Your environment is now set up!
 
-<!-- USAGE EXAMPLES -->
-## Usage
+6.  **Create configuration**
+    Starting from base_config.yaml, create your own configuration, following the instruction of the paper (not published yet)
 
-To avoid gym not found 
-sudo ..../MininetOpenDayLight/MYenv11/bin/python main.py
-
-or better, go into venv with the command 'source MYenv11/bin/activate'
-
-
-Create and modify `config.yaml` starting from `base_config.yaml`.
-One model (agent) is mandatory.
-
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
-<!-- ROADMAP -->
-## Roadmap
-
-- [x] Mininet network generation
-- [x] Open day light controller connected
-- [x] Generation of traffic like PING, UDP, TCP 
-- [x] Introduction of Reinforcmente learning algorithms to detect traffic: QLearning, Sarsa 
-- [x] Plot metrics and other statistics
-- [x] Comparering results with supervised learning (Decision tree calssification)
-- [ ] Deep learning
-    - [ ] DQN
-    - [ ] A2C
-    - [ ] PPO
-- [ ] Generation traffic real time, short and long time DDOS
-- [ ] Introduction of MARL
-
-
-See the [open issues](https://github.com/othneildrew/Best-README-Template/issues) for a full list of proposed features (and known issues).
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
-<!-- CONTRIBUTING -->
-## Contributing
-
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
-Don't forget to give the project a star! Thanks again!
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-
-### Top contributors:
-
-<a href="https://github.com/finix77/MininetOpenDayLight/graphs/contributors">
-  top
-</a>
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- LICENSE -->
-## License
-
-Distributed under the MIT License. See `LICENSE.txt` for more information.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- CONTACT -->
-## Contact
-
-Salvo Finistrella - [@Linkedin](https://www.linkedin.com/in/salvo-finistrella-03083540) - salvo.finistrella@unimore.com
-
-Project Link: [https://github.com/finix77/MininetOpenDayLight/](https://github.com/finix77/MininetOpenDayLight)
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
-<!-- ACKNOWLEDGMENTS -->
-## Acknowledgments
-
-Use this space to list resources you find helpful and would like to give credit to. I've included a few of my favorites to kick things off!
-
-* [Choose an Open Source License](https://choosealicense.com)
-* [GitHub Emoji Cheat Sheet](https://www.webpagefx.com/tools/emoji-cheat-sheet)
-* [Malven's Flexbox Cheatsheet](https://flexbox.malven.co/)
-* [Malven's Grid Cheatsheet](https://grid.malven.co/)
-* [Img Shields](https://shields.io)
-* [GitHub Pages](https://pages.github.com)
-* [Font Awesome](https://fontawesome.com)
-* [React Icons](https://react-icons.github.io/react-icons/search)
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
-[contributors-shield]: https://img.shields.io/github/contributors/othneildrew/Best-README-Template.svg?style=for-the-badge
-[contributors-url]: https://github.com/finix77/MininetOpenDayLight//graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/othneildrew/Best-README-Template.svg?style=for-the-badge
-[forks-url]: https://github.com/finix77/MininetOpenDayLight/network/members
-[stars-shield]: https://img.shields.io/github/stars/othneildrew/Best-README-Template.svg?style=for-the-badge
-[stars-url]: https://github.com/finix77/MininetOpenDayLight/stargazers
-[issues-shield]: https://img.shields.io/github/issues/othneildrew/Best-README-Template.svg?style=for-the-badge
-[issues-url]: https://github.com/finix77/MininetOpenDayLight/issues
-[license-shield]: https://img.shields.io/github/license/othneildrew/Best-README-Template.svg?style=for-the-badge
-[license-url]: https://github.com/othneildrew/Best-README-Template/blob/master/LICENSE.txt
-[ODL-karaf-0.8.4]: https://nexus.opendaylight.org/content/repositories/opendaylight.release/org/opendaylight/integration/karaf/0.8.4/karaf-0.8.4.zip
-[ODL-Ubuntu22-installation]: https://john.soban.ski/install-opendaylight-ubuntu-lts-22-04.html
-[Mininet and OpenVSwitch]: http://mininet.org/ - Custom switch for SDN and Mininet
+---
+[contributors-shield]: https://img.shields.io/github/contributors/dipi-unimore/mininet-gym.svg?style=for-the-badge
+[contributors-url]: https://github.com/dipi-unimore/mininet-gym/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/dipi-unimore/mininet-gym.svg?style=for-the-badge
+[forks-url]: https://github.com/dipi-unimore/mininet-gym/network/members
+[stars-shield]: https://img.shields.io/github/stars/dipi-unimore/mininet-gym.svg?style=for-the-badge
+[stars-url]: https://github.com/dipi-unimore/mininet-gym/stargazers
+[issues-shield]: https://img.shields.io/github/issues/dipi-unimore/mininet-gym.svg?style=for-the-badge
+[issues-url]: https://github.com/dipi-unimore/mininet-gym/issues
+[license-shield]: https://img.shields.io/github/license/dipi-unimore/mininet-gym.svg?style=for-the-badge
+[license-url]: https://github.com/dipi-unimore/mininet-gym/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
-[linkedin-url]: https://www.linkedin.com/in/salvo-finistrella-03083540/
-[use-different-python-version-with-virtualenv]: https://stackoverflow.com/questions/1534210/use-different-python-version-with-virtualenv
+[linkedin-url]: https://linkedin.com/in/salvo-finistrella-970034237
 [product-screenshot]: images/screenshot.png
 [schema-screenshot]: images/schema.png
+[ODL-Ubuntu22-installation]: https://docs.opendaylight.org/en/stable-fluorine/downloads.html
+[ODL-karaf-0.8.4]: https://docs.opendaylight.org/en/stable-fluorine/downloads.html
+[use-different-python-version-with-virtualenv]: https://stackoverflow.com/questions/35579976/how-to-use-a-different-python-version-with-virtualenv
