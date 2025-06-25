@@ -1,0 +1,12 @@
+body {
+  background-color: #f9f9f9;
+}
+h5 {
+  margin-top: 20px;
+}
+#agentsContainer .agent-block {
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  background-color: #fff;
+}

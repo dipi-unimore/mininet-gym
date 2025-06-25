@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mininet-Gym Interface</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet">
+</head>
+<body>
+  <div class="container mt-4">
+    <h1 class="mb-4">Mininet-Gym Control Panel</h1>
+    <ul class="nav nav-tabs" id="mainTab" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="config-tab" data-bs-toggle="tab" data-bs-target="#config" type="button" role="tab">Configuration</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="training-tab" data-bs-toggle="tab" data-bs-target="#training" type="button" role="tab">Training & Evaluation</button>
+      </li>
+    </ul>
+    <div class="tab-content" id="mainTabContent">
+      <!-- Config Tab -->
+      <div class="tab-pane fade show active p-3" id="config" role="tabpanel">
+        <form id="config-form">
+          <div id="general-config"></div>
+          <div id="env-config"></div>
+          <div id="agents-config"></div>
+          <button type="button" id="addAgent" class="btn btn-outline-secondary mb-3">Add Agent</button>
+
+          <button type="submit" class="btn btn-primary mt-3">Save Configuration</button>
+        </form>
+      </div>
+
+      <!-- Training Tab -->
+      <div class="tab-pane fade p-3" id="training" role="tabpanel">
+        <button id="start-training" class="btn btn-success mb-3">Start Training</button>
+        <div id="training-output" class="border p-3 bg-light" style="min-height: 300px; white-space: pre-wrap;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
