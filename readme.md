@@ -153,6 +153,9 @@ Follow these steps to get your development environment set up:
 6.  **Create configuration**
     Starting from base_config.yaml, create your own configuration, following the instruction of the paper (not published yet)
 
+
+This project is licensed under the MIT License – see the LICENSE.txt file for details.
+
 ---
 [contributors-shield]: https://img.shields.io/github/contributors/dipi-unimore/mininet-gym.svg?style=for-the-badge
 [contributors-url]: https://github.com/dipi-unimore/mininet-gym/graphs/contributors
