@@ -57,10 +57,13 @@
 
 ## About The Project
 
-[![Product Screen Shot][product-screenshot]]
-[![Schema Screen Shot][schema-screenshot]]
+![Schema Screen Shot][schema-screenshot]
+Schema 
+![Product Screen Shot][product-screenshot]
+Result accuracy graph
 
-Reinforcement learning Mininet OpenDayLight
+A Modular SDN-based Simulation Environment for Reinforcement Learning in Cybersecurity
+Real-time traffic generation and flow monitoring via Mininet and Custom Gym environments for traffic classification and DoS attack detection.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
