@@ -10,7 +10,7 @@ from reinforcement_learning.qlearning_agent import QLearningAgent
 from reinforcement_learning.adversarial_agent import  generate_random_traffic, generate_traffic
 from utility.my_log import set_log_level, information, debug, error, notify_client
 from utility.params import Params, read_config_file
-from utility.my_statistics import read_data_file, plot_net_metrics
+from utility.my_statistics import plot_agent_execution_confusion_matrix, plot_radar_chart, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, read_data_file, plot_net_metrics
 from utility.my_files import read_data_file, save_data_to_file
 import numpy as np
 import pandas as pd
@@ -232,13 +232,51 @@ def test_deep_learning(config, net_env):
         if dones:
             break
 
+def test_results_from_saved_data(env_type, execution_dir, agent_name):
+    directory_name = f"_training/{env_type}/{execution_dir}/{agent_name}"
+    if not os.path.exists(directory_name):
+        error(f"Directory {directory_name} does not exist")
+        return
+    information(f"Testing results from saved data in {directory_name}")
+    data = read_data_file(directory_name + "/data")
+    if data is None:
+        error(f"Data file not found in {directory_name}")
+        return
+    if 'train_indicators' in data:
+        #information(f"Train metrics: {data['train_indicators']}")
+        plot_agent_execution_confusion_matrix(data['train_indicators'], directory_name)
+    if 'train_metrics' in data:
+        #information(f"Train metrics: {data['train_metrics']}")
+        #plot_metrics(data['train_metrics'], directory_name, agent_name + " Train metrics") 
+        plot_combined_performance_over_time(data['train_metrics'], directory_name, agent_name + " Combined performance over time")
+        return data['train_metrics']  
+
 if __name__ == '__main__':
     set_log_level('info')
     
-    createTrafficClassificationEnv = True
+    testResultsFromSavedData = True
+    createTrafficClassificationEnv = False
     createCSVTrafficFromJson = False
     testCSVTrafficWithQLearning = False
     deepLearning = False
+    
+    if testResultsFromSavedData:
+        #test_results_from_saved_data('classification_from_dataset','20250625-121343_1_10_1','Q-learning_1')
+        agents_metrics=[]
+        env_type = 'attacks'
+        execution_dir = '20250307-095840_1_10_1'
+        directory_name = f"_training/{env_type}/{execution_dir}"
+        if not os.path.exists(directory_name):
+            error(f"Directory {directory_name} does not exist")
+            exit(-1)
+        #read directory to find the agents trained ( the agent are all directory contained expet Test)
+        agents = [f for f in os.listdir(directory_name) if os.path.isdir(os.path.join(directory_name, f)) and not f.startswith('TEST')] 
+        agents_metrics = defaultdict(list)
+        for agent in agents:
+            agents_metrics[agent]=test_results_from_saved_data(env_type,execution_dir,agent)
+        plot_comparison_bar_charts(directory_name, agents_metrics)
+        plot_radar_chart(directory_name, agents_metrics)
+        exit(0)
     
     config,net_env = create_network_from_config()     
     if createTrafficClassificationEnv:

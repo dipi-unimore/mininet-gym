@@ -41,7 +41,7 @@ class NetworkEnvClassification(NetworkEnv):
         # Define action and observation space, gym.spaces objects
 
         self.low = np.array([0,0,0,0])      
-        self.high = np.array([1e6, 1e6, 1e11, 1e11])        #fixed for every network
+        self.high = np.array([1e4, 1e4, 1e7, 1e7])        #fixed for every network
         self.observation_space = spaces.Box(low=0, high=self.high, shape=(len(self.state),), dtype=np.float32)
         
         # Define the number of discrete bins for each observation dimension
@@ -49,7 +49,7 @@ class NetworkEnvClassification(NetworkEnv):
         # self.low = np.array([1, len(self.net.hosts), 1e2, 1e3]) #np.inf
         # self.high = np.array([len(self.net.hosts), 1e2, 1e6, 1e7]) #np.inf
         self.low_to_normalize = np.array(np.zeros(self.num_actions)) #np.inf
-        self.high_to_normalize = np.array([1e6,1e6,1e11,1e11]) #fixed for every network
+        self.high_to_normalize = np.array([1e4,1e4,1e7,1e7]) #fixed for every network
         low = self.low #np.floor(np.log10(self.low)).astype(int)
         high = np.floor(np.log10(self.high)).astype(int)
         self.bins = [np.logspace(low[i], high[i], self.n_bins) for i in range(self.observation_space.shape[0])]

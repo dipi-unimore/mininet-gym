@@ -230,8 +230,10 @@ class NetworkEnv(gym.Env, ABC):
         for i, val in enumerate(state):
             if (i==1 or i==3) and self.gym_type>=4:
                 bin_index = self.get_linear_bin_index(val, low[i], high[i], n_bins-1)+1
-            else:       
+            elif self.gym_type>=4:
                 bin_index = self.get_linear_bin_index(val, low[i], high[i], n_bins)
+            else:       
+                bin_index = np.digitize(val+1, bins[i]) - 1
             discrete_state.append(bin_index)
         # return np.array(discrete_state, dtype=np.int32)
         return tuple(discrete_state)  

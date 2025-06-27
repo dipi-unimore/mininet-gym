@@ -1,9 +1,11 @@
 # main.py
+from collections import defaultdict
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from reinforcement_learning.network_env import NetworkEnv
 from reinforcement_learning.agent_manager import AgentManager
 #from utility.my_statistics import plot_metrics, plot_indicators, plot_train_types, plot_net_metrics
-from utility.my_statistics import plot_agent_test_errors, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_traffic_types, plot_enviroment_execution_statutes, plot_train_types, plot_agent_test, plot_test_confusion_matrix
+from supervised_agent import SupervisedAgent
+from utility.my_statistics import plot_agent_test_errors, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_traffic_types, plot_enviroment_execution_statutes, plot_radar_chart, plot_train_types, plot_agent_test, plot_test_confusion_matrix
 from utility.my_files import save_data_to_file, read_csv_file, create_directory_training_execution
 from utility.my_log import information, debug, error
 from colorama import Fore, Back, Style
@@ -19,7 +21,7 @@ def traffic_classification_main(config, net_env: NetworkEnv):
         am = AgentManager(net_env, config)
          # Step 1: training
         for agent in am.agents_params:             
-            if agent.skip_learn:
+            if isinstance(agent.instance, SupervisedAgent) or agent.skip_learn:
                 continue
             if not hasattr(agent, 'episodes'):
                 information(Fore.YELLOW+"Param 'total_timesteps' is missing\n")
@@ -31,10 +33,14 @@ def traffic_classification_main(config, net_env: NetworkEnv):
             train_agent(agent)   
             
         #Step 2: plotting and saving agent data
+        agents_metrics = defaultdict(list)
         for agent in am.agents_params:
-            if agent.skip_learn:
-                    continue
+            if isinstance(agent.instance, SupervisedAgent) or agent.skip_learn:
+                continue
             plot_and_save_data_agent(agent, config)  
+            agents_metrics[agent.name]=agent.instance.metrics
+        plot_comparison_bar_charts(config.training_execution_directory , agents_metrics)
+        plot_radar_chart(config.training_execution_directory , agents_metrics)
         
         #Step 3: starting test
         directory_name = create_directory_training_execution(config, "TEST")
@@ -81,7 +87,6 @@ def plot_and_save_data_agent(agent, config):
         accuracy, precision, recall, f1_score = agent.custom_callback.get_metrics()
         agent.instance.metrics = agent.custom_callback.metrics
         agent.instance.indicators = agent.custom_callback.indicators
-        #agent.instance.train_types = agent.custom_callback.train_types
         
     agent.metrics = {
         "accuracy": accuracy,
@@ -108,6 +113,7 @@ def plot_and_save_data_agent(agent, config):
         plot_agent_cumulative_rewards(data.train_indicators, directory_name, agent.name)
         plot_agent_execution_traffic_types(data.train_indicators, directory_name, agent.name)
         plot_agent_execution_confusion_matrix(data.train_indicators, directory_name)
+    plot_combined_performance_over_time(data.train_metrics, directory_name, agent.name + " Combined performance over time")
     plot_metrics(data.train_metrics,directory_name,agent.name+" Train metrics")
     if len(data.train_types["explorations"]) > 0 and len(data.train_types["exploitations"]) > 0: 
         plot_train_types(data.train_types, data.train_execution_time, directory_name)

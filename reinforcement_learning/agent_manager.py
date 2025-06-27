@@ -45,7 +45,7 @@ class AgentManager:
             model =  QLearningAgent(env, agent_param)
             try:            
                 if agent_param.load:
-                    path = find_latest_file(self.training_directory,name,'json',self.net_config_filter)
+                    path = agent_param.load_dir if agent_param.load_dir is not None else find_latest_file(self.training_directory,name,'json',self.net_config_filter)
                     model.load(path)
             except:
                 debug(f"No {name} model file\n")              
@@ -54,7 +54,7 @@ class AgentManager:
             model =  SARSAAgent(env, agent_param)
             try:
                 if agent_param.load:                
-                    path = find_latest_file(self.training_directory,name,'json',self.net_config_filter)
+                    path = agent_param.load_dir if agent_param.load_dir is not None else  find_latest_file(self.training_directory,name,'json',self.net_config_filter)
                     model.load(path)
             except:
                 debug(f"No {name} model file\n")              
@@ -154,11 +154,6 @@ class AgentManager:
         is_custom_agent = isinstance(model, QLearningAgent) or isinstance(model, SARSAAgent)
         information(f"Starting training\n")
         
-        # if self.train_type == 1:
-        #     self.generate_traffic()  
-        #     stop_event = threading.Event()            
-        #     gt = threading.Thread(target=self.env.update_state_thread, args=(stop_event,))
-        #     gt.start()
         self.env.early_exit = False        
             
         if is_custom_agent:
@@ -168,10 +163,6 @@ class AgentManager:
             for episode in range(agent.episodes):
                 agent.custom_callback.episode = episode
                 model.learn(total_timesteps=self.env.max_steps, callback=agent.custom_callback, progress_bar=agent.progress_bar)
-        # if self.train_type == 1:
-        #     #stop thread generating traffic
-        #     stop_event.set()
-        #     gt.join()
 
         information(f"Training finished { (np.mean(self.env.metrics['accuracy'])) * 100 :.2f} %\n")
 

@@ -100,7 +100,12 @@ def plot_agent_execution_confusion_matrix(indicators, dir_name):
             all_steps_status.append(step_status)
 
     predicted = [item['action_choosen'] for item in all_steps_status]
-    ground_truth = [item['action_choosen'] if item['action_correct'] else 1 - item['action_choosen'] for item in all_steps_status]
+    if 'traffic_type' in all_steps_status[0]:
+        # If 'traffic_type' exists, use it as ground truth, eg classification
+        ground_truth = [item['traffic_type'] for item in all_steps_status]
+    else:
+        # eg attack the prediction is 0 or 1
+        ground_truth = [item['action_choosen'] if item['action_correct'] else 1 - item['action_choosen'] for item in all_steps_status]
     try:
         confusion_matrix = metrics.confusion_matrix(ground_truth, predicted)
         cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix)
@@ -494,6 +499,140 @@ def plot_metrics(metrics, dir_name, title=''):
     # Save figure
     plt.savefig(f"{dir_name}/metrics.png")
     plt.close()
+    
+def plot_combined_performance_over_time(
+    metrics, dir_name,
+    title="Model Performance Over Time",
+    xlabel="Episodes",
+    ylabel="Metric Value"
+):
+    """
+    Plots accuracy, recall, precision, and f-score on a single line chart
+    over training episodes or time steps.
+
+    Args:
+        episodes (list or np.array): A list or array representing the x-axis (e.g., episode numbers).
+        accuracy_scores (list or np.array): List of accuracy scores corresponding to each episode.
+        recall_scores (list or np.array): List of recall scores.
+        precision_scores (list or np.array): List of precision scores.
+        fscore_scores (list or np.array): List of f-score scores.
+        title (str): Title of the plot.
+        xlabel (str): Label for the x-axis.
+        ylabel (str): Label for the y-axis.
+    """
+   # Extract data for plotting    
+    episodes = np.arange(1, len(metrics["accuracy"]) + 1)
+    accuracy_scores = metrics["accuracy"]
+    precision_scores = metrics["precision"]
+    recall_scores = metrics["recall"]
+    fscore_scores = metrics["f1_score"]    
+    
+    plt.figure(figsize=(12, 7))
+    plt.plot(episodes, accuracy_scores, label='Accuracy', marker='o', linestyle='-')
+    plt.plot(episodes, recall_scores, label='Recall', marker='x', linestyle='--')
+    plt.plot(episodes, precision_scores, label='Precision', marker='s', linestyle='-.')
+    plt.plot(episodes, fscore_scores, label='F-Score', marker='d', linestyle=':')
+
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend()
+    plt.ylim(0, 1.05) # Metrics are usually between 0 and 1
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/metrics_combined.png")
+    plt.close()   
+    
+def plot_radar_chart(dir_name,
+    scenario_data,
+    metrics=['accuracy', 'recall', 'precision', 'f1_score'],
+    title="Performance Profile Across Learning Scenarios"
+):
+    """
+    Creates a radar chart to visualize the performance profile of metrics across different scenarios.
+
+    Args:
+        scenario_data (dict): A dictionary where keys are scenario names (e.g., 'Low Traffic', 'High DDoS')
+                              and values are dictionaries containing metric scores.
+                              Example:
+                              {
+                                  'Scenario A': {'Accuracy': 0.7, 'Recall': 0.8, 'Precision': 0.75, 'F-Score': 0.78},
+                                  'Scenario B': {'Accuracy': 0.9, 'Recall': 0.85, 'Precision': 0.92, 'F-Score': 0.88}
+                              }
+        metrics (list): List of metric names to include in the radar chart.
+        title (str): Title of the plot.
+    """
+    num_metrics = len(metrics)
+    # Create angles for each axis in the radar chart
+    angles = np.linspace(0, 2 * np.pi, num_metrics, endpoint=False).tolist()
+    angles += angles[:1] # Complete the circle
+
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+
+    for scenario_name, scores in scenario_data.items():
+        # Get scores in the order of 'metrics' list
+        values = [np.mean(scores[metric]) for metric in metrics]
+        values += values[:1] # Complete the circle
+
+        ax.plot(angles, values, linewidth=1, linestyle='solid', label=scenario_name)
+        ax.fill(angles, values, alpha=0.25)
+
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(metrics)
+    ax.set_ylim(0, 1.0) # Metrics are usually between 0 and 1
+    ax.set_title(title, va='bottom')
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/radar_chart.png")   
+    plt.close() 
+    
+def plot_comparison_bar_charts(dir_name,
+    strategies_data,
+    metrics=['accuracy', 'recall', 'precision', 'f1_score'],
+    title="Comparison of RL Strategies Learning Performance"
+):
+    """
+    Creates grouped bar charts to compare performance metrics across different strategies/models.
+
+    Args:
+        strategies_data (dict): A dictionary where keys are strategy names (e.g., 'DQN', 'PPO')
+                                and values are dictionaries containing metric scores.
+                                Example:
+                                {
+                                    'DQN': {'Accuracy': 0.85, 'Recall': 0.78, 'Precision': 0.88, 'F-Score': 0.83},
+                                    'PPO': {'Accuracy': 0.90, 'Recall': 0.85, 'Precision': 0.92, 'F-Score': 0.88}
+                                }
+        metrics (list): List of metric names to plot.
+        title (str): Title of the plot.
+    """
+    strategy_names = list(strategies_data.keys())
+    num_strategies = len(strategy_names)
+    num_metrics = len(metrics)
+
+    bar_width = 0.2
+    index = np.arange(num_strategies)
+
+    plt.figure(figsize=(12, 7))
+
+    for i, metric_name in enumerate(metrics):
+        # Extract scores for the current metric across all strategies
+        scores = [np.mean(strategies_data[strategy][metric_name]) for strategy in strategy_names]
+        # Calculate offset for grouped bars
+        offset = bar_width * i - (num_metrics - 1) * bar_width / 2
+        plt.bar(index + offset, scores, bar_width, label=metric_name)
+
+    plt.title(title)
+    plt.xlabel("RL Strategy")
+    plt.ylabel("Metric Value")
+    plt.xticks(index, strategy_names) # Set x-axis ticks to strategy names
+    plt.ylim(0, 1.05)
+    plt.legend()
+    plt.grid(axis='y', linestyle='--', alpha=0.6)
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/metrics_comparison.png")
+    plt.close()    
     
 #normalized_segments = normalize_individual_segments(segments)     
 def normalize_individual_segments(arrays):
