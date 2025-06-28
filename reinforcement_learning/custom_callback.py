@@ -74,6 +74,7 @@ class CustomCallback(BaseCallback):
         self.exploration_count,  self.exploitation_count = 0, 0  # Reset counters for each episode
         self.ground_truth = []
         self.predicted = []
+        self.correct_predictions = 0
 
     def _on_rollout_start(self) -> None:
         """
@@ -121,12 +122,27 @@ class CustomCallback(BaseCallback):
         reward = self.locals["rewards"][0]  # assuming a single environment
         self.episode_rewards.append(reward)
         status = dict(self.net_env.status) #to detach to memory
-        status["variation_packet"]= int(status["variation_packet"])
-        status["packets"]= int(status["packets"]) 
-        status["variation_byte"]= int(status["variation_byte"]) 
-        status["bytes"]= int(status["bytes"]) 
+        if "variation_packet" in status:
+            status["variation_packet"]= int(status["variation_packet"])
+        if "packets" in status:
+            status["packets"]= int(status["packets"]) 
+        if "variation_byte" in status:
+            status["variation_byte"]= int(status["variation_byte"]) 
+        if "bytes" in status:
+            status["bytes"]= int(status["bytes"]) 
+            
+        if "packets_received" in status:
+            status["packets_received"]= int(status["packets_received"])
+        if "bytes_received" in status:
+            status["bytes_received"]= int(status["bytes_received"]) 
+        if "packets_transmitted" in status:
+            status["packets_transmitted"]= int(status["packets_transmitted"]) 
+        if "bytes_transmitted" in status:
+            status["bytes_transmitted"]= int(status["bytes_transmitted"]) 
         status["action_choosen"]=int(action)
         status["action_correct"]=bool(self.action_correct)
+        if bool(self.action_correct):
+            self.correct_predictions+= 1
         self.episode_statuses.append(status)
         
         #total_reward = sum(self.episode_rewards)

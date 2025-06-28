@@ -194,6 +194,7 @@ class AgentManager:
             g[self.env.generated_traffic_type]+=1
             ground_truth.append(g)
             real_state = self.env.real_state #not_normalized
+            normalized_state = self.env.get_normalize_state(real_state) 
             information(f"p_r={real_state[0]}\np_t={real_state[1]}\nb_r={real_state[2]}byte\nb_t={real_state[3]}byte\n")
             
             for agent in self.agents_params: 
@@ -203,7 +204,6 @@ class AgentManager:
                 if isinstance(model, SupervisedAgent) or isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
                     prediction = model.predict(real_state)
                 else:
-                    normalized_state = self.env.get_normalize_state(state) 
                     prediction, _states = model.predict(normalized_state, deterministic=True)
                 color = Fore.RED           
                 if prediction == self.env.generated_traffic_type:

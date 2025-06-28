@@ -20,6 +20,7 @@ def traffic_classification_main(config, net_env: NetworkEnv):
     try:
         am = AgentManager(net_env, config)
          # Step 1: training
+        agents_metrics = defaultdict(list)
         for agent in am.agents_params:             
             if isinstance(agent.instance, SupervisedAgent) or agent.skip_learn:
                 continue
@@ -33,10 +34,9 @@ def traffic_classification_main(config, net_env: NetworkEnv):
             train_agent(agent)   
             
         #Step 2: plotting and saving agent data
-        agents_metrics = defaultdict(list)
-        for agent in am.agents_params:
-            if isinstance(agent.instance, SupervisedAgent) or agent.skip_learn:
-                continue
+        #for agent in am.agents_params:
+            # if isinstance(agent.instance, SupervisedAgent) or agent.skip_learn:
+            #     continue
             plot_and_save_data_agent(agent, config)  
             agents_metrics[agent.name]=agent.instance.metrics
         plot_comparison_bar_charts(config.training_execution_directory , agents_metrics)
@@ -99,7 +99,8 @@ def plot_and_save_data_agent(agent, config):
     data.train_execution_time = agent.elapsed_time
     data.train_metrics = agent.instance.metrics
     data.train_indicators = agent.instance.indicators
-    data.train_types = agent.instance.train_types
+    if "train_types" in agent.instance.__dict__:
+        data.train_types = agent.instance.train_types
     #net_env.initialize_storage() #re-initialize for next agent
     
     #create directory to save all files for the agent training excecution
@@ -111,11 +112,11 @@ def plot_and_save_data_agent(agent, config):
     information("Plotting training data\n",agent.name)
     if len(data.train_indicators)>2:
         plot_agent_cumulative_rewards(data.train_indicators, directory_name, agent.name)
-        plot_agent_execution_traffic_types(data.train_indicators, directory_name, agent.name)
+        #plot_agent_execution_traffic_types(data.train_indicators, directory_name, agent.name)
         plot_agent_execution_confusion_matrix(data.train_indicators, directory_name)
     plot_combined_performance_over_time(data.train_metrics, directory_name, agent.name + " Combined performance over time")
     plot_metrics(data.train_metrics,directory_name,agent.name+" Train metrics")
-    if len(data.train_types["explorations"]) > 0 and len(data.train_types["exploitations"]) > 0: 
+    if "train_types" in data.__dict__ and len(data.train_types["explorations"]) > 0 and len(data.train_types["exploitations"]) > 0: 
         plot_train_types(data.train_types, data.train_execution_time, directory_name)
     
     #Step 5: saving data

@@ -522,14 +522,14 @@ def plot_combined_performance_over_time(
     """
    # Extract data for plotting    
     episodes = np.arange(1, len(metrics["accuracy"]) + 1)
+    recall_scores = metrics["recall"]
     accuracy_scores = metrics["accuracy"]
     precision_scores = metrics["precision"]
-    recall_scores = metrics["recall"]
     fscore_scores = metrics["f1_score"]    
     
     plt.figure(figsize=(12, 7))
-    plt.plot(episodes, accuracy_scores, label='Accuracy', marker='o', linestyle='-')
     plt.plot(episodes, recall_scores, label='Recall', marker='x', linestyle='--')
+    plt.plot(episodes, accuracy_scores, label='Accuracy', marker='o', linestyle='-')
     plt.plot(episodes, precision_scores, label='Precision', marker='s', linestyle='-.')
     plt.plot(episodes, fscore_scores, label='F-Score', marker='d', linestyle=':')
 
