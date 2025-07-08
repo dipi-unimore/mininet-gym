@@ -21,6 +21,7 @@ class AgentManager:
         self.test_episodes = config.test_episodes
         self.agents_params = [agent for agent in config.agents if agent.enabled]
         self.csv_file = config.env_params.csv_file
+        self.gym_type = config.env_params.gym_type
         self.training_directory = config.training_directory        
         self.net_config_filter = config.net_config_filter
         self.episode = 0
@@ -60,6 +61,8 @@ class AgentManager:
                 debug(f"No {name} model file\n")              
             return model, {}, True        
         elif algorithm == "Supervised":
+            if self.gym_type.startswith("attacks"): #attack detect with or not with dataset
+                return SupervisedAgent(), {}, False 
             return SupervisedAgent(self.csv_file), {}, False        
         elif algorithm == "PPO":
             try:
@@ -190,7 +193,7 @@ class AgentManager:
             # self.env.is_state_normalized = True
             state, _ = self.env.reset() #state continuos
             
-            g=np.zeros(self.env.num_actions)
+            g=np.zeros(self.env.actions_number)
             g[self.env.generated_traffic_type]+=1
             ground_truth.append(g)
             real_state = self.env.real_state #not_normalized
@@ -210,7 +213,7 @@ class AgentManager:
                     score[agent.name]  += 1 
                     color = Fore.GREEN           
                     
-                p=np.zeros(self.env.num_actions)
+                p=np.zeros(self.env.actions_number)
                 p[prediction]+=1 
                 predicted[agent.name].append(p)    
                 information(f"{agent.name}: Action predicted"+color+f" {self.env.execute_action(prediction)}\n"+Fore.WHITE)
@@ -238,7 +241,7 @@ class AgentManager:
             #self.env.is_state_normalized = True
             state, _ = self.env.reset(is_real_state= True) #state continuos
             
-            g=np.zeros(2)
+            g=np.zeros(self.env.actions_number)
             is_attack = 1 if self.env.status["id"]>0 else 0
             g[is_attack]+=1
             ground_truth.append(g)
@@ -248,7 +251,7 @@ class AgentManager:
                 if model is None:        
                     raise("The model can't be None. Create configuration")
                 if isinstance(model, SupervisedAgent):
-                    prediction = model.predict(state)                    
+                    prediction = model.predict_attack(state)                    
                 elif isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
                     #discretized_state = self.env.get_discretized_state(self.env.real_state)
                     prediction = model.predict(state)
@@ -260,7 +263,7 @@ class AgentManager:
                     score[agent.name]  += 1 
                     color = Fore.GREEN           
                     
-                p=np.zeros(2)
+                p=np.zeros(self.env.actions_number)
                 p[prediction]+=1 
                 predicted[agent.name].append(p)    
                 information(f"{agent.name}: Action predicted"+color+f" {self.env.execute_action(prediction)}\n"+Fore.WHITE)
@@ -318,10 +321,7 @@ class AgentManager:
         callback.episode_rewards=[]
         callback.episode_statuses=[]
         callback.ground_truth=[]
-        callback.predicted=[]
-        # callback_self.data_count_actions = {key: {0: 0, 1: 0, 2: 0, 3: 0} for key in  range(self.env.num_actions)}
-        # if hasattr(self, 'model'):
-        #     callback_self.count_actions = {action: 0 for action in range(self.training_env.action_space.n)}          
+        callback.predicted=[]        
         self.env.early_exit = True
         information(f"************* Episode {callback.episode} *************\n", callback.locals['tb_log_name'])         
    

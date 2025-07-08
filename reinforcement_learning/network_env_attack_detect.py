@@ -26,12 +26,11 @@ class NetworkEnvAttackDetect(NetworkEnv):
                         }
                     },
                     'gym_type':'classification_without_syncronize',
-                    'number_of_actions':4,
                     'K_steps':2,
                     'steps_min_percentage':0.9,
                     'accuracy_min':0.9         
                 }, server_user = 'server_user'):
-        params.numbers_of_actions = 2
+        params.actions_number = 2
         super().__init__(params, server_user)
         
         # Network creation
@@ -129,7 +128,6 @@ if __name__ == '__main__':
                 'pwd':'admin'
             }
         },
-        'number_of_actions':4,
         'K_steps':2,
         'steps_min_percentage':0.9,
         'accuracy_min':0.9        

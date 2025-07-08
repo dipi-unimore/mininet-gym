@@ -28,12 +28,11 @@ class NetworkEnvClassification(NetworkEnv):
                             'pwd':'admin'
                         }
                     },
-                    'number_of_actions':4,
                     'max_steps':2,
                     'steps_min_percentage':0.9,
                     'accuracy_min':0.9         
                 }, server_user = 'server_user'):
-        params.numbers_of_actions = 4
+        params.actions_number = 4
         # Network creation
         super().__init__(params, server_user)
         
@@ -48,7 +47,7 @@ class NetworkEnvClassification(NetworkEnv):
         self.n_bins = params.n_bins
         # self.low = np.array([1, len(self.net.hosts), 1e2, 1e3]) #np.inf
         # self.high = np.array([len(self.net.hosts), 1e2, 1e6, 1e7]) #np.inf
-        self.low_to_normalize = np.array(np.zeros(self.num_actions)) #np.inf
+        self.low_to_normalize = np.array(np.zeros(self.actions_number)) #np.inf
         self.high_to_normalize = np.array([1e4,1e4,1e7,1e7]) #fixed for every network
         low = self.low #np.floor(np.log10(self.low)).astype(int)
         high = np.floor(np.log10(self.high)).astype(int)
@@ -172,7 +171,6 @@ if __name__ == '__main__':
                 'pwd':'admin'
             }
         },
-        'number_of_actions':4,
         'K_steps':2,
         'steps_min_percentage':0.9,
         'accuracy_min':0.9        

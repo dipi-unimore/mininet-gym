@@ -18,7 +18,6 @@ class BaseAgent(ABC):
         self.discount_factor = params.discount_factor
         self.exploration_rate = params.exploration_rate
         self.exploration_decay = params.exploration_decay
-        self.number_actions = self.env.action_space.n
         self.is_exploitation = False
 
         # Initialize Q-table dimensions based on action space and number of discrete states
@@ -136,7 +135,7 @@ class BaseAgent(ABC):
         self.correct_predictions=0
         cumulative_reward=0
         done = truncated = False
-        count_actions_by_type =  {i: 0 for i in range(self.number_actions)}        
+        count_actions_by_type =  {i: 0 for i in range(self.env.action_space.n)}        
         self.episode_statuses = []
         self.exploration_count,  self.exploitation_count = 0, 0  # Reset counters for each episode
         state, _ = self.env.reset(is_discretized_state = is_discretized_state)  

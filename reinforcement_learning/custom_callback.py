@@ -69,7 +69,7 @@ class CustomCallback(BaseCallback):
             
         if self.training_start:
             self.training_start(self)
-        self.number_actions = self.net_env.num_actions            
+        self.number_actions = self.net_env.actions_number            
         self.count_actions = {i: 0 for i in range(self.number_actions)}
         self.exploration_count,  self.exploitation_count = 0, 0  # Reset counters for each episode
         self.ground_truth = []
@@ -223,13 +223,13 @@ class CustomCallback(BaseCallback):
     #     self.episode += 1         
     #     self.ground_truth=[]
     #     self.predicted=[]
-    #     # callback_self.data_count_actions = {key: {0: 0, 1: 0, 2: 0, 3: 0} for key in  range(self.env.num_actions)}
+    #     # callback_self.data_count_actions = {key: {0: 0, 1: 0, 2: 0, 3: 0} for key in  range(self.env.actions_number)}
     #     # if hasattr(self, 'model'):
     #     #     callback_self.count_actions = {action: 0 for action in range(self.training_env.action_space.n)}          
     #     self.env.early_exit = True
     #     #self.env.max_steps = callback_self.model.total_timesteps
     #     information(f"************* Episode {self.episode} *************\n", self.locals['tb_log_name'])         
-    #     #return self.env.num_actions       
+    #     #return self.env.actions_number       
         
     # def after_episode(self):
     #     cumulative_reward = sum(self.episode_rewards)

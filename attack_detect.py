@@ -4,7 +4,7 @@ from reinforcement_learning.adversarial_agent import  continuous_traffic_generat
 from reinforcement_learning.agent_manager import AgentManager
 from reinforcement_learning.network_env_attack_detect import NetworkEnvAttackDetect
 from utility.network_configurator import stop
-from utility.my_statistics import plot_agent_test_errors, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_statuses, plot_enviroment_execution_statutes, plot_train_types, plot_agent_test, plot_test_confusion_matrix
+from utility.my_statistics import plot_agent_test_errors, plot_combined_performance_over_time, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_statuses, plot_enviroment_execution_statutes, plot_train_types, plot_agent_test, plot_test_confusion_matrix
 from utility.my_files import save_data_to_file, read_data_file, create_directory_training_execution
 from utility.my_log import error, information, debug #,setLogLevel,  notify_client
 from colorama import Fore
@@ -49,25 +49,24 @@ def attack_detect_main(config, net_env: NetworkEnvAttackDetect):
             statuses = read_data_file("statuses")
             episodes = int((len(statuses) - config.test_episodes) / (config.env_params.max_steps + 1))
             for agent in am.agents_params:
-                if agent.skip_learn:
+                net_env.df=list(statuses)
+                if "skip_learn" not in agent.__dict__ or agent.skip_learn:
                     continue
                 if not hasattr(agent, 'episodes'):
                     information(Fore.YELLOW+"Param 'episodes' is missing\n")
                     continue        
-                net_env.df=list(statuses)
-                agent.episodes = episodes 
                 train_agent(agent)
+                agent.episodes = episodes 
+                #Step 2: plotting and saving agent data
+                plot_and_save_data_agent(agent, config)
         
         if config.env_params.gym_type=="attacks":
-            pause_event_traffic.set() 
-                
-        #Step 2: plotting and saving agent data
-        for agent in am.agents_params:
-            if agent.skip_learn:
-                    continue
-            plot_and_save_data_agent(agent, config)
-            
-        if config.env_params.gym_type=="attacks":
+            pause_event_traffic.set()                 
+            #Step 2: plotting and saving all agents data
+            for agent in am.agents_params:
+                if agent.skip_learn:
+                        continue
+                plot_and_save_data_agent(agent, config)
             pause_event_traffic.clear()             
         
         #Step 3: starting test
@@ -194,6 +193,7 @@ def plot_and_save_data_agent(agent, config):
         plot_agent_cumulative_rewards(data.train_indicators, directory_name, agent.name)
         plot_agent_execution_statuses(data.train_indicators, directory_name, agent.name)
         plot_agent_execution_confusion_matrix(data.train_indicators, directory_name)
+    plot_combined_performance_over_time(data.train_metrics, directory_name, agent.name + " Combined performance over time")
     plot_metrics(data.train_metrics,directory_name,agent.name+" Train metrics")
     if len(data.train_types["explorations"]) > 0 and len(data.train_types["exploitations"]) > 0: 
         plot_train_types(data.train_types, data.train_execution_time, directory_name)

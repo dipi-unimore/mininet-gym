@@ -29,7 +29,6 @@ class NetworkEnv(gym.Env, ABC):
                         }
                     },
                     'gym_type':'classification_without_syncronize',
-                    'number_of_actions':4,
                     'K_steps':2,
                     'steps_min_percentage':0.9,
                     'accuracy_min':0.9         
@@ -46,8 +45,8 @@ class NetworkEnv(gym.Env, ABC):
         #self.threshold = params.threshold
         
         # Define action and observation space, gym.spaces objects
-        self.num_actions = params.number_of_actions
-        self.action_space = spaces.Discrete(self.num_actions) #number of actions
+        self.actions_number = params.actions_number
+        self.action_space = spaces.Discrete(self.actions_number) #number of actions
           
 
         # Simulation parameters
@@ -105,8 +104,8 @@ class NetworkEnv(gym.Env, ABC):
         # Calculate reward
         reward = self.calculate_reward(action)  
            
-        ground_truth_step = np.zeros(self.num_actions)
-        predicted_step = np.zeros(self.num_actions)
+        ground_truth_step = np.zeros(self.actions_number)
+        predicted_step = np.zeros(self.actions_number)
         # if self.gym_type == 4 or self.gym_type == 5:
         #     self.generated_traffic_type = 1 if self.status["id"]>0 else 0
         ground_truth_step[self.generated_traffic_type] = 1
@@ -598,7 +597,6 @@ if __name__ == '__main__':
                 'pwd':'admin'
             }
         },
-        'number_of_actions':4,
         'K_steps':2,
         'steps_min_percentage':0.9,
         'accuracy_min':0.9        
