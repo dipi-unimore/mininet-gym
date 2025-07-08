@@ -589,20 +589,22 @@ def plot_radar_chart(dir_name,
     plt.close() 
     
 def plot_comparison_bar_charts(dir_name,
-    strategies_data,
-    metrics=['accuracy', 'recall', 'precision', 'f1_score'],
-    title="Comparison of RL Strategies Learning Performance"
+                               strategies_data,
+                               metrics=['accuracy', 'recall', 'precision', 'f1_score'],
+                               title="Comparison of RL Strategies Learning Performance"
 ):
     """
     Creates grouped bar charts to compare performance metrics across different strategies/models.
 
     Args:
+        dir_name (str): The directory where the chart image will be saved.
         strategies_data (dict): A dictionary where keys are strategy names (e.g., 'DQN', 'PPO')
                                 and values are dictionaries containing metric scores.
+                                Scores for each metric can be a single number or a list/array of numbers.
                                 Example:
                                 {
-                                    'DQN': {'Accuracy': 0.85, 'Recall': 0.78, 'Precision': 0.88, 'F-Score': 0.83},
-                                    'PPO': {'Accuracy': 0.90, 'Recall': 0.85, 'Precision': 0.92, 'F-Score': 0.88}
+                                    'DQN': {'accuracy': [0.85, 0.86, ...], 'recall': [0.78, ...], ...},
+                                    'PPO': {'accuracy': [0.90, 0.91, ...], 'recall': [0.85, ...], ...}
                                 }
         metrics (list): List of metric names to plot.
         title (str): Title of the plot.
@@ -611,14 +613,55 @@ def plot_comparison_bar_charts(dir_name,
     num_strategies = len(strategy_names)
     num_metrics = len(metrics)
 
+    # --- Calculate dynamic y-axis limits and ensure scores are scalar ---
+    all_scalar_scores = [] # This will store the single aggregated score for each metric/strategy
+    
+    # First, process the data to ensure we have scalar values for plotting
+    # and to collect all scores for dynamic y-axis calculation
+    processed_strategies_data = {}
+    for strategy in strategy_names:
+        processed_strategies_data[strategy] = {}
+        for metric_name in metrics:
+            raw_score = strategies_data[strategy].get(metric_name)
+            
+            if raw_score is None:
+                print(f"Warning: Metric '{metric_name}' not found for strategy '{strategy}'. Setting to 0 or NaN.")
+                aggregated_score = 0 # Or np.nan if you prefer to exclude it from calculations
+            elif isinstance(raw_score, (list, np.ndarray)):
+                # If it's a list/array, take the mean (or median, max, etc.)
+                if len(raw_score) > 0:
+                    aggregated_score = np.mean(raw_score)
+                else:
+                    print(f"Warning: Empty list of scores for metric '{metric_name}' in strategy '{strategy}'. Setting to 0.")
+                    aggregated_score = 0
+            else:
+                # If it's already a scalar, use it directly
+                aggregated_score = raw_score
+            
+            processed_strategies_data[strategy][metric_name] = aggregated_score
+            all_scalar_scores.append(aggregated_score)
+
+    if not all_scalar_scores:
+        print("Error: No valid scores found to plot after aggregation. Cannot create chart.")
+        return
+
+    min_score = np.min(all_scalar_scores)
+    
+    # Calculate the lower limit: minimum score minus 10% of the minimum score
+    # Ensure it doesn't go below 0 if min_score is very small or zero
+    y_lower_limit = max(0, min_score - (min_score * 0.10))
+    y_upper_limit = 1.05 # Common upper limit for these metrics
+
+    # --- Plotting logic ---
     bar_width = 0.2
     index = np.arange(num_strategies)
 
     plt.figure(figsize=(12, 7))
 
     for i, metric_name in enumerate(metrics):
-        # Extract scores for the current metric across all strategies
-        scores = [np.mean(strategies_data[strategy][metric_name]) for strategy in strategy_names]
+        # Extract the already processed (scalar) scores for the current metric across all strategies
+        scores = [processed_strategies_data[strategy][metric_name] for strategy in strategy_names]
+        
         # Calculate offset for grouped bars
         offset = bar_width * i - (num_metrics - 1) * bar_width / 2
         plt.bar(index + offset, scores, bar_width, label=metric_name)
@@ -626,13 +669,15 @@ def plot_comparison_bar_charts(dir_name,
     plt.title(title)
     plt.xlabel("RL Strategy")
     plt.ylabel("Metric Value")
-    plt.xticks(index, strategy_names) # Set x-axis ticks to strategy names
-    plt.ylim(0, 1.05)
+    plt.xticks(index + bar_width * (num_metrics - 1) / 2, strategy_names) # Adjust x-tick positions for better centering
+    plt.ylim(y_lower_limit, y_upper_limit) # Apply the dynamic y-axis limits
     plt.legend()
     plt.grid(axis='y', linestyle='--', alpha=0.6)
     plt.tight_layout()
+
+    # Ensure the directory exists before saving
     plt.savefig(f"{dir_name}/metrics_comparison.png")
-    plt.close()    
+    plt.close()
     
 #normalized_segments = normalize_individual_segments(segments)     
 def normalize_individual_segments(arrays):

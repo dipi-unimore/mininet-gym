@@ -143,133 +143,133 @@ class AgentManager:
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")      
         
-    def train_classification_agent(self, agent):
-        """
-        Train for a classification of traffic types
-        None, Ping, UDP, TCP
-        """
-        model = agent.instance
-        if model is None:        
-            raise("The model can't be None. Create configuration")
-        if isinstance(model, SupervisedAgent):
-            return False
+    # def train_classification_agent(self, agent):
+    #     """
+    #     Train for a classification of traffic types
+    #     None, Ping, UDP, TCP
+    #     """
+    #     model = agent.instance
+    #     if model is None:        
+    #         raise("The model can't be None. Create configuration")
+    #     if isinstance(model, SupervisedAgent):
+    #         return False
 
-        is_custom_agent = isinstance(model, QLearningAgent) or isinstance(model, SARSAAgent)
-        information(f"Starting training\n")
+    #     is_custom_agent = isinstance(model, QLearningAgent) or isinstance(model, SARSAAgent)
+    #     information(f"Starting training\n")
         
-        self.env.early_exit = False        
+    #     self.env.early_exit = False        
             
-        if is_custom_agent:
-            #learn for all episodes each one of env.max_steps maximum
-            model.learn(agent.episodes)     
-        else:   
-            for episode in range(agent.episodes):
-                agent.custom_callback.episode = episode
-                model.learn(total_timesteps=self.env.max_steps, callback=agent.custom_callback, progress_bar=agent.progress_bar)
+    #     if is_custom_agent:
+    #         #learn for all episodes each one of env.max_steps maximum
+    #         model.learn(agent.episodes)     
+    #     else:   
+    #         for episode in range(agent.episodes):
+    #             agent.custom_callback.episode = episode
+    #             model.learn(total_timesteps=self.env.max_steps, callback=agent.custom_callback, progress_bar=agent.progress_bar)
 
-        information(f"Training finished { (np.mean(self.env.metrics['accuracy'])) * 100 :.2f} %\n")
+    #     information(f"Training finished { (np.mean(self.env.metrics['accuracy'])) * 100 :.2f} %\n")
 
-        return True   
+    #     return True   
   
-    def evaluate_classification_agent(self):
-        """
-        Evaluate for n episodes a classification of traffic types
-        None, Ping, UDP, TCP
-        """      
-        # if self.env.gym_type == 0:
-        #    self.env.gym_type = 2
-        #    #read initial traffic
-        #    self.env.sync_time = self.env.synchronize_controller()
-        #    self.env.read_time = self.env.sync_time * 0.6           
-        epochs = self.test_episodes
+    # def evaluate_classification_agent(self):
+    #     """
+    #     Evaluate for n episodes a classification of traffic types
+    #     None, Ping, UDP, TCP
+    #     """      
+    #     # if self.env.gym_type == 0:
+    #     #    self.env.gym_type = 2
+    #     #    #read initial traffic
+    #     #    self.env.sync_time = self.env.synchronize_controller()
+    #     #    self.env.read_time = self.env.sync_time * 0.6           
+    #     epochs = self.test_episodes
                 
-        information(f"Evaluation started: epochs {epochs}\n")
-        score =  {agent.name: 0 for agent in self.agents_params}
-        ground_truth = []
-        predicted =  {agent.name: [] for agent in self.agents_params}
+    #     information(f"Evaluation started: epochs {epochs}\n")
+    #     score =  {agent.name: 0 for agent in self.agents_params}
+    #     ground_truth = []
+    #     predicted =  {agent.name: [] for agent in self.agents_params}
 
-        for episode in range(epochs):
-            information(f"\n\n************* Episode {episode+1} *************\n")            
-            # self.env.is_state_normalized = True
-            state, _ = self.env.reset() #state continuos
+    #     for episode in range(epochs):
+    #         information(f"\n\n************* Episode {episode+1} *************\n")            
+    #         # self.env.is_state_normalized = True
+    #         state, _ = self.env.reset() #state continuos
             
-            g=np.zeros(self.env.actions_number)
-            g[self.env.generated_traffic_type]+=1
-            ground_truth.append(g)
-            real_state = self.env.real_state #not_normalized
-            normalized_state = self.env.get_normalize_state(real_state) 
-            information(f"p_r={real_state[0]}\np_t={real_state[1]}\nb_r={real_state[2]}byte\nb_t={real_state[3]}byte\n")
+    #         g=np.zeros(self.env.actions_number)
+    #         g[self.env.generated_traffic_type]+=1
+    #         ground_truth.append(g)
+    #         real_state = self.env.real_state #not_normalized
+    #         normalized_state = self.env.get_normalize_state(real_state) 
+    #         information(f"p_r={real_state[0]}\np_t={real_state[1]}\nb_r={real_state[2]}byte\nb_t={real_state[3]}byte\n")
             
-            for agent in self.agents_params: 
-                model = agent.instance
-                if model is None:        
-                    raise("The model can't be None. Create configuration")
-                if isinstance(model, SupervisedAgent) or isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
-                    prediction = model.predict(real_state)
-                else:
-                    prediction, _states = model.predict(normalized_state, deterministic=True)
-                color = Fore.RED           
-                if prediction == self.env.generated_traffic_type:
-                    score[agent.name]  += 1 
-                    color = Fore.GREEN           
+    #         for agent in self.agents_params: 
+    #             model = agent.instance
+    #             if model is None:        
+    #                 raise("The model can't be None. Create configuration")
+    #             if isinstance(model, SupervisedAgent) or isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
+    #                 prediction = model.predict(real_state)
+    #             else:
+    #                 prediction, _states = model.predict(normalized_state, deterministic=True)
+    #             color = Fore.RED           
+    #             if prediction == self.env.generated_traffic_type:
+    #                 score[agent.name]  += 1 
+    #                 color = Fore.GREEN           
                     
-                p=np.zeros(self.env.actions_number)
-                p[prediction]+=1 
-                predicted[agent.name].append(p)    
-                information(f"{agent.name}: Action predicted"+color+f" {self.env.execute_action(prediction)}\n"+Fore.WHITE)
+    #             p=np.zeros(self.env.actions_number)
+    #             p[prediction]+=1 
+    #             predicted[agent.name].append(p)    
+    #             information(f"{agent.name}: Action predicted"+color+f" {self.env.execute_action(prediction)}\n"+Fore.WHITE)
 
-        information(f"Evaluation finished \n")
-        return score, ground_truth, predicted
+    #     information(f"Evaluation finished \n")
+    #     return score, ground_truth, predicted
     
-    def evaluate_attack_detect_agent(self):
-        """
-        Evaluate for n episodes a attack detect of traffic types
-        Normal, Attack
-        """      
+    # def evaluate_attack_detect_agent(self):
+    #     """
+    #     Evaluate for n episodes a attack detect of traffic types
+    #     Normal, Attack
+    #     """      
        
-        epochs = self.test_episodes
+    #     epochs = self.test_episodes
                 
-        information(f"*** Evaluation started: epochs {epochs} ***\n")
-        score =  {agent.name: 0 for agent in self.agents_params}
-        ground_truth = []
-        predicted =  {agent.name: [] for agent in self.agents_params}
+    #     information(f"*** Evaluation started: epochs {epochs} ***\n")
+    #     score =  {agent.name: 0 for agent in self.agents_params}
+    #     ground_truth = []
+    #     predicted =  {agent.name: [] for agent in self.agents_params}
 
-        for episode in range(epochs):
-            if self.env.gym_type == 4: #attack
-                time.sleep(1)
-            information(f"\n\n************* Episode {episode+1} *************\n")            
-            #self.env.is_state_normalized = True
-            state, _ = self.env.reset(is_real_state= True) #state continuos
+    #     for episode in range(epochs):
+    #         if self.env.gym_type == 4: #attack
+    #             time.sleep(1)
+    #         information(f"\n\n************* Episode {episode+1} *************\n")            
+    #         #self.env.is_state_normalized = True
+    #         state, _ = self.env.reset(is_real_state= True) #state continuos
             
-            g=np.zeros(self.env.actions_number)
-            is_attack = 1 if self.env.status["id"]>0 else 0
-            g[is_attack]+=1
-            ground_truth.append(g)
+    #         g=np.zeros(self.env.actions_number)
+    #         is_attack = 1 if self.env.status["id"]>0 else 0
+    #         g[is_attack]+=1
+    #         ground_truth.append(g)
             
-            for agent in self.agents_params: 
-                model = agent.instance
-                if model is None:        
-                    raise("The model can't be None. Create configuration")
-                if isinstance(model, SupervisedAgent):
-                    prediction = model.predict_attack(state)                    
-                elif isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
-                    #discretized_state = self.env.get_discretized_state(self.env.real_state)
-                    prediction = model.predict(state)
-                else:
-                    normalized_state = self.env.get_normalize_state(state) 
-                    prediction, _states = model.predict(normalized_state, deterministic=True)
-                color = Fore.RED           
-                if prediction == is_attack:
-                    score[agent.name]  += 1 
-                    color = Fore.GREEN           
+    #         for agent in self.agents_params: 
+    #             model = agent.instance
+    #             if model is None:        
+    #                 raise("The model can't be None. Create configuration")
+    #             if isinstance(model, SupervisedAgent):
+    #                 prediction = model.predict_attack(state)                    
+    #             elif isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
+    #                 #discretized_state = self.env.get_discretized_state(self.env.real_state)
+    #                 prediction = model.predict(state)
+    #             else:
+    #                 normalized_state = self.env.get_normalize_state(state) 
+    #                 prediction, _states = model.predict(normalized_state, deterministic=True)
+    #             color = Fore.RED           
+    #             if prediction == is_attack:
+    #                 score[agent.name]  += 1 
+    #                 color = Fore.GREEN           
                     
-                p=np.zeros(self.env.actions_number)
-                p[prediction]+=1 
-                predicted[agent.name].append(p)    
-                information(f"{agent.name}: Action predicted"+color+f" {self.env.execute_action(prediction)}\n"+Fore.WHITE)
+    #             p=np.zeros(self.env.actions_number)
+    #             p[prediction]+=1 
+    #             predicted[agent.name].append(p)    
+    #             information(f"{agent.name}: Action predicted"+color+f" {self.env.execute_action(prediction)}\n"+Fore.WHITE)
 
-        information(f"*** Evaluation finished ***\n")
-        return score, ground_truth, predicted
+    #     information(f"*** Evaluation finished ***\n")
+    #     return score, ground_truth, predicted
     
     def create_agents(self):
         for agent_param in self.agents_params:

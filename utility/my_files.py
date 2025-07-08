@@ -1,4 +1,5 @@
 # my_files.py
+import shutil
 import os, time, yaml, json as js, orjson, numpy as np, pwd
 from utility.my_log import set_log_level,set_log_file, information, debug, error, notify_client   
 from utility.params import read_config_file
@@ -21,6 +22,68 @@ def regain_root():
     except:
         error("no root instance to recover")
 
+def copy_config_file_to_training_dir(training_dir: str) -> bool:
+    """
+    Copies 'config.yaml' to a specified training subdirectory.
+    The source file is 'config.yaml'.
+
+    Args:
+        training_dir (str): The path to the destination directory,
+                                        relative to the script's execution directory.
+                                        e.g., 'configs/backup', 'my_new_folder'.
+
+    Returns:
+        bool: True if the copy was successful, False otherwise.
+    """
+    source_file_name = "config.yaml"
+    
+    # The execution directory is where the script is being run
+    execution_dir = os.getcwd() 
+    
+    # Construct the full path to the source config.yaml
+    source_path = os.path.join(execution_dir, source_file_name)
+    
+    # Construct the full path to the destination directory
+    # This will be <execution_dir>/<relative_destination_dir>
+    destination_full_dir = os.path.join(execution_dir, training_dir)
+    
+    # Construct the full path for the destination file
+    destination_path = os.path.join(destination_full_dir, source_file_name)
+
+    # --- Start of the copying logic ---
+
+    # 1. Check if the source config.yaml exists
+    if not os.path.exists(source_path):
+        print(f"Error: Source file '{source_file_name}' not found in the execution directory '{execution_dir}'.")
+        return False
+    if not os.path.isfile(source_path):
+        print(f"Error: '{source_path}' is not a file.")
+        return False
+
+    # 2. Ensure the destination directory exists, create if not
+    if not os.path.exists(destination_full_dir):
+        print(f"Destination directory '{destination_full_dir}' does not exist. Creating it...")
+        try:
+            os.makedirs(destination_full_dir)
+            print(f"Directory '{destination_full_dir}' created successfully.")
+        except OSError as e:
+            print(f"Error creating destination directory '{destination_full_dir}': {e}")
+            return False
+    
+    # 3. Perform the copy operation
+    try:
+        shutil.copy2(source_path, destination_path)
+        print(f"Successfully copied '{source_file_name}' from '{execution_dir}' to '{destination_full_dir}'.")
+        return True
+    except shutil.SameFileError:
+        print(f"Error: Source and destination are the same file. No copy needed for '{source_path}'.")
+        return False
+    except PermissionError:
+        print(f"Error: Permission denied. Unable to copy '{source_file_name}' to '{destination_full_dir}'.")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred while copying: {e}")
+        return False
 
 def save_data_to_file(data, dir_name, file_name="data"):
     def convert_np(obj):

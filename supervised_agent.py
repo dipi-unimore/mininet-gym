@@ -10,18 +10,12 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from utility.my_files import read_data_file
 
 class SupervisedAgent:
-    def __init__(self, csv_file = 'traffic.csv'): 
+    def __init__(self, csv_file = None): 
 
-        df = pd.read_csv(csv_file)
-        df.head()
-        #df.info()
-
-        del df['i_src_host']
-        del df['i_dst_host']
-        df = df.dropna()
-
-        X = df.copy()
-        y = X.pop('traffic_type')
+        if csv_file is None:
+            X, y = self.init_attack_detection_env()
+        else:
+            X, y = self.init_traffic_classification_env(csv_file)
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
 
         self.clf = DecisionTreeClassifier(max_depth=4)
@@ -32,7 +26,20 @@ class SupervisedAgent:
         self.accuracy = accuracy_score(y_test, y_pred)
         self.precision, self.recall, self.fscore, _ = precision_recall_fscore_support(y_test, y_pred, average='macro')
 
-    def __init__(self): 
+    def init_traffic_classification_env(self, csv_file):
+        df = pd.read_csv(csv_file)
+        df.head()
+        #df.info()
+
+        del df['i_src_host']
+        del df['i_dst_host']
+        df = df.dropna()
+
+        X = df.copy()
+        y = X.pop('traffic_type')
+        return X,y
+
+    def init_attack_detection_env(self):
         statuses = read_data_file('statuses')
         df = pd.DataFrame(list(statuses))
         df.head()
@@ -46,15 +53,7 @@ class SupervisedAgent:
 
         X = df.copy()
         y = X.pop('is_attack')
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
-
-        self.clf = DecisionTreeClassifier(max_depth=4)
-        self.clf.fit(X_train, y_train)
-        self.row_to_predict = X_test.iloc[[110]]
-        y_pred = self.clf.predict(X_test)
-        
-        self.accuracy = accuracy_score(y_test, y_pred)
-        self.precision, self.recall, self.fscore, _ = precision_recall_fscore_support(y_test, y_pred, average='macro')
+        return X,y
 
 
     def predict(self, state):

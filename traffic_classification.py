@@ -4,6 +4,8 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from reinforcement_learning.network_env import NetworkEnv
 from reinforcement_learning.agent_manager import AgentManager
 #from utility.my_statistics import plot_metrics, plot_indicators, plot_train_types, plot_net_metrics
+from reinforcement_learning.qlearning_agent import QLearningAgent
+from reinforcement_learning.sarsa_agent import SARSAAgent
 from supervised_agent import SupervisedAgent
 from utility.my_statistics import plot_agent_test_errors, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_traffic_types, plot_enviroment_execution_statutes, plot_radar_chart, plot_train_types, plot_agent_test, plot_test_confusion_matrix
 from utility.my_files import save_data_to_file, read_csv_file, create_directory_training_execution
@@ -39,8 +41,9 @@ def traffic_classification_main(config, net_env: NetworkEnv):
             #     continue
             plot_and_save_data_agent(agent, config)  
             agents_metrics[agent.name]=agent.instance.metrics
-        plot_comparison_bar_charts(config.training_execution_directory , agents_metrics)
-        plot_radar_chart(config.training_execution_directory , agents_metrics)
+        if len(agents_metrics)>0:            
+            plot_comparison_bar_charts(config.training_execution_directory , agents_metrics)
+            plot_radar_chart(config.training_execution_directory , agents_metrics)
         
         #Step 3: starting test
         directory_name = create_directory_training_execution(config, "TEST")
@@ -124,7 +127,7 @@ def plot_and_save_data_agent(agent, config):
     information(f"Data saved \n",agent.name)    
 
 def test_classification_agents(am, directory_name, config):
-    score, ground_truth, predicted = am.evaluate_classification_agent()
+    score, ground_truth, predicted = evaluate_classification_agent(am)
     metrics =  {agent.name: {'accuracy': 0, 'precision': 0, 'recall': 0, 'f1_score': 0} for agent in config.agents}
 
     for s, p in zip(score.items(),predicted.items()):
@@ -150,3 +153,56 @@ def test_classification_agents(am, directory_name, config):
     plot_agent_test(data.__dict__, directory_name, title='')
     plot_agent_test_errors(data.__dict__, directory_name, title='Agent Evaluation Errors')
 
+def evaluate_classification_agent(am: AgentManager):
+    """
+    Evaluate for n episodes a classification of traffic types
+    None, Ping, UDP, TCP
+    """      
+    epochs = am.test_episodes
+    agents_params = am.agents_params   
+    env = am.env
+    
+    # if env.gym_type == 0:
+    #    env.gym_type = 2
+    #    #read initial traffic
+    #    env.sync_time = env.synchronize_controller()
+    #    env.read_time = env.sync_time * 0.6           
+            
+    information(f"Evaluation started: epochs {epochs}\n")
+    score =  {agent.name: 0 for agent in agents_params}
+    ground_truth = []
+    predicted =  {agent.name: [] for agent in agents_params}
+
+    for episode in range(epochs):
+        information(f"\n\n************* Episode {episode+1} *************\n")            
+        # self.env.is_state_normalized = True
+        state, _ = env.reset() #state continuos
+        
+        g=np.zeros(env.actions_number)
+        g[env.generated_traffic_type]+=1
+        ground_truth.append(g)
+        real_state = env.real_state #not_normalized
+        normalized_state = env.get_normalize_state(real_state) 
+        information(f"p_r={real_state[0]}\np_t={real_state[1]}\nb_r={real_state[2]}byte\nb_t={real_state[3]}byte\n")
+        
+        for agent in agents_params: 
+            model = agent.instance
+            if model is None:        
+                raise("The model can't be None. Create configuration")
+            if isinstance(model, SupervisedAgent) or isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
+                prediction = model.predict(real_state)
+            else:
+                prediction, _states = model.predict(normalized_state, deterministic=True)
+            color = Fore.RED           
+            if prediction == env.generated_traffic_type:
+                score[agent.name]  += 1 
+                color = Fore.GREEN           
+                
+            p=np.zeros(env.actions_number)
+            p[prediction]+=1 
+            predicted[agent.name].append(p)    
+            information(f"{agent.name}: Action predicted"+color+f" {env.execute_action(prediction)}\n"+Fore.WHITE)
+
+    information(f"Evaluation finished \n")
+    return score, ground_truth, predicted
+    

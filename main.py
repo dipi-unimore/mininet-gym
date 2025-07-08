@@ -5,7 +5,7 @@ from reinforcement_learning.network_env_attack_detect import NetworkEnvAttackDet
 from traffic_classification import traffic_classification_main
 from attack_detect import attack_detect_main
 #from utility.my_statistics import plot_statutes
-from utility.my_files import create_directory_training_execution, save_data_to_file, drop_privileges, regain_root
+from utility.my_files import copy_config_file_to_training_dir, create_directory_training_execution, save_data_to_file, drop_privileges, regain_root
 from utility.params import read_config_file
 from utility.my_log import set_log_level, set_log_file, information, debug, error, notify_client
 import time, random
@@ -29,7 +29,9 @@ def main():
     training_execution_directory = create_directory_training_execution(config)
     set_log_file(f"{training_execution_directory}/log.txt")
     config.training_execution_directory = training_execution_directory
-    save_data_to_file(config_dict, training_execution_directory, "config")    
+    if copy_config_file_to_training_dir(training_execution_directory):
+        information(f"Config file copied to {training_execution_directory}/config.yaml")
+    #save_data_to_file(config_dict, training_execution_directory, "config")    
     regain_root()
         
     if (False):

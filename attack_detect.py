@@ -1,10 +1,15 @@
 # attack_detect_main.py
+from collections import defaultdict
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+import numpy as np
 from reinforcement_learning.adversarial_agent import  continuous_traffic_generation
 from reinforcement_learning.agent_manager import AgentManager
 from reinforcement_learning.network_env_attack_detect import NetworkEnvAttackDetect
+from reinforcement_learning.qlearning_agent import QLearningAgent
+from reinforcement_learning.sarsa_agent import SARSAAgent
+from supervised_agent import SupervisedAgent
 from utility.network_configurator import stop
-from utility.my_statistics import plot_agent_test_errors, plot_combined_performance_over_time, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_statuses, plot_enviroment_execution_statutes, plot_train_types, plot_agent_test, plot_test_confusion_matrix
+from utility.my_statistics import plot_agent_test_errors, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_statuses, plot_enviroment_execution_statutes, plot_radar_chart, plot_train_types, plot_agent_test, plot_test_confusion_matrix
 from utility.my_files import save_data_to_file, read_data_file, create_directory_training_execution
 from utility.my_log import error, information, debug #,setLogLevel,  notify_client
 from colorama import Fore
@@ -17,6 +22,7 @@ def attack_detect_main(config, net_env: NetworkEnvAttackDetect):
         am = AgentManager(net_env, config)
         
         # Step 1: training
+        agents_metrics = defaultdict(list)
         if config.env_params.gym_type=="attacks":
             # Step 1: Start the traffic generation thread
             # Set the desired attack probability (e.g., 0.3 means 30% chance of attack)
@@ -59,6 +65,8 @@ def attack_detect_main(config, net_env: NetworkEnvAttackDetect):
                 agent.episodes = episodes 
                 #Step 2: plotting and saving agent data
                 plot_and_save_data_agent(agent, config)
+                agents_metrics[agent.name]=agent.instance.metrics
+            
         
         if config.env_params.gym_type=="attacks":
             pause_event_traffic.set()                 
@@ -67,7 +75,12 @@ def attack_detect_main(config, net_env: NetworkEnvAttackDetect):
                 if agent.skip_learn:
                         continue
                 plot_and_save_data_agent(agent, config)
-            pause_event_traffic.clear()             
+                agents_metrics[agent.name]=agent.instance.metrics                
+            pause_event_traffic.clear()
+            
+        if len(agents_metrics)>0:
+            plot_comparison_bar_charts(config.training_execution_directory , agents_metrics)
+            plot_radar_chart(config.training_execution_directory , agents_metrics)                           
         
         #Step 3: starting test
         directory_name = create_directory_training_execution(config, "TEST")
@@ -98,7 +111,7 @@ def attack_detect_main(config, net_env: NetworkEnvAttackDetect):
             stop(net_env.net) 
 
 def test_attack_detect_agents(am, directory_name, config):
-    score, ground_truth, predicted = am.evaluate_attack_detect_agent()
+    score, ground_truth, predicted = evaluate_attack_detect_agent(am)
     metrics =  {agent.name: {'accuracy': 0, 'precision': 0, 'recall': 0, 'f1_score': 0} for agent in config.agents}
 
     for s, p in zip(score.items(),predicted.items()):
@@ -124,6 +137,58 @@ def test_attack_detect_agents(am, directory_name, config):
     # plot test
     plot_agent_test(data.__dict__, directory_name, title='')
     plot_agent_test_errors(data.__dict__, directory_name, title='Agent Evaluation Errors')
+
+def evaluate_attack_detect_agent(am: AgentManager):
+        """
+        Evaluate for n episodes a attack detect of traffic types
+        Normal, Attack
+        """             
+        epochs = am.test_episodes
+        agents_params = am.agents_params
+        env = am.env
+                
+        information(f"*** Evaluation started: epochs {epochs} ***\n")
+        score =  {agent.name: 0 for agent in agents_params}
+        ground_truth = []
+        predicted =  {agent.name: [] for agent in agents_params}
+
+        for episode in range(epochs):
+            if env.gym_type == 4: #attack
+                time.sleep(1)
+            information(f"\n\n************* Episode {episode+1} *************\n")            
+            #self.env.is_state_normalized = True
+            state, _ = env.reset(is_real_state= True) #state continuos
+            
+            g=np.zeros(env.actions_number)
+            is_attack = 1 if env.status["id"]>0 else 0
+            g[is_attack]+=1
+            ground_truth.append(g)
+            
+            for agent in agents_params: 
+                model = agent.instance
+                if model is None:        
+                    raise("The model can't be None. Create configuration")
+                if isinstance(model, SupervisedAgent):
+                    prediction = model.predict_attack(state)                    
+                elif isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
+                    #discretized_state = self.env.get_discretized_state(self.env.real_state)
+                    prediction = model.predict(state)
+                else:
+                    normalized_state = env.get_normalize_state(state) 
+                    prediction, _states = model.predict(normalized_state, deterministic=True)
+                color = Fore.RED           
+                if prediction == is_attack:
+                    score[agent.name]  += 1 
+                    color = Fore.GREEN           
+                    
+                p=np.zeros(env.actions_number)
+                p[prediction]+=1 
+                predicted[agent.name].append(p)    
+                information(f"{agent.name}: Action predicted"+color+f" {env.execute_action(prediction)}\n"+Fore.WHITE)
+
+        information(f"*** Evaluation finished ***\n")
+        return score, ground_truth, predicted
+   
 
 def start_continuous_traffic_generation(net_env: NetworkEnvAttackDetect, show_normal_traffic):
     # Create a stop event to manage the thread
@@ -179,7 +244,8 @@ def plot_and_save_data_agent(agent, config):
     data.train_execution_time = agent.elapsed_time
     data.train_metrics = agent.instance.metrics
     data.train_indicators = agent.instance.indicators
-    data.train_types = agent.instance.train_types
+    if hasattr(agent.instance, 'train_types'):
+        data.train_types = agent.instance.train_types
     #net_env.initialize_storage() #re-initialize for next agent
     
     #create directory to save all files for the agent training excecution
@@ -195,7 +261,7 @@ def plot_and_save_data_agent(agent, config):
         plot_agent_execution_confusion_matrix(data.train_indicators, directory_name)
     plot_combined_performance_over_time(data.train_metrics, directory_name, agent.name + " Combined performance over time")
     plot_metrics(data.train_metrics,directory_name,agent.name+" Train metrics")
-    if len(data.train_types["explorations"]) > 0 and len(data.train_types["exploitations"]) > 0: 
+    if hasattr(data, 'train_types') and len(data.train_types["explorations"]) > 0 and len(data.train_types["exploitations"]) > 0: 
         plot_train_types(data.train_types, data.train_execution_time, directory_name)
     
     #Step 5: saving data
