@@ -65,33 +65,113 @@ Result accuracy graph
 A Modular SDN-based Simulation Environment for Reinforcement Learning in Cybersecurity
 Real-time traffic generation and flow monitoring via Mininet and Custom Gym environments for traffic classification and DoS attack detection.
 
+---
+
+## Built With
+
+* [Python](https://www.python.org/)
+* [Mininet](http://mininet.org/)
+* [OpenDayLight (ODL)](https://www.opendaylight.org/)
+* [Gymnasium / OpenAI Gym](https://gymnasium.farama.org/)
+* [PyTorch](https://pytorch.org/) / [NumPy](https://numpy.org/)
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+---
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Getting Started
 
-This section provides instructions on how to set up and run the MininetGym project.
+This section provides instructions on how to set up and run the MininetGym project on a clean Ubuntu 20.04+ system.
 
 ### Prerequisites
 
 Ensure you have the following installed on your system:
-* **Python 3.11**
+* **Python 3.11** or later
 * **Mininet**: A network emulator that creates a network of virtual hosts, switches, controllers, and links.
-* **OpenDayLight (ODL)**: A modular open-source platform for Software-Defined Networking (SDN).
-* **Java**: Required for OpenDayLight. Version 1.8.0 or later is recommended.
+* **OpenDayLight (ODL)**: A modular open-source platform for Software-Defined Networking (SDN). Java 1.8.0 or later is required for ODL.
 
 ### Installation
 
-Follow these steps to get your development environment set up:
+Follow these steps to get your development environment set up.
 
-1.  **Mininet Installation**
-    Mininet is crucial for this simulation framework. It is recommended to install Mininet on a clean Ubuntu x.x LTS system. For detailed instructions, refer to the official Mininet documentation or a guide specific to your OS version. A common installation method involves:
+1.  **Install Mininet, hping3, and System Dependencies**
+   The project requires the **`hping3`** tool for network attack simulation. Make sure it is installed along with Mininet.
+
+    ```bash
+    sudo apt update && sudo apt upgrade -y
+    sudo apt-get install mininet python3-venv git -y
+    
+    # Installazione di hping3
+    sudo apt-get install -y hping3
+    ```
+    
+    **Verifica e Pulizia:**
+    Verification and Cleanup: Run a simple Mininet test and clean the environment to ensure that `hping3` is recognized by the virtual hosts.
+    ```bash
+    sudo mn --test pingall
+    sudo mn -c
+    ```
+    You can verify the `hping3` installation with: `hping3 --help` or `which hping3`.
+
+2.  **Clone the Repository**
+    Create a new directory for your project, navigate into it, and clone your repository.
+
     ```bash
-    git clone [https://github.com/mininet/mininet](https://github.com/mininet/mininet)
-    mininet/util/install.sh -a
+    mkdir MininetGym
+    cd MininetGym
+    git clone [https://github.com/dipi-unimore/mininet-gym.git](https://github.com/dipi-unimore/mininet-gym.git)
+    cd mininet-gym
     ```
 
-2.  **OpenDayLight (ODL) Controller Installation**
-    For installing OpenDayLight controller, follow the instructions provided in the [ODL-Ubuntu22-installation] guide. This project was developed with ODL Karaf version 0.8.4 and Java 1.8.0. This is not mandatory, it depends by environment configuration.
+3.  **Create and Activate a Python Virtual Environment**
+    It is crucial to use a virtual environment to manage project dependencies and avoid conflicts with system packages. This also prevents the `externally-managed-environment` error.
+
+    ```bash
+    # Create a new virtual environment named 'venv'
+    python3 -m venv venv
+
+    # Activate the virtual environment
+    source venv/bin/activate
+    ```
+    You will see `(venv)` prepended to your terminal prompt, indicating that the virtual environment is active.
+
+4.  **Install Python Dependencies**
+    With your virtual environment activated, install the required Python packages using `requirements.txt`.
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+    If you encounter an error related to `ale-py`, you may need to update the version in the `requirements.txt` file (e.g., to `ale-py>=0.11.0`).
+
+5. **Troubleshooting: libcudnn.so Errors**
+    If you encounter an error like `ImportError: libcudnn.so.9: cannot open shared object file: No such file or directory`, it means that your PyTorch installation is configured to use NVIDIA GPU acceleration but cannot find the necessary libraries. You have two options to resolve this:
+
+    Option A: Install the CPU-only version of PyTorch (Recommended)
+    This is the simplest and safest solution, especially if you do not have a dedicated NVIDIA GPU. It avoids the need for any CUDA or cuDNN libraries.
+
+    ```bash
+    pip uninstall torch
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+    ```    
+
+    Option B: Install the Full CUDA Toolkit and cuDNN (If you have an NVIDIA GPU)
+    If your machine has a compatible NVIDIA GPU and you want to use it for training, you\'ll need to install the full CUDA Toolkit and the cuDNN library. This is a more complex process and is not covered in detail in this guide. You should refer to NVIDIA\'s official documentation for instructions on how to install the appropriate versions of CUDA and cuDNN for your system.
+
+
+
+
+6.  **Run a Sample**
+    Mininet requires root privileges to create virtual network devices. 
+    
+    ```bash
+    sudo python3 main.py
+    ```
+    This command will start a Mininet simulation, run your environment, and begin the training process.
+
+7.  **OpenDayLight (ODL) Controller Setup (Optional)**
+    For installing the OpenDayLight controller, follow the instructions provided in the [ODL-Ubuntu22-installation] guide. This project was developed with ODL Karaf version 0.8.4.
 
     You might also use a Docker container for ODL. To start an OpenDayLight controller container:
     ```bash
@@ -101,63 +181,41 @@ Follow these steps to get your development environment set up:
     ```bash
     ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@192.168.1.226 -p 8101
     ```
-    (Note: Replace `admin` with your ODL username and `192.168.1.226` with your VM's IP if different).
 
-3.  **Set JAVA_PATH (if using local ODL installation)**
-    Ensure your `JAVA_PATH` is correctly set, especially if you are running ODL directly and not via Docker:
+    Ensure your `JAVA_PATH` is correctly set, especially if you are running ODL directly and not via Docker.
     ```bash
     echo 'export JAVA_PATH=/usr/lib/jvm/java-21-openjdk-amd64/bin/java' >> ~/.bashrc
     source ~/.bashrc
     ```
     Adjust the path to your Java installation accordingly.
 
-4.  **Create and Activate a Python Virtual Environment**
-    It's highly recommended to use a virtual environment to manage project dependencies.
-    ```bash
-    # Create a virtual environment named 'MYenv11' using Python 3.11
-    python3.11 -m venv MYenv11
-    # Alternatively, if you have 'virtualenv' installed:
-    # virtualenv --python="/usr/bin/python3.11" "MYenv11"
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-    # Activate the virtual environment
-    source MYenv11/bin/activate
-    ```
-    You will see `(MYenv11)` prepended to your terminal prompt, indicating that the virtual environment is active.
+## Usage
 
-5.  **Install Python Dependencies**
-    With your virtual environment activated, install the required Python packages using `requirements.txt`.
-    ```bash
-    pip install -r requirements.txt
-    ```
-    This will install the following libraries:
-    * `Flask==3.0.3`
-    * `Flask-SocketIO==5.3.0`
-    * `Flask-Cors==4.0.0`
-    * `eventlet==0.36.1`
-    * `python-engineio==4.9.1`
-    * `python-socketio==5.11.0`
-    * `requests==2.32.3`
-    * `numpy==1.26.4`
-    * `pandas==2.2.2`
-    * `matplotlib==3.8.4`
-    * `scikit-learn==1.4.2`
-    * `scipy==1.13.1`
-    * `gymnasium==0.29.1`
-    * `stable-baselines3==2.3.0`
-    * `sb3-contrib==2.3.0`
-    * `Mininet==2.3.0`
-    * `colorama==0.4.6`
-    * `pyyaml==6.0.1`
-    * `lxml==5.2.2`
-    * `beautifulsoup4==4.12.3`
+*This section is not yet filled out.*
 
-    Your environment is now set up!
+## Roadmap
 
-6.  **Create configuration**
-    Starting from base_config.yaml, create your own configuration, following the instruction of the paper (not published yet)
+*This section is not yet filled out.*
 
+## Contributing
 
-This project is licensed under the MIT License – see the LICENSE.txt file for details.
+*This section is not yet filled out.*
+
+## License
+
+Distributed under the MIT License – see the `LICENSE.txt` file for details.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Contact
+
+*This section is not yet filled out.*
+
+## Acknowledgments
+
+*This section is not yet filled out.*
 
 ---
 [contributors-shield]: https://img.shields.io/github/contributors/dipi-unimore/mininet-gym.svg?style=for-the-badge
@@ -175,5 +233,3 @@ This project is licensed under the MIT License – see the LICENSE.txt file for 
 [product-screenshot]: images/screenshot.png
 [schema-screenshot]: images/schema.png
 [ODL-Ubuntu22-installation]: https://docs.opendaylight.org/en/stable-fluorine/downloads.html
-[ODL-karaf-0.8.4]: https://docs.opendaylight.org/en/stable-fluorine/downloads.html
-[use-different-python-version-with-virtualenv]: https://stackoverflow.com/questions/35579976/how-to-use-a-different-python-version-with-virtualenv
