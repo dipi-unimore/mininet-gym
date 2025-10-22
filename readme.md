@@ -18,10 +18,10 @@
   <p align="center">
     Reinforcement learning Mininet OpenDayLight
     This project aims to provide a basic framework for DDoS mitigation using reinforcement learning (Deep and not).
-    The network is implemented using Mininet (based on Software defined networking).
-    The design of the solution is inspired by the work "???" by Salvo Finistrella and others here.
+    The network is implemented using Mininet (based on Software-Defined networking).
+    The design of the solution is inspired by the work "MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity" by Salvo Finistrella and others here.
     <br />
-    <a href="https://github.com/dipi-unimore/mininet-gym"><strong>Explore the docs »</strong></a>
+    <a href="https://www.sciencedirect.com/science/article/pii/S235271102500278X"><strong>Explore the docs »</strong></a>
     <br />
     <br />
     <a href="https://github.com/dipi-unimore/mininet-gym/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
