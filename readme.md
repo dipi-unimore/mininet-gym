@@ -58,9 +58,10 @@
 ## About The Project
 
 ![Schema Screen Shot][schema-screenshot]
-Schema 
+Schema
+
 ![Product Screen Shot][product-screenshot]
-Result accuracy graph
+Web UI screenshot
 
 A Modular SDN-based Simulation Environment for Reinforcement Learning in Cybersecurity
 Real-time traffic generation and flow monitoring via Mininet and Custom Gym environments for traffic classification and DoS attack detection.
@@ -231,5 +232,5 @@ Distributed under the MIT License – see the `LICENSE.txt` file for details.
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/salvo-finistrella-970034237
 [product-screenshot]: images/screenshot.png
-[schema-screenshot]: images/schema.png
+[schema-screenshot]: images/architecture.png
 [ODL-Ubuntu22-installation]: https://docs.opendaylight.org/en/stable-fluorine/downloads.html
