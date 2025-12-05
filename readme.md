@@ -98,22 +98,21 @@ Ensure you have the following installed on your system:
 Follow these steps to get your development environment set up.
 
 1.  **Install Mininet, hping3, and System Dependencies**
-   The project requires the **`hping3`** tool for network attack simulation. Make sure it is installed along with Mininet.
+    The project requires the **`hping3`** tool for network attack simulation. Make sure it is installed along with Mininet.
 
-    ```bash
-    sudo apt update && sudo apt upgrade -y
-    sudo apt-get install mininet python3-venv git -y
+    ```bash
+    sudo apt update && sudo apt upgrade -y
+    sudo apt-get install mininet python3-venv git -y
+    # Installazione di hping3
+    sudo apt-get install -y hping3
+    ```
     
-    # Installazione di hping3
-    sudo apt-get install -y hping3
-    ```
-    
-    **Verifica e Pulizia:**
-    Verification and Cleanup: Run a simple Mininet test and clean the environment to ensure that `hping3` is recognized by the virtual hosts.
-    ```bash
-    sudo mn --test pingall
-    sudo mn -c
-    ```
+    **Verifica e Pulizia:**
+    Verification and Cleanup: Run a simple Mininet test and clean the environment to ensure that `hping3` is recognized by the virtual hosts.
+    
+    sudo mn --test pingall
+    sudo mn -c           
+   
     You can verify the `hping3` installation with: `hping3 --help` or `which hping3`.
 
 2.  **Clone the Repository**
