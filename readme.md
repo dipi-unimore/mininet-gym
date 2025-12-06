@@ -8,25 +8,27 @@
 [![LinkedIn][linkedin-shield]][linkedin-url]
 
 <br />
-<div align="center">
-  <a href="https://github.com/dipi-unimore/mininet-gym">
+<div align="left">
+  <a href="https://github.com/dipi-unimore/mininet-gym-icaart-2026">
     <img src="images/logo.png" alt="Logo" width="80" height="80">
   </a>
 
-  <h3 align="center">MininetGym</h3>
+  <h2 align="center">MininetGym</h3>
 
-  <p align="center">
-    Reinforcement learning Mininet OpenDayLight
+  <p>
     This project aims to provide a basic framework for DDoS mitigation using reinforcement learning (Deep and not).
     The network is implemented using Mininet (based on Software-Defined networking).
-    The design of the solution is inspired by the work "MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity" by Salvo Finistrella and others here.
-    <br />
-    <a href="https://www.sciencedirect.com/science/article/pii/S235271102500278X"><strong>Explore the docs »</strong></a>
-    <br />
-    <br />
-    <a href="https://github.com/dipi-unimore/mininet-gym/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
+    The design of the solution is inspired by the work 
+  </p>
+  <h3 align="center">
+    <strong ><em> <a href="https://www.sciencedirect.com/science/article/pii/S235271102500278X">"MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity"</a></em></strong> <br>
+    by <strong><a href="https://finix77.github.io/index.html">Finistrella S.</a></strong> at al.</h5>
+
+
+  <p>
+    <a href="https://github.com/dipi-unimore/mininet-gym-icaart-2026/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     ·
-    <a href="https://github.com/dipi-unimore/mininet-gym/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
+    <a href="https://github.com/dipi-unimore/mininet-gym-icaart-2026/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
   </p>
 </div>
 
@@ -56,15 +58,16 @@
 </details>
 
 ## About The Project
+A Modular SDN-based Simulation Environment for Reinforcement Learning in Cybersecurity
+Real-time traffic generation and flow monitoring via Mininet and Custom Gym environments for traffic classification and DoS attack detection.
 
 ![Schema Screen Shot][schema-screenshot]
-Schema
+The previous Schema shows the framework architecture. A deep explanation can be found in the section on the cited [mininet-gym-paper].
 
 ![Product Screen Shot][product-screenshot]
 Web UI screenshot
 
-A Modular SDN-based Simulation Environment for Reinforcement Learning in Cybersecurity
-Real-time traffic generation and flow monitoring via Mininet and Custom Gym environments for traffic classification and DoS attack detection.
+
 
 ---
 
@@ -98,6 +101,7 @@ Ensure you have the following installed on your system:
 Follow these steps to get your development environment set up.
 
 1.  **Install Mininet, hping3, and System Dependencies**
+
     The project requires the **`hping3`** tool for network attack simulation. Make sure it is installed along with Mininet.
 
     ```bash
@@ -230,6 +234,7 @@ Distributed under the MIT License – see the `LICENSE.txt` file for details.
 [license-url]: https://github.com/dipi-unimore/mininet-gym/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/salvo-finistrella-970034237
+[mininet-gym-paper]: https://www.sciencedirect.com/science/article/pii/S235271102500278X
 [product-screenshot]: images/screenshot.png
 [schema-screenshot]: images/architecture.png
 [ODL-Ubuntu22-installation]: https://docs.opendaylight.org/en/stable-fluorine/downloads.html
