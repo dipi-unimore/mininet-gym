@@ -62,11 +62,10 @@ A Modular SDN-based Simulation Environment for Reinforcement Learning in Cyberse
 Real-time traffic generation and flow monitoring via Mininet and Custom Gym environments for traffic classification and DoS attack detection.
 
 ![Schema Screen Shot][schema-screenshot]
-The previous Schema shows the framework architecture. A deep explanation can be found in the section on the cited [mininet-gym-paper].
+**Framework Architecture:** The schema illustrates the framework architecture. A deep explanation can be found in the section on the cited **[mininet-gym-paper]**.
 
 ![Product Screen Shot][product-screenshot]
-Web UI screenshot
-
+**Web Interface for Flow Monitoring**: Real-time visualization of network traffic and DDoS attack metrics registered per second during a simulation.
 
 
 ---
