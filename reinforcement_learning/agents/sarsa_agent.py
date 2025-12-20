@@ -9,6 +9,7 @@ class SARSAAgent(BaseAgent):
     """
     def __init__(self, env: NetworkEnv, params):
         super().__init__(env, params) 
+        self.is_discretized_state = True  
         
     def update_qtable(self, state, action, reward, next_state, next_action):
         # SARSA Update Rule
@@ -18,18 +19,21 @@ class SARSAAgent(BaseAgent):
                  
     def train(self):
         cumulative_reward, state, done, truncated, count_actions_by_type = self.episode_reset(self.is_discretized_state) 
-        status = dict(self.env.status)  
+        status = dict(self.env.global_state.status)  
         action = self.choose_action(state)
                       
-        while not done and not truncated: #episode             
+        while not done and not truncated and not self.stop_event.is_set(): #episode             
             count_actions_by_type[action] += 1 
             self.current_step+=1
-            next_state, reward, done, truncated, infos = self.env.step(action, is_discretized_state = self.is_discretized_state, current_step = self.current_step, correct_predictions= self.correct_predictions )
+            next_state, reward, done, truncated, infos = self.env.step(action, is_discretized_state = self.is_discretized_state, 
+                                                                       current_step = self.current_step, 
+                                                                       correct_predictions= self.correct_predictions, 
+                                                                       show_action = self.show_action, name = self.name)
             
             self.manage_step_data(action,reward,infos,status)
             cumulative_reward += reward            
             
-            status = dict(self.env.status) 
+            status = dict(self.env.global_state.status) 
             next_action = self.choose_action(next_state)
                       
             self.update_qtable(state, action, reward, next_state, next_action)

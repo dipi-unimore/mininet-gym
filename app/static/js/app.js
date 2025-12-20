@@ -1,87 +1,125 @@
+
+
+// ====================================================================\
+// EVENT LISTENERS & INITIALIZATION
+// ====================================================================\
+
 $(document).ready(function () {
-  const defaultAgent = {
-    name: "",
-    algorithm: "",
-    learning_rate: 0.01,
-    discount_factor: 0.99
-  };
+    // Initial render of the configuration
+    renderConfig();
+    navigateTo('config'); // Start on the config page
 
-  function addAgentForm(agent = defaultAgent) {
-    const index = $("#agents-config .agent-block").length;
-    const html = `
-      <div class="agent-block border p-3 mb-2 rounded bg-light">
-        <h6>Agent ${index + 1}</h6>
-        <input type="text" class="form-control mb-1" name="agent_name" placeholder="Name" value="${agent.name}">
-        <input type="text" class="form-control mb-1" name="algorithm" placeholder="Algorithm" value="${agent.algorithm}">
-        <input type="number" step="0.001" class="form-control mb-1" name="learning_rate" placeholder="Learning Rate" value="${agent.learning_rate}">
-        <input type="number" step="0.01" class="form-control mb-1" name="discount_factor" placeholder="Discount Factor" value="${agent.discount_factor}">
-      </div>`;
-    $("#agents-config").append(html);
-  }
+    // --- Configuration Page Buttons ---
+    $('#save-config-btn').click(saveConfiguration);
 
-  // Load config from API
-  function loadConfig() {
-    $.getJSON("/params", function (data) {
-    // Load general config (root-level keys excluding env and agents)
-      let generalHTML = '<h5>General Configuration</h5>';
-      for (const [key, value] of Object.entries(data)) {
-        if (key !== "env_params" && key !== "agents") {
-          generalHTML += `
-            <div class="mb-2">
-              <label class="form-label">${key}</label>
-              <input type="text" class="form-control" name="${key}" value="${value}">
-            </div>`;
-        }
-      }
-      $("#general-config").html(generalHTML);
+    $('#download-result-btn').click(downloadResults);
 
-
-      // Load env config
-      let envHTML = '<h5>Environment Configuration</h5>';
-      for (const [key, value] of Object.entries(data.env_params)) {
-        if (typeof value === 'object') {
-          envHTML += `<div class="border p-2 mb-2 bg-white"><strong>${key}</strong>`;
-          for (const [subkey, subvalue] of Object.entries(value)) {
-            envHTML += `
-              <div class="mb-2">
-                <label class="form-label">${subkey}</label>
-                <input type="text" class="form-control" name="${key}.${subkey}" value="${subvalue}">
-              </div>`;
-          }
-          envHTML += `</div>`;
-        } else {
-          envHTML += `
-            <div class="mb-2">
-              <label class="form-label">${key}</label>
-              <input type="text" class="form-control" name="env.${key}" value="${value}">
-            </div>`;
-        }
-      }
-      $("#env-config").html(envHTML);
-
-      // Load agents
-      $("#agents-config").empty().append('<h5>Agents Configuration</h5>');
-      data.agents.forEach(agent => addAgentForm(agent));
+    // Listener for the remove agent buttons (uses event delegation)
+    $('#agents-list').on('click', '.remove-agent-btn', function (e) {
+        e.preventDefault();
+        const agentName = $(this).data('agent-name');
+        removeAgent(agentName);
     });
-  }
+    $('#add-agent-btn').click(addAgent);
 
-  // On page load
-  loadConfig();
+    // --- Training Page Buttons ---
 
-  // Add new agent
-  $("#addAgent").click(function () {
-    addAgentForm();
-  });
+    // Start Training
+    $('#start-training-btn').click(function () {
+        if (systemStatus==SYSTEM_STATUS.TRAINING_STARTING ||
+            systemStatus==SYSTEM_STATUS.TRAINING_RUNNING ||
+            systemStatus==SYSTEM_STATUS.PLOTTING_TRAINING_DATA ||
+            systemStatus==SYSTEM_STATUS.EVALUATING_RUNNING
+        ) return;
+        showStatus('Attempting to start training...', 'info');
 
-  // Placeholder for training start
-  $("#start-training").click(function () {
-    $("#training-output").append("<p><b>Training started...</b></p>");
-    // TODO: Add WebSocket logic
-  });
+        $.ajax({
+            url: '/start_training',
+            type: 'POST',
+            contentType: 'application/json',
+            success: function (response) {
+                showStatus(response.message, 'success');
+                if (response.status == STATUS.STARTING) {
+                    setStatus(SYSTEM_STATUS.TRAINING_STARTING, response.message );
+                    showCharts();
+                }
+                else
+                    setStatus(SYSTEM_STATUS.RESUMED, response.message );
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Error starting training: ' + response.message, 'error');
+                setStatus(SYSTEM_STATUS.ERROR, 'Error starting training');
+            }
+        });
+    });
 
-  // Save Configuration (TO DO)
-  $("#config-form").submit(function (e) {
-    e.preventDefault();
-    alert("Saving configuration not implemented yet.");
-  });
+    // Pause Training
+    $('#pause-training-btn').click(function () {
+        if ((systemStatus!=SYSTEM_STATUS.TRAINING_RUNNING 
+            && systemStatus!=SYSTEM_STATUS.TRAINING_STARTING
+            && systemStatus!=SYSTEM_STATUS.RESUMED
+            && systemStatus!=SYSTEM_STATUS.EVALUATING_RUNNING)
+            || systemStatus==SYSTEM_STATUS.PAUSED
+            || systemStatus==SYSTEM_STATUS.STOPPED
+        ) return;
+
+        $.ajax({
+            url: '/pause_training',
+            type: 'POST',
+            success: function (response) {
+                setStatus(SYSTEM_STATUS.PAUSED, 'Training paused.');
+                showStatus(response.message || 'Training paused.', 'info');
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Error pausing training: ' + response.message, 'error');
+                setStatus(SYSTEM_STATUS.ERRO, 'Error pausing training');
+            }
+        });
+    });
+
+    // Stop Training
+    $('#stop-training-btn').click(function () {
+        if (systemStatus==SYSTEM_STATUS.STOPPED) return;
+        showStatus('Attempting to stop training...', 'info');
+
+        $.ajax({
+            url: '/stop_training',
+            type: 'POST',
+            success: function (response) {
+                if (socket && socket.connected) {
+                    socket.close();
+                }
+                setStatus(SYSTEM_STATUS.STOPPED, 'Training session stopped.');
+                showStatus(response.message || 'Training session stopped.', 'success');
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Error stopping training: ' + response.message, 'error');
+                setStatus(SYSTEM_STATUS.ERROR, 'Error stopping training');
+            }
+        });
+    });
+
+    $('#view-config-btn').click(() => {
+        $('#config-modal').removeClass('hidden');
+        renderConfigSummary();
+    });
+    $('#close-config-modal-btn').click(() => {
+        $('#config-modal').addClass('hidden');
+    });
+
+    // Load Modal Button (for future use)
+    $('#load-configs-btn').click(() => {
+        $('#config-list-modal').removeClass('hidden');
+    });
+    $('#close-modal-btn').click(() => {
+        $('#config-list-modal').addClass('hidden');
+    });
+
+    $('#close-result-modal-btn').click(() => {
+        $('#result-modal').addClass('hidden');
+    });
+
 });

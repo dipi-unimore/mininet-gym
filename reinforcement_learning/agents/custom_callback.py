@@ -1,6 +1,7 @@
 from stable_baselines3.common.callbacks import BaseCallback
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-from utility.my_log import set_log_level, information
+from utility.constants import SystemLevels
+from utility.my_log import notify_client, set_log_level, information
 import numpy as np
 import torch
 
@@ -69,7 +70,7 @@ class CustomCallback(BaseCallback):
             
         if self.training_start:
             self.training_start(self)
-        self.number_actions = self.net_env.actions_number            
+        self.number_actions = self.env.actions_number            
         self.count_actions = {i: 0 for i in range(self.number_actions)}
         self.exploration_count,  self.exploitation_count = 0, 0  # Reset counters for each episode
         self.ground_truth = []
@@ -121,47 +122,40 @@ class CustomCallback(BaseCallback):
         self.predicted.append(predicted_step) 
         reward = self.locals["rewards"][0]  # assuming a single environment
         self.episode_rewards.append(reward)
-        status = dict(self.net_env.status) #to detach to memory
-        if "variation_packet" in status:
-            status["variation_packet"]= int(status["variation_packet"])
-        if "packets" in status:
-            status["packets"]= int(status["packets"]) 
-        if "variation_byte" in status:
-            status["variation_byte"]= int(status["variation_byte"]) 
-        if "bytes" in status:
-            status["bytes"]= int(status["bytes"]) 
-            
-        if "packets_received" in status:
-            status["packets_received"]= int(status["packets_received"])
-        if "bytes_received" in status:
-            status["bytes_received"]= int(status["bytes_received"]) 
-        if "packets_transmitted" in status:
-            status["packets_transmitted"]= int(status["packets_transmitted"]) 
-        if "bytes_transmitted" in status:
-            status["bytes_transmitted"]= int(status["bytes_transmitted"]) 
-        status["action_choosen"]=int(action)
-        status["action_correct"]=bool(self.action_correct)
+        status = dict(self.env.global_state.status) #to detach to memory
         if bool(self.action_correct):
-            self.correct_predictions+= 1
+           self.correct_predictions+= 1
         self.episode_statuses.append(status)
+        step_data = {
+            'episode': self.episode,
+            'step': self.current_step,
+            'status': {'id': status["id"], 'text': status["status"]},
+            'receivedPackets': status['received_packets'],
+            'receivedPacketsPercentageChange': status['received_packets_percentage_change'],
+            'receivedBytes': status['received_bytes'],
+            'receivedBytesPercentageChange': status['received_bytes_percentage_change'],
+            'transmittedPackets': status['transmitted_packets'],
+            'transmittedPacketsPercentageChange': status['transmitted_packets_percentage_change'],
+            'transmittedBytes': status['transmitted_bytes'],
+            'transmittedBytesPercentageChange': status['transmitted_bytes_percentage_change'],
+            'action': {'choosen': status["action_choosen"], 'isCorrect': status["action_correct"]},               
+            'correctPredictions': self.correct_predictions,        
+            'reward': reward
+        }
+        #name = self.locals['tb_log_name']
+        notify_client(level=SystemLevels.DATA, agent_name = self.name, step_data = step_data)
+        # if not hasattr(self, 'steps_data'):
+        #     self.steps_data = []
+        # self.steps_data.append(step_data)
         
-        #total_reward = sum(self.episode_rewards)
-        # done = self.locals["dones"][0] 
-        # if done:
-        #     if "loss" in self.locals:
-        #         current_loss = self.locals["loss"]  # Extract current loss from training loop
-        #         self.losses.append(current_loss)
-        #         print(f"Step {self.num_timesteps} - Loss: {current_loss}")            
-        #     # Mark the episode as done by closing the environment
-        #     self.model.env.env_method("close")
-        #     #print("Stopping episode as reward of 1 is achieved.")
-        #     return False 
         
+        self.env.execute_action(action, show_action = self.show_action, name = self.name, reward = reward)            
+       
         # Custom function after each step
         if self.step_end:
             self.step_end(self)
-        return True  # Continue training, False top training
-
+        return True  # Continue training, False top training   
+  
     def _on_rollout_end(self) -> None:
         """
         This event is triggered before updating the policy. 
@@ -181,10 +175,10 @@ class CustomCallback(BaseCallback):
             
     def evaluate_episode(self, episode, cumulative_reward):
         # Calculate and store metrics at the end of the episode with library sklearn
-        # ground_truth = self.ground_truth
-        # predicted = self.predicted 
-        ground_truth = [1 if item[0] == 0 else 0 for item in self.ground_truth]   
-        predicted = [1 if item[0] == 0 else 0 for item in self.predicted]                          
+        # ground_truth = [1 if item[0] == 0 else 0 for item in self.ground_truth]   
+        # predicted = [1 if item[0] == 0 else 0 for item in self.predicted]   
+        ground_truth = [next((i for i, val in enumerate(item) if val == 1), -1) for item in self.ground_truth]   
+        predicted = [next((i for i, val in enumerate(item) if val == 1), -1) for item in self.predicted]                                
         accuracy_episode = accuracy_score(ground_truth, predicted)
         precision_episode, recall_episode, f1_score_episode, _ = precision_recall_fscore_support(ground_truth, predicted, average='weighted', zero_division=0.0)
         self.metrics['accuracy'].append(accuracy_episode)
@@ -231,12 +225,12 @@ class CustomCallback(BaseCallback):
     #     information(f"************* Episode {self.episode} *************\n", self.locals['tb_log_name'])         
     #     #return self.env.actions_number       
         
-    # def after_episode(self):
-    #     cumulative_reward = sum(self.episode_rewards)
-    #     self.evaluate_episode(self.episode, cumulative_reward)
-    #     self.print_metrics(cumulative_reward)
-    #     # information(f"Evalueting...")     
-    #     # mean_reward, std_reward = evaluate_policy(callback_self.model, self.env, n_eval_episodes=1)
-    #     # information(f"{mean_reward} {std_reward}")
-    #     information(f"*** Episode {self.episode} finished ***\n", self.locals['tb_log_name'])             
+    def after_episode(self):
+        cumulative_reward = sum(self.episode_rewards)
+        self.evaluate_episode(self.episode, cumulative_reward)
+        self.print_metrics(cumulative_reward)
+        # information(f"Evalueting...")     
+        # mean_reward, std_reward = evaluate_policy(callback_self.model, self.env, n_eval_episodes=1)
+        # information(f"{mean_reward} {std_reward}")
+        information(f"*** Episode {self.episode} finished ***\n", self.locals['tb_log_name'])             
                 

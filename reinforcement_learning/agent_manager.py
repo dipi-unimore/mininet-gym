@@ -1,71 +1,123 @@
-import os
-from reinforcement_learning.custom_policy import CustomDQNPolicy
-from stable_baselines3 import PPO, DQN, A2C
+import os, time
 from stable_baselines3.common.env_checker import check_env
-from reinforcement_learning.qlearning_agent import QLearningAgent
-from reinforcement_learning.sarsa_agent import SARSAAgent
+from stable_baselines3 import PPO, DQN, A2C
+from reinforcement_learning.agents.custom_policy import CustomDQNPolicy
+from reinforcement_learning.agents.qlearning_agent import QLearningAgent
+from reinforcement_learning.agents.sarsa_agent import SARSAAgent
+from reinforcement_learning.agents.custom_callback import CustomCallback
+from reinforcement_learning.agents.supervised_agent import SupervisedAgent
+from reinforcement_learning.marl.constants import COORDINATOR
+from reinforcement_learning.marl.network_env_marl_attack_detect import NetworkEnvMarlAttackDetect
 from reinforcement_learning.network_env import NetworkEnv
-from reinforcement_learning.custom_callback import CustomCallback
+from utility.constants import *
 from utility.my_files import find_latest_file
-from utility.my_log import set_log_level, information, debug, error, notify_client
-from supervised_agent import SupervisedAgent
+from utility.my_log import information, debug
 
-from colorama import Fore, Back, Style
-import numpy as np
 import torch.nn as nn
-import threading, time
 
 class AgentManager:
     def __init__(self, env : NetworkEnv, config): 
         self.env = env
-        self.test_episodes = config.test_episodes
+        
         self.agents_params = [agent for agent in config.agents if agent.enabled]
-        self.csv_file = config.env_params.csv_file
+        self.data_traffic_file = config.env_params.data_traffic_file
         self.gym_type = config.env_params.gym_type
         execution_dir = os.getcwd()
         self.training_directory = os.path.join(execution_dir, config.training_directory)      
         self.net_config_filter = config.net_config_filter
         self.episode = 0
+        self.episodes = config.env_params.episodes
+        self.test_episodes = config.env_params.test_episodes
         
         information("Check environment\n")
-        check_env(env, warn=True)
-        env.initialize_storage()
+        if self.env is None:
+            raise ValueError("The environment can't be None. Create environment")
+        elif isinstance(self.env, NetworkEnvMarlAttackDetect):
+            information("Marl environment\n")
+            for name,env in self.env.host_envs.items():
+                information(f"Host {name} environment\n")
+                if config.env_params.must_check_env:
+                    check_env(env, warn=True)
+                else:
+                    time.sleep(1.5)
+                break
+            information(f"Coordinator environment\n")
+            if config.env_params.must_check_env:
+                check_env(self.env.coordinator_env, warn=True)
+            else:
+                time.sleep(1.5)
+        else:
+            if config.env_params.must_check_env:    
+                check_env(env, warn=True)
+            else:
+                time.sleep(1.5)                
+        self.env.initialize_storage()
         information("Check environment finished\n")
         
         if len(self.agents_params)>0:
             self.create_agents()
         else:
             raise ValueError(f"In config.yaml insert at least one agent and its params")
-            
-    def create_agent(self, agent_param ):
-        env = self.env
-        algorithm = agent_param.algorithm
-        name = agent_param.name
-        model = None
+    
+    def create_marl_agent(self, agent_param ):
+        agent_param.instances = {}
+        for host_name,env in self.env.host_envs.items():
+            instance, custum_callback, is_custom_agent =  self.create_agent(agent_param, env, name = host_name )
+            instance.is_team_member = True
+            instance.is_team_coordinator = False
+
+            agent_param.instances[host_name] = {
+                'instance': instance,
+                'custom_callback': custum_callback,
+                'is_custom_agent': is_custom_agent,
+                'max_steps' : self.env.max_steps
+            }
+        instance, custum_callback, is_custom_agent =  self.create_agent(agent_param, self.env.coordinator_env, name = COORDINATOR )
+        instance.is_team_member = True
+        instance.is_team_coordinator = True
+        agent_param.instances[COORDINATOR] = {
+                'instance': instance,
+                'custom_callback': custum_callback,
+                'is_custom_agent': is_custom_agent,
+                'max_steps' : self.env.max_steps
+        }          
         
-        if algorithm == "Q-learning":
+            
+    def create_agent(self, agent_param, env=None, name = None): 
+        if env is None:
+            env = self.env
+        algorithm = agent_param.algorithm
+        if not hasattr(agent_param, 'episodes') or agent_param.episodes is None:
+            agent_param.episodes = self.episodes
+        model = None
+        #use lower case for algorithm names check
+        if algorithm.lower() == Q_LEARNING:
             model =  QLearningAgent(env, agent_param)
             try:            
                 if agent_param.load:
                     path = agent_param.load_dir if agent_param.load_dir is not None else find_latest_file(self.training_directory,name,'json',self.net_config_filter)
+                    #TODO: check if file exists e raise exception. if not exists skip load
+                    #TODO: load all instances?                    
                     model.load(self.training_directory+"/"+path)
             except:
-                debug(f"No {name} model file\n")              
+                debug(f"No {name} model file\n") 
+            if name is not None:
+                model.name = f"{agent_param.name}_{name}"              
             return model, {}, True
-        elif algorithm == "Sarsa":
+        elif algorithm.lower() == SARSA:
             model =  SARSAAgent(env, agent_param)
             try:
                 if agent_param.load:                
                     path = agent_param.load_dir if agent_param.load_dir is not None else  find_latest_file(self.training_directory,name,'json',self.net_config_filter)
                     model.load(self.training_directory+"/"+path)
             except:
-                debug(f"No {name} model file\n")              
+                debug(f"No {name} model file\n")     
+            if name is not None:
+                model.name = f"{agent_param.name}_{name}"                             
             return model, {}, True        
-        elif algorithm == "Supervised":
-            if self.gym_type.startswith("attacks"): #attack detect with or not with dataset
-                return SupervisedAgent(), {}, False 
-            return SupervisedAgent(self.csv_file), {}, False        
-        elif algorithm == "PPO":
+        elif algorithm.lower() == SUPERVISED:
+            return SupervisedAgent(env.gym_type, self.data_traffic_file), {}, False        
+        elif algorithm.lower() == PPO:
             try:
                 model = self.load_agent_model(agent_param)
             except Exception as e: 
@@ -80,10 +132,13 @@ class AgentManager:
                         verbose=1)
             cc = CustomCallback(training_start=self.before_episode, 
                                 training_end=self.after_episode)
-            cc.net_env = self.env
+            cc.env = self.env
+            cc.show_action = agent_param.show_action
+            if name is not None:
+                cc.name = model.name = f"{agent_param.name}_{name}"                
             return model, cc, False
             
-        elif algorithm == "DQN":
+        elif algorithm.lower() == DQN:
             try:                
                 model = self.load_agent_model(agent_param)
             except:
@@ -119,10 +174,13 @@ class AgentManager:
                 model.verbose=1                
             cc = CustomCallback(training_start=self.before_episode, 
                                 training_end=self.after_episode)
-            cc.net_env = self.env
+            cc.env = self.env
+            cc.show_action = agent_param.show_action
+            if name is not None:
+                cc.name = model.name = f"{agent_param.name}_{name}"                
             return model, cc, False
             
-        elif algorithm == "A2C":
+        elif algorithm.lower() == A2C:
             try:
                 model = self.load_agent_model(agent_param)
             except:
@@ -138,17 +196,23 @@ class AgentManager:
                        verbose=1)
             cc = CustomCallback(training_start=self.before_episode, 
                                 training_end=self.after_episode)
-            cc.net_env = self.env
+            cc.env = self.env
+            cc.show_action = agent_param.show_action
+            if name is not None:
+                cc.name = model.name = f"{agent_param.name}_{name}"                
             return model, cc, False
             
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")      
         
-    
+   
     def create_agents(self):
         for agent_param in self.agents_params:
-            agent_param.instance, agent_param.custom_callback, agent_param.is_custom_agent = self.create_agent(agent_param)
-            agent_param.max_steps = self.env.max_steps
+            if self.gym_type.startswith("marl"):
+                self.create_marl_agent(agent_param)
+            else:
+                agent_param.instance, agent_param.custom_callback, agent_param.is_custom_agent = self.create_agent(agent_param)
+                agent_param.max_steps = self.env.max_steps
     
     def load_agent_model(self, agent_param):
         """

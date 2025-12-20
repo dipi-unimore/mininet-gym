@@ -1,41 +1,293 @@
 # my_statistics.py
 import matplotlib
 matplotlib.use('Agg')  # Used for a non-GUI backend (Agg is for PNG output)
-import matplotlib.pyplot as plt, matplotlib.patches as mpatches, numpy as np
+import matplotlib.pyplot as plt, matplotlib.patches as mpatches, numpy as np, seaborn as sns,  pandas as pd
 from sklearn import metrics
-from utility.my_files import read_data_file, find_latest_execution, read_all_data_from_execution
-from utility.params import  Params, read_config_file
-from utility.my_log import information, error
-import traceback
-from colorama import Fore
 
-def plot_all_lines_and_save_png(lines, title, x_label, y_label,legend_lables, colors, markers, file_name):
+
+#TODO copy new from colab
+def plot_bar_chart_scores(scores, dir_name, title=''):
     """
-    generic plot function
-    """  
- 
-    i=1
-    x=[]
-    y = [[0 for x in range(len(lines))] for y in range(len(lines[0]))] 
-    for j in lines:
-        x.append(i)
-        for w in range(len(j)):
-            y[w][i-1]=j[w]
-        i+=1
-
-    for w in range(len(lines[0])):
-        plt.plot(x, y[w], linestyle='-', linewidth=2.0) # - solid line -- dashed line 
+    Plots a vertical bar chart of agent scores.
+    
+    Args:
+        scores (dict): A dictionary where keys are agent names and values are their scores.
+    """
+    df_scores = pd.DataFrame(scores.items(), columns=['Agent', 'Score'])
+    df_scores = df_scores.sort_values(by='Score', ascending=False)
+    
+    plt.figure(figsize=(15, 8))
+    ax = sns.barplot(x='Agent', y='Score', data=df_scores, palette='viridis', hue='Agent', legend=False)
+    
+    # Add labels on top of the bars
+    ax.bar_label(ax.containers[0], fmt='%.0f', padding=3)
+    
+    ax.set_xlabel('Agent', fontsize=12)
+    ax.set_ylabel('Score', fontsize=12)
+    plt.title('Agent Performance Scores', fontsize=16)
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/scores.png")
+    plt.close()
+    
+def plot_horizontal_bar_chart_test_data(scores, dir_name, title=''):
+    """
+    Plots a horizontal bar chart of agent scores from test data.
+    
+    Args:
+        scores (dict): A dictionary where keys are agent names and values are their scores.
+    """
+    df_scores = pd.DataFrame(scores.items(), columns=['Agent', 'Score'])
+    df_scores = df_scores.sort_values(by='Score', ascending=True)
+    
+    plt.figure(figsize=(15, 8))
+    ax = sns.barplot(x='Score', y='Agent', data=df_scores, palette='viridis', hue='Agent', legend=False)
+    
+    # Add labels to the bars
+    for index, row in df_scores.iterrows():
+        ax.text(row.Score + 1, index, f'{row.Score:.0f}', va='center')
+    # for container in ax.containers:
+    #     ax.bar_label(container)
         
-    plt.xlabel(x_label)
-    plt.ylabel(y_label)
-    plt.gca().set_prop_cycle(color=colors,marker=markers)
-    plt.title(f'{title}')   
-    plt.legend(legend_lables, loc='upper left')
-    #plt.semilogy(lines, "b--")
-    #plt.show()
-
-    plt.savefig(f"{file_name}.png")
+    plt.title('Agent Performance Scores (Horizontal)', fontsize=16)
+    plt.xlabel('Score', fontsize=12)
+    plt.ylabel('Agent', fontsize=12)
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/scores_horizontal.png")
     plt.close()  
+
+# Parse the agent names to get the algorithm and variant
+def parse_agent_name(name):
+    parts = name.split('_')
+    algorithm = parts[0]
+    speed = '_'.join(parts[1:]) if len(parts) > 1 else 'N/A'
+    return algorithm, speed
+
+def plot_grouped_by_algo_score_bar_chart(scores, dir_name, title=''):
+    """
+    Plots a bar chart of scores for grouped by algorithm.
+    
+    Args:
+        scores (dict): A dictionary of agent scores.
+    """
+    df_scores = pd.DataFrame(scores.items(), columns=['Agent', 'Score'])
+    df_scores = df_scores.sort_values(by='Score', ascending=True)
+    
+    df_scores[['Algorithm', 'Speed']] = df_scores['Agent'].apply(
+        lambda x: pd.Series(parse_agent_name(x))
+    )
+
+    # Plot the grouped bar chart
+    plt.figure(figsize=(12, 8))
+    ax = sns.barplot(
+        x='Algorithm',
+        y='Score',
+        hue='Speed',
+        data=df_scores,
+        palette='pastel'
+    )
+
+    # Add labels on top of the bars
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.0f', padding=3)
+
+    ax.set_title('Agent Scores Grouped by Algorithm', fontsize=16)
+    ax.set_xlabel('Algorithm', fontsize=12)
+    ax.set_ylabel('Score', fontsize=12)
+    ax.set_ylim(215, 300) # Set a lower y-limit for better visibility
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/scores_grouped_by_algo.png")
+    plt.close()  
+    
+def plot_total_score_bar_chart(scores, dir_name, title=''):
+    """
+    Plots a bar chart of the total score.
+    
+    Args:
+        scores (dict): A dictionary of agent scores.
+    """
+    total_score = sum(scores.values())
+    
+    plt.figure(figsize=(8, 6))
+    ax = sns.barplot(x=['Total Score'], y=[total_score], palette='viridis', hue=['Total Score'], legend=False)
+    
+    # Add labels on the bar
+    ax.bar_label(ax.containers[0], fmt='%.0f', padding=3)
+
+    plt.title('Total Score Across All Agents', fontsize=16)
+    plt.ylabel('Score', fontsize=12)
+    plt.xlabel('')
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/scores_total.png")
+    plt.close()    
+
+def plot_score_metrics_bar_chart(scores, metrics, dir_name, title=''):
+    """
+    Plots a bar chart of scores for grouped by algorithm.
+    
+    Args:
+        scores (dict): A dictionary of agent scores.
+        metrics (dict): A dictionary of agent metrics.
+    """
+    df_scores = pd.DataFrame(scores.items(), columns=['Agent', 'Score'])
+    df_scores = df_scores.sort_values(by='Score', ascending=True)
+    # Get the ordered list of agents for the y-axis labels
+    agent_order = df_scores['Agent'].tolist()
+    df_metrics = pd.DataFrame(metrics.items(), columns=['Agent', 'Metrics'])
+
+    # Convert the dictionary to a DataFrame suitable for plotting
+    # The data is in a "wide" format, so we need to "melt" it to a "long" format for seaborn
+    df_metrics = pd.DataFrame(metrics).T.reset_index()
+    df_metrics = df_metrics.rename(columns={'index': 'Agent'})
+    df_long = pd.melt(df_metrics, id_vars=['Agent'], var_name='Metric', value_name='Value')
+
+    # Merge the metrics data with the scores data
+    df_merged = pd.merge(df_long, df_scores, on='Agent')
+
+    # Sort the merged DataFrame by the scores in descending order
+    df_merged = df_merged.sort_values(by='Score', ascending=False)
+
+    # Create a list of formatted labels for the y-axis
+    y_labels = []
+    for agent in agent_order:
+        score = df_scores[df_scores['Agent'] == agent]['Score'].iloc[0]
+
+        # Format the agent name (e.g., A2C_quick -> A2C quick)
+        formatted_name = agent.replace('_', ' ')
+
+        # Create the two-line label string
+        y_labels.append(f'{formatted_name}\nscore: {score}')
+
+        # Create the grouped bar chart, ordering agents by score
+        plt.figure(figsize=(14, 8))
+        ax = sns.barplot(x='Value', y='Agent', hue='Metric', data=df_merged, order=agent_order, palette='Paired')
+
+    # Set the x-axis limits
+    ax.set_xlim(0.65, 1.0)
+
+    # Apply the custom y-axis labels
+    ax.set_yticklabels(y_labels)
+
+    # Add percentage labels at the end of each bar
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.1f%%', padding=5, labels=[f'{val:.1%}' for val in container.datavalues], fontsize=8)
+
+    # Customize the plot
+    plt.title('Agent Performance Metrics (Ordered by Score)')
+    plt.xlabel('Value')
+    plt.ylabel('Agent & Score')
+    ax.legend(title='Metric', loc='lower right')
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/metrics_and_scores.png")
+    plt.close()  
+
+
+def plot_predictions_over_time(data, agents_to_plot, dir_name, title=''):
+    """
+    Plots agent predictions against ground truth over time.
+    
+    Args:
+        data (dict): The complete evaluation data.
+        agents_to_plot (list): A list of agent names to include in the plot.
+    """
+    df_predictions = pd.DataFrame(data['predicted']).melt(
+        var_name='Agent', value_name='Prediction'
+    )
+    df_predictions['Time Step'] = df_predictions.index
+    
+    df_ground_truth = pd.DataFrame({'Time Step': np.arange(len(data['ground_truth'])),
+                                    'Ground Truth': data['ground_truth']})
+
+    plt.figure(figsize=(15, 8))
+    
+    # Create the prediction line plot for the selected agents
+    for agent in agents_to_plot:
+        sns.lineplot(
+            x='Time Step',
+            y='Prediction',
+            data=df_predictions[df_predictions['Agent'] == agent],
+            label=f'{agent} Prediction',
+            linestyle='--'
+        )
+    
+    # Create the ground truth line plot
+    sns.lineplot(
+        x='Time Step',
+        y='Ground Truth',
+        data=df_ground_truth,
+        color='black',
+        linewidth=2,
+        label='Ground Truth'
+    )
+
+    # Find where the ground truth changes and add vertical lines
+    ground_truth_array = np.array(data['ground_truth'])
+    change_points = np.where(ground_truth_array[:-1] != ground_truth_array[1:])[0]
+    
+    for cp in change_points:
+        plt.axvline(x=cp + 1, color='red', linestyle='--', linewidth=1)
+
+    plt.title('Agent Predictions vs. Ground Truth Over Time', fontsize=16)
+    plt.xlabel('Time Step', fontsize=12)
+    plt.ylabel('Prediction (0=Normal, 1=Attack)', fontsize=12)
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_fn_or_fp_linear_chart(data, is_fn=True):
+    """
+    Plots a linear chart for False Negatives or False Positives for the top 5 agents.
+    
+    Args:
+        data (dict): The complete evaluation data with 'predicted' and 'ground_truth'.
+        is_fn (bool): If True, plots False Negatives. If False, plots False Positives.
+    """
+    metric_type = 'FN' if is_fn else 'FP'
+    
+    # Calculate FP/FN for each agent
+    agent_metrics = {}
+    ground_truth = np.array(data['ground_truth'])
+    
+    for agent_name, predictions in data['predicted'].items():
+        predictions = np.array(predictions)
+        
+        # Calculate True Positive (TP), False Positive (FP), False Negative (FN), and True Negative (TN)
+        tp = np.sum((predictions == 1) & (ground_truth == 1))
+        fp = np.sum((predictions == 1) & (ground_truth == 0))
+        fn = np.sum((predictions == 0) & (ground_truth == 1))
+        tn = np.sum((predictions == 0) & (ground_truth == 0))
+        
+        if is_fn:
+            agent_metrics[agent_name] = fn
+        else:
+            agent_metrics[agent_name] = fp
+
+    # Sort agents and select the top 5
+    sorted_agents = sorted(agent_metrics.items(), key=lambda item: item[1], reverse=True)
+    top_5_agents = {agent[0]: agent[1] for agent in sorted_agents[:5]}
+
+    plt.figure(figsize=(15, 8))
+    ax = plt.gca()
+    
+    # Define colors for the agents
+    agent_colors = plt.cm.get_cmap('viridis', len(top_5_agents))
+    
+    # Plot bars for the top 5 agents
+    sns.barplot(x=list(top_5_agents.keys()), y=list(top_5_agents.values()), palette=agent_colors, ax=ax)
+    
+    # Add labels on the bars
+    for i, (agent, metric_value) in enumerate(top_5_agents.items()):
+        ax.text(i, metric_value, f'{metric_value}', ha='center', va='bottom', fontsize=10)
+    
+    plt.title(f'Top 5 Agents with Most {metric_type}s', fontsize=16)
+    plt.xlabel('Agent', fontsize=12)
+    plt.ylabel(f'Number of {metric_type}s', fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.show()
+
+
 
 def plot_agent_action_accuracy(indicators, dir_name):
     """Plot agent accuracy per action
@@ -56,6 +308,8 @@ def plot_agent_action_accuracy(indicators, dir_name):
     
     plt.savefig(f"{dir_name}/accuracy.png")
     plt.close()
+
+#END new from colab
 
 def plot_agent_cumulative_rewards(indicators, dir_name, title=''):
     """plot the agent cumulative reward for each episode
@@ -85,7 +339,7 @@ def plot_agent_cumulative_rewards(indicators, dir_name, title=''):
     plt.savefig(f"{dir_name}/rewards.png")
     plt.close()    
 
-def plot_agent_execution_confusion_matrix(indicators, dir_name):
+def plot_agent_execution_confusion_matrix(indicators, dir_name, must_print = True, title=''):
     """print confusion matrix
 
     Args:
@@ -108,12 +362,14 @@ def plot_agent_execution_confusion_matrix(indicators, dir_name):
         ground_truth = [item['action_choosen'] if item['action_correct'] else 1 - item['action_choosen'] for item in all_steps_status]
     try:
         confusion_matrix = metrics.confusion_matrix(ground_truth, predicted)
-        cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix)
-        cm_display.plot()
-        plt.savefig(f"{dir_name}/matrix.png")
-        plt.close()
+        if must_print:
+            cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix)
+            cm_display.plot()
+            plt.savefig(f"{dir_name}/matrix.png")
+            plt.close()
+        return confusion_matrix
     except Exception as e: 
-        error(Fore.RED+f"Error!\n{e}\{traceback.format_exc()}\n"+Fore.WHITE)
+        error(Fore.RED+f"Error!\n{e}: {traceback.format_exc()}\n"+Fore.WHITE)
     
 def plot_agent_execution_statuses(indicators, dir_name, title=''):
     """print all registered traffic normal or attack
@@ -135,7 +391,7 @@ def plot_agent_execution_statuses(indicators, dir_name, title=''):
     steps = [item['step'] for item in all_steps_status]
     bytes = [item['bytes'] for item in all_steps_status]
     packets = [item['packets'] for item in all_steps_status]
-    predictions = [item['action_correct'] for item in all_steps_status]
+    predictions = [item['action_choosen'] for item in all_steps_status]
     types = [item['id'] for item in all_steps_status]
     
     # Create subplots for different indicators
@@ -312,9 +568,10 @@ def plot_enviroment_execution_statutes(statutes, dir_name, title=''):
     # Extracting indicators to plot
     episodes = range(1,len(statutes)+1)
     packets = [item['packets'] for item in statutes]
-    packets_varation = [item['variation_packet'] for item in statutes]
+    #TODO adapt to global_state
+    packets_varation = [item['packetsPercentageChange'] for item in statutes]
     bytes = [item['bytes'] for item in statutes]
-    bytes_varation = [item['variation_byte'] for item in statutes]
+    bytes_varation = [item['packetsPercentageChange'] for item in statutes]
     ids = [item['id'] for item in statutes] #*100 to view the line
 
     # Create subplots for different indicators
@@ -405,18 +662,24 @@ def get_colors_for_predictions(items):
     return colors
  
 def plot_test_confusion_matrix(dir_name,ground_truth, predicted, agent):
-    try:
-        confusion_matrix = metrics.confusion_matrix(ground_truth, predicted)
-        if isinstance(ground_truth[0], int):
-            display_labels = None
-        else:
-            display_labels = [0, 1]
-        cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = display_labels)
-        cm_display.plot()
-        plt.savefig(f"{dir_name}/{agent}_matrix.png")
-        plt.close()  
-    except Exception as e: 
-        error(Fore.RED+f"Error!\n{e}\{traceback.format_exc()}\n"+Fore.WHITE)
+    """
+    print confusion matrix
+    Args:
+        dir_name (_type_): _description_
+        ground_truth (_type_): _description_
+        predicted (_type_): _description_
+        agent (_type_): _description_
+    """
+    confusion_matrix = metrics.confusion_matrix(ground_truth, predicted)
+    if isinstance(ground_truth[0], int):
+        display_labels = None
+    else:
+        display_labels = [0, 1]
+    cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = display_labels)
+    cm_display.plot()
+    plt.savefig(f"{dir_name}/{agent}_matrix.png")
+    plt.close()  
+
 
 #TODO: remove this function, not usefull, because now we have plot_cumulative_reward and 
 # the status traffic is the same for all agents
@@ -521,6 +784,7 @@ def plot_combined_performance_over_time(
         ylabel (str): Label for the y-axis.
     """
    # Extract data for plotting    
+   # TODO: verify that all metrics have the same length
     episodes = np.arange(1, len(metrics["accuracy"]) + 1)
     recall_scores = metrics["recall"]
     accuracy_scores = metrics["accuracy"]
@@ -707,22 +971,6 @@ def filter_labels_segments_empty(pr_normalized, labels):
             filtered_segments.append([segment])  # Treat as a single-element array
     return filtered_labels, filtered_segments
 
-# def indicators_to_net_metrics(indicators):
-#     # Define traffic types and initialize data_traffic dictionary
-#     traffic_types = ['none', 'ping', 'udp', 'tcp']
-#     data_traffic = {key: {'p_r': [], 'p_t': [], 'b_r': [], 'b_t': []} for key in traffic_types}
-
-#     # Iterate through the data list and populate data_traffic
-#     for entry in indicators:
-#         traffic_type_index = entry["traffic_type"]
-#         traffic_key = traffic_types[traffic_type_index]
-
-#         data_traffic[traffic_key]['p_r'].append(entry["packets_received"])
-#         data_traffic[traffic_key]['p_t'].append(entry["packets_transmitted"])
-#         data_traffic[traffic_key]['b_r'].append(entry["bytes_received"])
-#         data_traffic[traffic_key]['b_t'].append(entry["bytes_transmitted"])
-#     return data_traffic
-
 def plot_net_metrics(data, dir_name, title=''):
     plt.figure(figsize=(12, 6))
 
@@ -768,6 +1016,13 @@ def plot_train_types(train_types, training_execution_time, dir_name):
     # Save figure
     plt.savefig(f"{dir_name}/train_types.png")
     plt.close()    
+  
+
+from utility.my_files import find_latest_execution, read_all_data_from_execution
+from utility.params import  read_config_file
+from utility.my_log import information, error
+import traceback
+from colorama import Fore
     
 if __name__ == '__main__':
 
@@ -776,7 +1031,6 @@ if __name__ == '__main__':
     # stats = collect_mystatistics(net)
     # plot_mystatistics(stats)
     # lines=[(3,9,3),(8,6,4),(8,8,2),(5,3,1),(3,9,5),(8,6,7),(8,8.8),(5,3,9)]
-    # plot_all_lines_and_save_png(lines, "title", ['a', 'b','c'],"prova")
     
     config,config_dict = read_config_file('config.yaml')
     #test plot traffic from indicators previously recorded

@@ -1,7 +1,7 @@
 # my_files.py
 import shutil
 import os, time, yaml, json as js, orjson, numpy as np, pwd
-from utility.my_log import set_log_level,set_log_file, information, debug, error, notify_client   
+from utility.my_log import set_log_level, information, error   
 from utility.params import read_config_file
 
 def drop_privileges(username: str):
@@ -90,16 +90,17 @@ def save_data_to_file(data, dir_name, file_name="data"):
         # Converts np.float32 or np.float64 to regular float
         if isinstance(obj, (np.float32, np.float64)):
             return float(obj)
+        if isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
         if isinstance(obj, (np.ndarray)):
             return list(obj)
         raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
     
-    #drop_privileges("salvo")
-    
+   
     with open(f"{dir_name}/{file_name}.json", 'w') as f:
         js.dump(data, f, default=convert_np) 
     
-    #regain_root()
+
     
 def read_csv_file(csv_file):
     """
@@ -112,8 +113,8 @@ def read_csv_file(csv_file):
     df = pd.read_csv(csv_file)
     return df.to_dict(orient='records')
 
-def read_data_file(file_name:str = '../data' , add_extension_file:bool = True, extension:str = "json"):
-    if add_extension_file:
+def read_data_file(file_name:str = '../data' , extension:str = None):
+    if extension is not None:
         file_name = f"{file_name}.{extension}"
     with open(file_name, 'r') as file:
         data = orjson.loads(file.read()) # faster than this -> data = yaml.safe_load(file)

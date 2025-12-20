@@ -1,12 +1,145 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
 body {
-  background-color: #f9f9f9;
+    font-family: 'Inter', sans-serif;
+    background-color: #f7f9fb;
 }
-h5 {
-  margin-top: 20px;
+
+.config-input {
+    @apply w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out;
 }
-#agentsContainer .agent-block {
-  padding: 10px;
-  margin-bottom: 10px;
-  border: 1px solid #ccc;
-  background-color: #fff;
+
+.config-input[readonly] {
+    @apply bg-gray-100 cursor-not-allowed;
+}
+
+.config-select {
+    @apply w-full p-2 border border-gray-300 rounded-lg bg-white focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out;
+}
+
+.remove-agent-btn svg {
+    transition: transform 0.1s ease-in-out;
+}
+
+.remove-agent-btn:hover svg {
+    transform: scale(1.1);
+}
+
+.trend-icon {
+    display: inline;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0.5rem;
+    /* Spazio tra il testo e l'icona */
+}
+
+.status-icon {
+    display: inline;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0.5rem;
+    /* Spazio tra il testo e l'icona */
+}
+
+
+summary {
+    list-style: none;
+    /* Remove default arrow */
+    position: relative;
+    padding-left: 1.5rem;
+    /* Space for custom icon */
+}
+
+
+summary::before {
+    content: "▶";
+    position: absolute;
+    left: 0;
+    transform: rotate(0deg);
+    transition: transform 0.3s ease;
+}
+
+
+details[open] summary::before {
+    transform: rotate(90deg);
+    content: "▼";
+    /* Open state icon */
+}
+
+details[open] summary {
+    color: #a8acb6;
+    /* Change color when open */
+}
+
+/*  */
+
+.blink_me {
+    animation: blinker 1s linear infinite;
+}
+
+@keyframes blinker {
+    50% {
+        opacity: 0;
+    }
+}
+
+
+ul#host-task-data li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+ul#host-task-data li span {
+    display: inline-block;
+    text-align: center;
+}
+
+.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 5px;
+}
+
+/* Gauce chart style */
+.gauge-container {
+    height: 90px;
+}
+
+.gauge-svg {
+    width: 110px;
+}
+
+.gauge-bg {
+    fill: none;
+    stroke: #e0e0e0;
+    stroke-width: 20;
+}
+
+.gauge-fill {
+    fill: none;
+    stroke: #4CAF50;
+    stroke-width: 20;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.8s ease, stroke 0.3s ease;
+}
+
+.gauge-text {
+    transform: translate(30%, -110%);
+    font-size: 22px;
+    font-weight: bold;
+    color: #333;
+    width: 100px;
+}
+
+.gauge-label {
+    transform: translate(6%, -200%);
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    width: 100px;
 }

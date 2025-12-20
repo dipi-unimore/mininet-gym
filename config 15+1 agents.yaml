@@ -1,0 +1,285 @@
+training_directory: _training
+server_user: salvo
+random_seed: 14
+test_episodes: 100 #Number of episodes to test the agent
+env_params:
+  threshold:
+    packets: 1000 #2880 # packets  to determinate an attack
+    var_packets: 50 #percentage packet variation to determinate an attack
+    bytes: 1000000 #4230000 # bytes  to determinate an attack
+    var_bytes: 30 #percentage byte variation to determinate an attack
+  show_normal_traffic: False
+  gym_type: classification_from_dataset #_from_dataset #How to read traffic: [classification_from_dataset, classification, attacks, attacks_from_dataset]. Attacks works only with main_with_attack.py
+  attack_probability: 0.005 #max 0.5; likelihood that one host attacks. necessary only with gym_type=attacks
+  csv_file: traffic.csv #necessary only if gym_type: classification_from_dataset and for agent supervised
+  net_params:
+    traffic_types: ["none", "ping",  "udp" , "tcp"] #labels normal traffic generator
+    num_hosts: 10
+    num_switches: 1
+    num_iot: 1
+    controller:
+      ip: 192.168.1.107 #226 on ubuntu
+      port: 6633
+      usr: admin
+      pwd: admin
+  n_bins: 4  
+  number_of_actions: 4 #4 for classification, 2 for attack at the moment
+  max_steps: 80 
+  steps_min_percentage: 0.9
+  accuracy_min: 0.9 #to return done during train related to steps_min_percentage
+# === Agents Configuration ===
+agents:
+  - name: "Supervised_1"
+    algorithm: "Supervised"
+    enabled: true
+
+  # --- Q-learning ---
+  # - name: "Q-learning_quick"
+  #   algorithm: "Q-learning"
+  #   enabled: true
+  #   skip_learn: false
+  #   show_action: false
+  #   load: false
+  #   load_dir: null
+  #   save: true
+  #   learning_rate: 0.2
+  #   discount_factor: 0.3
+  #   exploration_rate: 1.0
+  #   exploration_decay: 0.995
+  #   episodes: 100
+
+  # - name: "Q-learning_slow"
+  #   algorithm: "Q-learning"
+  #   enabled: true
+  #   skip_learn: false
+  #   show_action: false
+  #   load: false
+  #   load_dir: null
+  #   save: true
+  #   learning_rate: 0.01
+  #   discount_factor: 0.9
+  #   exploration_rate: 1.0
+  #   exploration_decay: 0.9995
+  #   episodes: 100
+
+  # - name: "Q-learning_balanced"
+  #   algorithm: "Q-learning"
+  #   enabled: true
+  #   skip_learn: false
+  #   show_action: false
+  #   load: false
+  #   load_dir: null
+  #   save: true
+  #   learning_rate: 0.05
+  #   discount_factor: 0.5
+  #   exploration_rate: 1.0
+  #   exploration_decay: 0.999
+  #   episodes: 100
+
+  # # --- SARSA ---
+  # - name: "Sarsa_quick"
+  #   algorithm: "Sarsa"
+  #   enabled: true
+  #   skip_learn: false
+  #   show_action: false
+  #   load: false
+  #   load_dir: null
+  #   save: true
+  #   learning_rate: 0.2
+  #   discount_factor: 0.3
+  #   exploration_rate: 1.0
+  #   exploration_decay: 0.995
+  #   episodes: 100
+
+  # - name: "Sarsa_slow"
+  #   algorithm: "Sarsa"
+  #   enabled: true
+  #   skip_learn: false
+  #   show_action: false
+  #   load: false
+  #   load_dir: null
+  #   save: true
+  #   learning_rate: 0.01
+  #   discount_factor: 0.9
+  #   exploration_rate: 1.0
+  #   exploration_decay: 0.9995
+  #   episodes: 100
+
+  # - name: "Sarsa_balanced"
+  #   algorithm: "Sarsa"
+  #   enabled: true
+  #   skip_learn: false
+  #   show_action: false
+  #   load: false
+  #   load_dir: null
+  #   save: true
+  #   learning_rate: 0.05
+  #   discount_factor: 0.5
+  #   exploration_rate: 1.0
+  #   exploration_decay: 0.999
+  #   episodes: 100
+
+  # --- DQN ---
+  - name: "DQN_quick"
+    algorithm: "DQN"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.005
+    gamma: 0.3
+    exploration_fraction: 0.1
+    exploration_initial_eps: 1.0
+    exploration_final_eps: 0.1
+    buffer_size: 5000
+    batch_size: 16
+    target_update_interval: 80
+    learning_starts: 20
+    episodes: 100
+
+  - name: "DQN_slow"
+    algorithm: "DQN"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.0003
+    gamma: 0.95
+    exploration_fraction: 0.3
+    exploration_initial_eps: 1.0
+    exploration_final_eps: 0.05
+    buffer_size: 20000
+    batch_size: 16
+    target_update_interval: 80
+    learning_starts: 20
+    episodes: 100
+
+  - name: "DQN_balanced"
+    algorithm: "DQN"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.001
+    gamma: 0.9
+    exploration_fraction: 0.2
+    exploration_initial_eps: 1.0
+    exploration_final_eps: 0.05
+    buffer_size: 10000
+    batch_size: 16
+    target_update_interval: 80
+    learning_starts: 20
+    episodes: 100
+
+  # --- PPO ---
+  - name: "PPO_quick"
+    algorithm: "PPO"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.005
+    gamma: 0.3
+    ent_coef: 0.1
+    n_steps: 20
+    batch_size: 1
+    episodes: 100
+
+  - name: "PPO_slow"
+    algorithm: "PPO"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.0003
+    gamma: 0.95
+    ent_coef: 0.01
+    n_steps: 40
+    batch_size: 1
+    episodes: 100
+
+  - name: "PPO_balanced"
+    algorithm: "PPO"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.001
+    gamma: 0.9
+    ent_coef: 0.05
+    n_steps: 20
+    batch_size: 1
+    episodes: 100
+
+  # --- A2C ---
+  - name: "A2C_quick"
+    algorithm: "A2C"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.005
+    gamma: 0.3
+    ent_coef: 0.1
+    n_steps: 20
+    episodes: 100
+
+  - name: "A2C_slow"
+    algorithm: "A2C"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.0003
+    gamma: 0.95
+    ent_coef: 0.01
+    n_steps: 40
+    episodes: 100
+
+  - name: "A2C_balanced"
+    algorithm: "A2C"
+    enabled: true
+    progress_bar: false
+    skip_learn: false
+    show_action: false
+    load: false
+    load_dir: null
+    save: true
+    net_arch: [8, 8]
+    learning_rate: 0.001
+    gamma: 0.9
+    ent_coef: 0.05
+    n_steps: 20
+    episodes: 100

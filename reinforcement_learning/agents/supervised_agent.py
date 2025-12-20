@@ -7,46 +7,60 @@ from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
+from utility.constants import ATTACKS, ATTACKS_FROM_DATASET, CLASSIFICATION_FROM_DATASET, CLASSIFICATION, GYM_TYPE, MARL_ATTACKS, MARL_ATTACKS_FROM_DATASET
 from utility.my_files import read_data_file
 
 class SupervisedAgent:
-    def __init__(self, csv_file = None): 
+    def __init__(self, gym_type, json_file = None):
 
-        if csv_file is None:
-            X, y = self.init_attack_detection_env()
+        if json_file is None :
+            raise ValueError("A json_file must be provided for the SupervisedAgent.")   
+    
+        if gym_type in [GYM_TYPE[ATTACKS_FROM_DATASET], GYM_TYPE[ATTACKS]]:
+            X, y = self.init_attack_detection_env(json_file)
+        elif gym_type in [GYM_TYPE[CLASSIFICATION_FROM_DATASET], GYM_TYPE[CLASSIFICATION]]:
+            X, y = self.init_traffic_classification_env(json_file)
+        elif gym_type in [GYM_TYPE[MARL_ATTACKS_FROM_DATASET], GYM_TYPE[MARL_ATTACKS]]:
+            X, y = self.init_marl_attack_env(json_file)
         else:
-            X, y = self.init_traffic_classification_env(csv_file)
+            raise ValueError(f"Unsupported gym_type for SupervisedAgent: {gym_type}")
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
 
         self.clf = DecisionTreeClassifier(max_depth=4)
         self.clf.fit(X_train, y_train)
-        self.row_to_predict = X_test.iloc[[110]]
+        
         y_pred = self.clf.predict(X_test)
         
         self.accuracy = accuracy_score(y_test, y_pred)
         self.precision, self.recall, self.fscore, _ = precision_recall_fscore_support(y_test, y_pred, average='macro')
 
-    def init_traffic_classification_env(self, csv_file):
-        df = pd.read_csv(csv_file)
+   
+    def init_traffic_classification_env(self, json_file):
+        statuses = read_data_file(json_file)
+        df = pd.DataFrame(list(statuses))
         df.head()
         #df.info()
 
-        del df['i_src_host']
-        del df['i_dst_host']
+        del df['hostStatusesStructured']
+        del df['status']
+        del df['src_host']
+        del df['dst_host']
+
         df = df.dropna()
 
         X = df.copy()
-        y = X.pop('traffic_type')
+        y = X.pop('id')
         return X,y
-
-    def init_attack_detection_env(self):
-        statuses = read_data_file('statuses')
+        
+    def init_attack_detection_env(self, json_file):
+        statuses = read_data_file(json_file)
         df = pd.DataFrame(list(statuses))
         df.head()
         #df.info()
         df['is_attack'] = (df['id'] >= 2).astype(int)
 
-        del df['text']
+        del df['hostStatusesStructured']
+        del df['status']
         del df['id']
 
         df = df.dropna()
@@ -61,10 +75,10 @@ class SupervisedAgent:
         receives normal state and predicts action
         """   
         row_data = pd.DataFrame({
-            'packets_received': [state[0]],
-            'bytes_received': [state[2]],
-            'packets_transmitted': [state[1]],
-            'bytes_transmitted': [state[3]]
+            'packets': [state[0]],
+            'bytes': [state[2]],
+            'packetsPercentageChange': [state[1]],
+            'bytesPercentageChange': [state[3]]
         })
         row_data_df = pd.DataFrame(row_data, index=[0])
 
@@ -74,11 +88,12 @@ class SupervisedAgent:
         """
         receives normal state and predicts action
         """   
+        #TODO adapt to global_state
         row_data = pd.DataFrame({
-            'variation_packet': [state[1]],
-            'variation_byte': [state[3]],
             'packets': [state[0]],
-            'bytes': [state[2]]
+            'bytes': [state[2]],
+            'packetsPercentageChange': [state[1]],
+            'bytesPercentageChange': [state[3]]
         })
         row_data_df = pd.DataFrame(row_data, index=[0])
         

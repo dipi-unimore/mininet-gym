@@ -1,16 +1,18 @@
 import gymnasium as gym
 import time, random, os, csv, orjson
 from collections import Counter
+from utility import constants
 import numpy as np
 
-from reinforcement_learning.network_env_attack_detect import NetworkEnvAttackDetect
-from reinforcement_learning.network_env_classification import NetworkEnvClassification
+from reinforcement_learning.attack_detect.network_env_attack_detect import NetworkEnvAttackDetect
+from reinforcement_learning.classification.network_env_classification import NetworkEnvClassification
 from reinforcement_learning.network_env import NetworkEnv
 from reinforcement_learning.qlearning_agent import QLearningAgent
-from reinforcement_learning.adversarial_agent import  generate_random_traffic, generate_traffic
+from reinforcement_learning.adversarial_agent import  generate_random_traffic, generate_traffic, test_dos_attack
 from utility.my_log import set_log_level, information, debug, error, notify_client
+from utility.network_configurator import create_network, test_link_actions
 from utility.params import Params, read_config_file
-from utility.my_statistics import plot_agent_execution_confusion_matrix, plot_radar_chart, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, read_data_file, plot_net_metrics
+from utility.my_statistics import plot_agent_execution_confusion_matrix, plot_radar_chart, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, plot_net_metrics
 from utility.my_files import read_data_file, save_data_to_file
 import numpy as np
 import pandas as pd
@@ -125,7 +127,7 @@ def create_network_from_config():
         random.seed(config.random_seed)
         
     # Step 1: Create Network
-    if config.env_params.gym_type.startswith("attacks"):
+    if config.env_params.gym_type.startswith(constants.ATTACKS):
         information("Creating network and environment for attack detection")
         net_env = NetworkEnvAttackDetect(config.env_params, config.server_user)
     else:
@@ -135,7 +137,7 @@ def create_network_from_config():
 
 def create_traffic_classification_env( config, net_env):        
     #test create traffic  
-    traffic = test_create_traffic_no_synchronize(net_env, config.test_episodes)
+    traffic = test_create_traffic_no_synchronize(net_env, config.env_params.test_episodes)
     keys = list(traffic[0].keys())
     with open(config.env_params.csv_file, 'w', newline='') as output_file:
         dict_writer = csv.DictWriter(output_file, keys)
@@ -232,39 +234,51 @@ def test_deep_learning(config, net_env):
         if dones:
             break
 
-def test_results_from_saved_data(env_type, execution_dir, agent_name):
+def test_results_from_saved_data(env_type, execution_dir, agent_name, print_indicators=True, print_metrics=True, print_comparisons=True):
     directory_name = f"_training/{env_type}/{execution_dir}/{agent_name}"
     if not os.path.exists(directory_name):
         error(f"Directory {directory_name} does not exist")
         return
-    information(f"Testing results from saved data in {directory_name}")
+    #information(f"Testing results from saved data in {directory_name}")
     data = read_data_file(directory_name + "/data")
     if data is None:
         error(f"Data file not found in {directory_name}")
         return
     if 'train_indicators' in data:
         #information(f"Train metrics: {data['train_indicators']}")
-        plot_agent_execution_confusion_matrix(data['train_indicators'], directory_name)
+        data["train_confusion_matrix"] = plot_agent_execution_confusion_matrix(data['train_indicators'], directory_name, must_print = print_indicators)
     if 'train_metrics' in data:
         #information(f"Train metrics: {data['train_metrics']}")
         #plot_metrics(data['train_metrics'], directory_name, agent_name + " Train metrics") 
-        plot_combined_performance_over_time(data['train_metrics'], directory_name, agent_name + " Combined performance over time")
-        return data['train_metrics']  
+        if print_metrics:
+            plot_combined_performance_over_time(data['train_metrics'], directory_name, agent_name + " Combined performance over time")
+        if print_comparisons:
+            plot_comparison_bar_charts(directory_name, agents_metrics)
+            plot_radar_chart(directory_name, agents_metrics)            
+    return data 
 
 if __name__ == '__main__':
     set_log_level('info')
+    config,config_dict = read_config_file('config.yaml')     
+    test_link_actions(config)
     
-    testResultsFromSavedData = True
+    testResultsFromSavedData = False
     createTrafficClassificationEnv = False
     createCSVTrafficFromJson = False
     testCSVTrafficWithQLearning = False
     deepLearning = False
+    dos_attack = True
+    
+    if dos_attack:
+        net = create_network(config.env_params.net_params, server_user = config.server_user)   
+        test_dos_attack(net)
+        exit(0)
     
     if testResultsFromSavedData:
         #test_results_from_saved_data('classification_from_dataset','20250625-121343_1_10_1','Q-learning_1')
         agents_metrics=[]
-        env_type = 'attacks'
-        execution_dir = '20250307-095840_1_10_1'
+        env_type = constants.ATTACKS_FROM_DATASET #'classification_from_dataset'       
+        execution_dir = '20250709-105720_1_10_1'#'20250708-190552_1_10_1' 
         directory_name = f"_training/{env_type}/{execution_dir}"
         if not os.path.exists(directory_name):
             error(f"Directory {directory_name} does not exist")
@@ -272,10 +286,30 @@ if __name__ == '__main__':
         #read directory to find the agents trained ( the agent are all directory contained expet Test)
         agents = [f for f in os.listdir(directory_name) if os.path.isdir(os.path.join(directory_name, f)) and not f.startswith('TEST')] 
         agents_metrics = defaultdict(list)
+        agents_indicators = defaultdict(list)
+        agents_confusion_matrix = defaultdict(list)
+
+
+        data_agents = {}
         for agent in agents:
-            agents_metrics[agent]=test_results_from_saved_data(env_type,execution_dir,agent)
-        plot_comparison_bar_charts(directory_name, agents_metrics)
-        plot_radar_chart(directory_name, agents_metrics)
+            data=test_results_from_saved_data(env_type,execution_dir,agent, print_indicators = False, print_metrics= False, print_comparisons = False)
+            agents_metrics[agent]=data["train_metrics"]
+            agents_indicators[agent]=data["train_indicators"]
+            agents_confusion_matrix[agent]=data["train_confusion_matrix"]
+            TN, FP, FN, TP = data["train_confusion_matrix"][0, 0], data["train_confusion_matrix"][0, 1], data["train_confusion_matrix"][1, 0], data["train_confusion_matrix"][1, 1]
+            #print(f"{agent} TN={TN}, FP={FP}, FN={FN}, TP={TP}")
+            AA,AF,AP,AR =np.average(data["train_metrics"]["accuracy"]),np.average(data["train_metrics"]["f1_score"]), np.average(data["train_metrics"]["precision"]), np.average(data["train_metrics"]["recall"])
+            print(f"{agent} avarage accuracy={AA}, f1_score={AF}, precision={AP}, recall={AR}")
+            data_agents[agent] = {
+                #'TN': TN, 'FP': FP, 'FN': FN, 'TP': TP,
+                'confusion_matrix' : data["train_confusion_matrix"],
+                'avg_accuracy': AA, 'avg_f1_score': AF, 'avg_precision': AP, 'avg_recall': AR,
+                'accuracy': data["train_metrics"]["accuracy"],
+                'f1_score': data["train_metrics"]["f1_score"],
+                'precision': data["train_metrics"]["precision"],
+                'recall': data["train_metrics"]["recall"]
+            }
+        save_data_to_file(data_agents, directory_name , file_name="training_agents")
         exit(0)
     
     config,net_env = create_network_from_config()     

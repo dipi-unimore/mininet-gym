@@ -1,0 +1,115 @@
+training_directory: _training
+server_user: salvo
+random_seed: 14
+test_episodes: 100 #Number of episodes to test the agent
+env_params:
+  threshold:
+    packets: 1000 #2880 # packets  to determinate an attack
+    var_packets: 50 #percentage packet variation to determinate an attack
+    bytes: 1000000 #4230000 # bytes  to determinate an attack
+    var_bytes: 30 #percentage byte variation to determinate an attack
+  show_normal_traffic: False
+  gym_type: classification_from_dataset #_from_dataset #How to read traffic: [classification_from_dataset, classification, attacks, attacks_from_dataset]. Attacks works only with main_with_attack.py
+  attack_probability: 0.005 #max 0.5; likelihood that one host attacks. necessary only with gym_type=attacks
+  csv_file: traffic.csv #necessary only if gym_type: classification_from_dataset and for agent supervised
+  net_params:
+    traffic_types: ["none", "ping",  "udp" , "tcp"] #labels normal traffic generator
+    num_hosts: 10
+    num_switches: 1
+    num_iot: 1
+    controller:
+      ip: 192.168.1.107 #226 on ubuntu
+      port: 6633
+      usr: admin
+      pwd: admin
+  n_bins: 4  
+  number_of_actions: 4 #4 for classification, 2 for attack at the moment
+  max_steps: 80 
+  steps_min_percentage: 0.9
+  accuracy_min: 0.9 #to return done during train related to steps_min_percentage
+agents:
+  - name: 'Supervised_1'
+    algorithm: 'Supervised'
+    enabled: True
+  - name: 'Q-learning_1'
+    algorithm: 'Q-learning'
+    enabled: True
+    skip_learn: False #Skip learning phase, but need loading activated with a model just trained
+    show_action: False  
+    load: False
+    load_dir: None #If is None, it will use the last save with the same network parameters
+    save: True
+    learning_rate: 0.05
+    discount_factor: 0.5
+    exploration_rate: 1
+    exploration_decay: 0.9995
+    episodes : 100
+  - name: 'DQN_1'  
+    algorithm: 'DQN'
+    enabled: False
+    progress_bar: False
+    skip_learn: True #Skip learning phase, but need loading activated with a model just trained
+    show_action: False  
+    load: False
+    load_dir: None #If is None, it will use the last save with the same network parameters
+    save: True 
+    net_arch: [8,8]      
+    learning_rate: 0.001 #lowering it (e.g., 0.001 or 0.0005) to smooth out learning. A lower learning rate is typical in stable, long-term training phases, allowing the model to make finer adjustments
+    #The step size used when updating the neural network weights during training. A value too high can cause instability. A value too low can lead to very slow learning. Common values: 1e-3, 1e-4
+    gamma: 0.1 #discount_factor. Set this closer to 1 if you want to encourage long-term reward optimization. A very low gamma value suggests the model is only considering immediate rewards.
+    #Start around 0.9–0.99
+    exploration_fraction: 0.2 #The fraction of training during which the agent transitions from full exploration (random actions) to full exploitation (using the learned Q-values). 
+    #Example: if exploration_fraction=0.1 and total_timesteps=10000, then: first 1000 steps → random actions (exploration) afterward → gradually use learned policy
+    exploration_initial_eps: 1.0 #sets the starting exploration rate (e.g., 1.0 for full exploration)
+    exploration_final_eps: 0.05      # the minimum exploration rate at the end of the decay (e.g., 0.01 or 0.1).
+    #Slower decay can help with exploration while learning 
+    buffer_size: 10000 #The size of the replay buffer (experience replay memory). DQN stores past experiences here and samples random batches for training. Too small: the agent forgets too quickly. Too big: long memory but more RAM usage.
+    batch_size: 1 #
+    target_update_interval: 80  #80 = 1 episode. How often the target network is updated. DQN uses a target network to stabilize training. This copies the main Q-network every target_update_interval steps.
+    learning_starts: 20 #The number of steps before training starts. Before this number of steps, DQN only collects experience (by exploring). After this, it starts updating the Q-network using data from the buffer.
+    episodes : 100   # Increase steps to improve batch learning    
+  - name: 'PPO_1'  
+    algorithm: 'PPO'
+    enabled: False
+    progress_bar: False
+    skip_learn: True #Skip learning phase, but need loading activated with a model just trained
+    show_action: False  
+    load: False
+    load_dir: None #If is None, it will use the last save with the same network parameters
+    save: True  
+    net_arch: [8,8]         
+    learning_rate: 0.001 #Use a lower rate initially, such as 0.0003, to handle larger fluctuations in rewards.
+    gamma: 0.99 #Start with 0.95–0.99 to balance between immediate and future rewards. gamma=0 on PPO (for example), act as a contextual Multiarmed Bandit
+    ent_coef: 0.01   # Adjusts entropy for exploration. This encourages exploration. A higher ent_coef, like 0.1, can help PPO adapt more gradually.
+    n_steps: 20          # Increase steps to improve batch learning. Number of steps after that show metrics 
+    batch_size: 1          # Suitable for PPO’s minibatch gradient descent
+    episodes : 100   # Increase steps to improve batch learning  
+  - name: 'A2C_1'
+    algorithm: 'A2C'
+    enabled: False
+    progress_bar: False
+    skip_learn: True #Skip learning phase, but need loading activated with a model just trained
+    show_action: False  
+    load: False
+    load_dir: None #If is None, it will use the last save with the same network parameters
+    save: True  
+    net_arch: [8,8]          
+    learning_rate: 0.001 #Similar to PPO, 0.0003 or 0.0007 often works well for A2C.
+    gamma: 0.59 #discount_factor., Higher discount factor for future rewards. Set to 0.9–0.95 to reduce oscillation.
+    ent_coef: 0.1   # Adjusts entropy for exploration. A higher value (e.g., 0.1) can stabilize learning by promoting exploration.
+    n_steps: 20      # The default is 5; a larger value could improve stability
+    episodes : 100   # Increase steps to improve batch learning
+  - name: 'Sarsa'
+    algorithm: 'Sarsa'
+    enabled: False
+    skip_learn: True #Skip learning phase, but need loading activated with a model just trained
+    show_action: False  
+    load: False
+    load_dir: None #If is None, it will use the last save with the same network parameters
+    save: True    
+    learning_rate: 0.5
+    discount_factor: 0.09
+    exploration_rate: 1
+    exploration_decay: 0.9995
+    episodes : 100
+  

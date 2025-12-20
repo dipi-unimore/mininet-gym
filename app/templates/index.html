@@ -1,46 +1,368 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mininet-Gym Interface</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MininetGym Dashboard</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font -->
+    <link href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
-<body>
-  <div class="container mt-4">
-    <h1 class="mb-4">Mininet-Gym Control Panel</h1>
-    <ul class="nav nav-tabs" id="mainTab" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="config-tab" data-bs-toggle="tab" data-bs-target="#config" type="button" role="tab">Configuration</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="training-tab" data-bs-toggle="tab" data-bs-target="#training" type="button" role="tab">Training & Evaluation</button>
-      </li>
-    </ul>
-    <div class="tab-content" id="mainTabContent">
-      <!-- Config Tab -->
-      <div class="tab-pane fade show active p-3" id="config" role="tabpanel">
-        <form id="config-form">
-          <div id="general-config"></div>
-          <div id="env-config"></div>
-          <div id="agents-config"></div>
-          <button type="button" id="addAgent" class="btn btn-outline-secondary mb-3">Add Agent</button>
 
-          <button type="submit" class="btn btn-primary mt-3">Save Configuration</button>
-        </form>
-      </div>
+<body class="min-h-screen p-1 md:p-2">
+    <!-- Header -->
+    <header class="bg-gray-500 shadow-xl rounded-xl p-1 mb-2 sticky top-0 z-10">
+        <div class="flex flex-col md:flex-row justify-between items-center">
+            <h1 class="text-1xl font-extrabold text-red-700"><span class="text-white text-3xl">MininetGym</span> UI
+                Manager</h1>
+            <div class="my-3 md:my-0">
+                <div class="text-white text-xl font-bold">
+                    <img src="{{ url_for('static', filename='images/logo.png') }}" alt="MininetGym Logo" width="90">
+                </div>
+            </div>
 
-      <!-- Training Tab -->
-      <div class="tab-pane fade p-3" id="training" role="tabpanel">
-        <button id="start-training" class="btn btn-success mb-3">Start Training</button>
-        <div id="training-output" class="border p-3 bg-light" style="min-height: 300px; white-space: pre-wrap;"></div>
-      </div>
+            <!-- Navigation Links -->
+            <nav class="flex space-x-4 mt-3 md:mt-0" id="main-nav">
+                <button id="nav-config" onclick="navigateTo('config')"
+                    class="font-semibold text-white px-4 py-2 rounded-lg transition duration-200 bg-blue-600 hover:bg-blue-700 shadow-md">
+                    Configuration Setup
+                </button>
+                <button id="nav-training" onclick="navigateTo('training')"
+                    class="font-semibold px-4 py-2 rounded-lg transition duration-200 text-gray-600 bg-gray-200 hover:bg-gray-300 shadow-md">
+                    Training Dashboard
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Status Message Area -->
+    <div id="status-message"
+        class="hidden fixed bottom-2 left-2 p-2 rounded-lg shadow-2xl font-medium transition duration-500 ease-in-out z-20"
+        role="alert"></div>
+    <!-- MAIN VIEWS CONTAINER -->
+    <main class="mt-1">
+        <!-- ============================================== -->
+        <!-- 1. CONFIGURATION PAGE -->
+        <!-- ============================================== -->
+        <div id="config-page" class="space-y-2">
+            <!-- Management Buttons -->
+            <div
+                class="bg-white p-1 rounded-xl shadow-xl flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0 sm:space-x-4">
+                <h2 class="text-2xl font-bold text-gray-800">Configuration<img
+                        src="{{ url_for('static', filename='images/gif/web-settings.gif') }}" alt="Configuration page"
+                        title="Configuration page" class="inline-block w-6 h-6 ml-2"></h2>
+                <div class="flex space-x-3">
+                    <button id="save-config-btn"
+                        class="px-3 py-1 bg-green-500 text-white font-bold rounded-lg hover:bg-green-600 transition duration-150 shadow-lg">
+                        <!-- <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M8 7H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4">
+                            </path>
+                        </svg> -->
+                        <img src="{{ url_for('static', filename='images/gif/floppy-disc.gif') }}" alt="Configuration"
+                            title="Configuration" class="inline-block w-6 h-6  rounded">
+                        Save
+                    </button>
+                    <button id="load-configs-btn"
+                        class="px-3 py-1 bg-indigo-500 text-white font-bold rounded-lg hover:bg-indigo-600 transition duration-150 shadow-lg">
+                        <img src="{{ url_for('static', filename='images/gif/work-in-progress.gif') }}"
+                            alt="Load Configurations (Future)" title="Load Configurations (Future)"
+                            class="inline-block w-6 h-6  rounded">
+                        <!-- <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 0020 12a8 8 0 00-15.356-2m15.356 2H20v-5"></path>
+                        </svg> -->
+                        Load
+                    </button>
+                </div>
+            </div>
+
+            <!-- Configuration Sections -->
+            <div class="grid grid-cols-1 lg:grid-cols-1 gap-1">
+
+                <!-- General (Root) Parameters -->
+                <details open class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                    <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4 cursor-pointer">
+                        <img src="{{ url_for('static', filename='images/gif/settings.gif') }}" alt="Parameters (Root)"
+                            title="Parameters (Root)" class="inline-block w-6 h-6 ml-2">General
+                    </summary>
+                    <div id="general-config-list" class="space-y-4  grid grid-cols-1 md:grid-cols-6 gap-2">
+                        <!-- Dynamic inputs for root keys will be rendered here -->
+                    </div>
+                </details>
+
+                <!-- Environment Parameters -->
+                <details class="lg:col-span-2 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                    <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4  cursor-pointer">
+                        <img src="{{ url_for('static', filename='images/gif/earth.gif') }}"
+                            alt="Parameters (`env_params`)" title="Parameters (`env_params`)"
+                            class="inline-block w-6 h-6 ml-2">Environment
+                    </summary>
+                    <div id="env-params-config-list" class="space-y-4 grid grid-cols-1 md:grid-cols-5 gap-2">
+                        <!-- Dynamic inputs for env_params will be rendered here -->
+                    </div>
+                </details>
+
+            </div>
+
+            <!-- Agents Configuration -->
+            <details class="bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4 cursor-pointer">
+                    <img src="{{ url_for('static', filename='images/gif/manager.gif') }}" alt="Parameters (`agents`)"
+                        title="Parameters (`agents`)" class="inline-block w-6 h-6 ml-2"> Agents
+                </summary>
+                <div id="agents-list" class="space-y-4">
+                    <!-- Dynamic agent cards will be rendered here -->
+                </div>
+                <button id="add-agent-btn"
+                    class="mt-4 px-2 py-1 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 transition duration-150 flex items-center shadow-md">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Add New Agent
+                </button>
+            </details>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- 2. TRAINING PAGE -->
+        <!-- ============================================== -->
+        <div id="training-page" class="hidden space-y-2">
+            <div
+                class="bg-white p-1 rounded-xl shadow-xl  flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0 sm:space-x-4">
+                <h2 class="text-2xl font-bold text-gray-800">Training Control Panel</h2>
+                <div class="flex space-x-3">
+                    <button id="start-training-btn"
+                        class="px-2 py-1 text-white font-bold rounded-xl bg-blue-600 hover:bg-blue-700 transition duration-150 shadow-lg text-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z">
+                            </path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span id="start-training-btn-text">START TRAINING</span>
+                    </button>
+                    <button id="pause-training-btn"
+                        class="hidden px-2 py-1 text-white font-bold rounded-xl bg-yellow-500 hover:bg-yellow-600 transition duration-150 shadow-lg text-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        PAUSE
+                    </button>
+                    <button id="stop-training-btn"
+                        class="hidden px-2 py-1 text-white font-bold rounded-xl bg-red-600 hover:bg-red-700 transition duration-150 shadow-lg text-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10h6M9 14h6">
+                            </path>
+                        </svg>
+                        STOP
+                    </button>
+
+                </div>
+
+                <p id="training-status-text" class="text-center mt-4 text-lg font-semibold text-gray-500">
+                    Status: <span class="text-gray-900">
+                        <img src="/static/images/gif/start-line.gif" alt="Idle. Ready to start."
+                            title="Idle. Ready to start." class="system-status-image1 inline-block w-11 h-11 mr-2">
+                        <img src="/static/images/gif/training.gif"
+                            class="system-status-image2 hidden inline-block w-11 h-11 mr-2"></span>
+                    </span>
+                </p>
+            </div>
+            <div class="mt-2 grid grid-cols-1 md:grid-cols-5 gap-2">
+                <!-- WebSocket Log and Filters (Updated Section) 2 columns -->
+
+                <div class="md:col-span-3 bg-gray-50 p-2 rounded-xl border border-gray-800">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800"><img src="/static/images/gif/interface.gif"
+                                alt="Log Monitor" title="Log Monitor" class="inline-block w-6 h-6 mr-1">Log Monitor</h3>
+
+                        <!-- Log Filters (New Checkboxes) -->
+                        <div class="flex items-center space-x-4 text-sm">
+                            <label class="flex items-center text-gray-700">
+                                <input id="log-info-checkbox" type="checkbox"
+                                    class="form-checkbox h-4 w-4 text-blue-600 rounded" checked>
+                                <span class="ml-1 text-white bg-gray-400 px-2 rounded-md"><img
+                                        src="/static/images/icon/info.png" alt="INFO" title="INFO"
+                                        class="inline-block w-4 h-4 m-1">INFO</span>
+                            </label>
+                            <label class="flex items-center text-gray-700">
+                                <input id="log-debug-checkbox" type="checkbox"
+                                    class="form-checkbox h-4 w-4 text-yellow-600 rounded">
+                                <span class="ml-1 text-white bg-gray-400 px-2 rounded-md"><img
+                                        src="/static/images/icon/bug.png" alt="DEBUG" title="DEBUG"
+                                        class="inline-block w-4 h-4 m-1">DEBUG</span>
+                            </label>
+                            <label class="flex items-center text-gray-700">
+                                <input id="log-error-checkbox" type="checkbox"
+                                    class="form-checkbox h-4 w-4 text-red-600 rounded" checked>
+                                <span class="ml-1 text-white bg-gray-400 px-2 rounded-md"><img
+                                        src="/static/images/icon/mark.png" alt="ERROR" title="ERROR"
+                                        class="inline-block w-4 h-4 m-1">ERROR</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Log Area -->
+                    <div id="websocket-log"
+                        class="h-96 overflow-y-scroll bg-gray-900 p-4 rounded-lg text-sm text-gray-300 space-y-1">
+                        <p class="text-blue-400">[SYSTEM] Navigate to the Configuration Setup page to modify parameters.
+                        </p>
+                    </div>
+                </div>
+                <!-- WebSocket Log and Filters (Updated Section) 2 columns -->
+                <div class=" md:col-span-2 bg-white p-1 rounded-xl border border-gray-800">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">
+                            <img src="/static/images/gif/network.gif" alt="Host task Monitor" title="Host task Monitor"
+                                class="inline-block w-6 h-6 mr-1">
+                            Host task Monitor
+                        </h3>
+                        <div class="flex items-center space-x-4 text-sm">
+                            <img src="/static/images/gif/vision.gif" alt="View configuration"
+                                title="View configuration" class="inline-block w-6 h-6 mr-1 cursor-pointer" id="view-config-btn">
+                        </div>
+                    </div>
+                    <div class="">
+                        <ul id="host-task-data"
+                            class="h-96 overflow-y-scroll bg-gray-100 p-4 rounded-lg text-sm text-gray-800 grid md:grid-cols-2">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-Time Charts Section (NEW) -->
+            <div class="mt-2 bg-white shadow-xl rounded-xl p-2 border border-gray-800" id="charts-section">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6 border-b pb-2">Real-Time Statistics - <span
+                        id="real-time-status" class="text-green-600"></span></h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="charts-traffic-section">
+                    <div class="p-4 border rounded-lg shadow-sm">
+                        <h3 class="text-xl font-bold mb-4 text-center">Total Traffic Trends (Packets=<span id="packets"
+                                class="text-blue-600">0</span>
+                            <span id="trendIndicatorPackets" class="text-xl font-semibold items-center"></span>
+                            <span id="var_packets" class="text-red-600">0</span>)
+                        </h3>
+                        <canvas id="lineChartPackets"></canvas>
+                    </div>
+                    <div class="p-4 border rounded-lg shadow-sm">
+                        <h3 class="text-xl font-bold mb-4 text-center">Total Traffic Trends (Bytes=<span id="bytes"
+                                class="text-blue-600">0</span>
+                            <span id="trendIndicatorBytes" class="text-xl font-semibold items-center"></span>
+                            <span id="var_bytes" class="text-red-600">0</span>)
+                        </h3>
+                        <canvas id="lineChartBytes"></canvas>
+                    </div>
+                    <div class="p-4 border rounded-lg shadow-sm">
+                        <h3 class="text-xl font-bold mb-4 text-center">Agent Traffic Breakdown (Packets)</h3>
+                        <canvas id="barChartPackets"></canvas>
+                    </div>
+                    <div class="p-4 border rounded-lg shadow-sm">
+                        <h3 class="text-xl font-bold mb-4 text-center">Agent Traffic Breakdown (Bytes)</h3>
+                        <canvas id="barChartBytes"></canvas>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-1 gap-6" id="charts-metrics-section">
+                    <div class="agent-section my-8 border-t border-gray-300 hidden">
+                        <details open class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                            <summary class="text-2xl font-semibold text-gray-800 mb-6 border-b pb-2 agent-title">Agent
+                                Name</summary>
+                            <div class="grid grid-cols-1 md:grid-cols-5 gap-6 agent-charts-data-section">
+                                <div class="agent-charts-section md:col-span-3">
+                                    <div class="p-4 border rounded-lg shadow-sm">
+                                        <canvas class="lineChartAccuracy"></canvas>
+                                    </div>
+                                    <div class="p-4 border rounded-lg shadow-sm">
+                                        <canvas class="lineChartReward"></canvas>
+                                    </div>
+                                </div>
+                                <div class="agent-data-section md:col-span-2"></div>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Modal for Config  -->
+    <div id="config-modal"
+        class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden flex items-center justify-center">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-3/4 max-w-4xl">
+            <h3 class="text-xl font-bold mb-4">Configuration Summary</h3>  
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6" >
+                <div id="config-env" class="gap-6">                    
+                </div>
+                <div id="config-agents" class="gap-6">                    
+                </div>
+            </div>
+            <button id="close-config-modal-btn" class="mt-4 px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400">Close</button>
+        </div>
     </div>
-  </div>
 
-  <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+    <!-- Modal for Config List (Hidden, but ready for future use) -->
+    <div id="config-list-modal"
+        class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden flex items-center justify-center">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg">
+            <h3 class="text-xl font-bold mb-4">Load Configuration</h3>
+            <p>Select a YAML file to load configuration. </p>
+
+            <input type="file" id="yamlFileInput" accept=".yaml" />
+            <button onclick="readYamlFile()" class="mt-4 px-4 py-2 bg-blue-300 rounded-lg hover:bg-cyan-400">Load
+                YAML</button>
+            <button id="close-modal-btn" class="mt-4 px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400">Close</button>
+            <pre id="yamlOutput"></pre>
+
+        </div>
+    </div>
+
+    <div id="result-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden flex items-center justify-center">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg">
+            <h3 class="text-xl font-bold mb-4">Last Result</h3>
+            <p>Download the last result zip file.</p>
+
+            <button id="download-result-btn"
+                class="mt-4 px-4 py-2 bg-blue-300 rounded-lg hover:bg-cyan-400">Download</button>
+            <button id="close-result-modal-btn"
+                class="mt-4 px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400">Close</button>
+            <pre id="resultOutput"></pre>
+
+        </div>
+    </div>
+
+
+    <!-- Load Necessary Scripts (jQuery, Bootstrap, SocketIO) -->
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Configurazione passata da Flask
+        let currentConfig = {{ config | safe }};
+    </script>
+    <script src="{{ url_for('static', filename='js/constants.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ui_helpers.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/web_socket.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/statistics.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/agent_statistics.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/traffic_statistics.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
+
 </html>
