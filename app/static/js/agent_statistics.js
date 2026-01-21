@@ -95,7 +95,7 @@ function initializeLineChartReward(agent, hostsDataset = [], canvasEl) {
             plugins: {
                 title: {
                     display: true,
-                    text: agent + ' Reward by host per Episode (Multi-Agent)',
+                    text: agent + ' Reward by host per Episode',
                     font: {
                         size: 16
                     }
@@ -143,10 +143,10 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
     datasetForAccuracy = [];
     datasetForReward = [];
     if (!isMultiAgentMode) {
-            const colorAcc = getAgentColor("acc");
-            datasetForAccuracy.push(getDataset("agent", colorAcc));
-            const colorRew = getAgentColor("rew");
-            datasetForReward.push(getDataset("agent", colorRew));
+        const colorAcc = getAgentColor("acc");
+        datasetForAccuracy.push(getDataset("agent", colorAcc));
+        const colorRew = getAgentColor("rew");
+        datasetForReward.push(getDataset("agent", colorRew));
     }
     else {
         for (let i = 0; i < hosts.length; i++) {
@@ -223,9 +223,9 @@ function getDataset(host, color) {
 
 function getLiElement(agentKey, agent, isHost) {
     let ilElement = $(`<li data-host-agent='${agentKey}'></li>`);
-    ilElement.addClass("flex items-center justify-between bg-white p-1 rounded shadow mb-1 mr-1");
+    ilElement.addClass("flex items-center  bg-white p-1 rounded shadow mb-1 mr-1");
     html = getHtmlGauce(agentKey);
-    html += "<details close class='ml-2 text-sm'>";
+    html += "<details close class='ml-3'>";
     html += getHtmlSummaryAgent(agent)
     if (isHost) {
         html += getHtmlDivTrafficHost();
@@ -252,14 +252,10 @@ function getHtmlSummaryAgent(agent) {
 function getHtmlDivTrafficHost() {
     let html = `<div>`;
     //html += ` Accuracy: <span class="accuracy mr-2 font-bold">N/A</span>`;
-    html += ` <span class="text-gray-700">Pkt rec.:</span> <span class="packets_rx mr-2 font-bold">N/A</span>`;
-    html += ` <span class="var_packets_rx mr-2 font-bold">N/A</span>`;
-    html += ` <span class="text-gray-700">KB rec.:</span> <span class="bytes_rx mr-2 font-bold">N/A</span>`;
-    html += ` <span class="var_bytes_rx mr-2 font-bold">N/A</span>`;
-    html += ` <span class="text-gray-700">Pkt tr.:</span> <span class="packets_tx mr-2 font-bold">N/A</span>`;
-    html += ` <span class="var_packets_tx mr-2 font-bold">N/A</span>`;
-    html += ` <span class="text-gray-700">KB tr.:</span> <span class="bytes_tx mr-2 font-bold">N/A</span>`;
-    html += ` <span class="var_bytes_tx mr-2 font-bold">N/A</span>`;
+    html += ` <span class="text-gray-700">Pkt R/T:</span> <span class="packets_rx mr-2 font-bold">N/A</span> / <span class="packets_tx mr-2 font-bold">N/A</span>`;
+    html += ` (<span class="var_packets_rx mr-2 font-bold">N/A</span> / <span class="var_packets_tx mr-2 font-bold">N/A</span>)`;
+    html += ` <span class="text-gray-700">Byte R/T:</span> <span class="bytes_rx mr-2 font-bold">N/A</span> / <span class="bytes_tx mr-2 font-bold">N/A</span>`;
+    html += ` (<span class="var_bytes_rx mr-2 font-bold">N/A</span> / <span class="var_bytes_tx mr-2 font-bold">N/A</span>)`;
     html += `</div>`;
     return html;
 }
@@ -267,10 +263,15 @@ function getHtmlDivTrafficHost() {
 
 function getHtmlDivTrafficNetwork() {
     let html = `<div>`;
-    html += ` <span class="text-gray-700">Pkt:</span> <span class="packets mr-2 font-bold">N/A</span>`;
-    html += ` <span class="var_packets mr-2 font-bold">N/A</span>`;
-    html += ` <span class="text-gray-700">KB:</span> <span class="bytes mr-2 font-bold">N/A</span>`;
-    html += ` <span class="var_bytes mr-2 font-bold">N/A</span>`;
+    if (isClassificationEnv()) {
+        html += ` <span class="text-gray-700">Pkt:</span> <span class="packets mr-2 font-bold">N/A</span>`;
+        html += ` <span class="text-gray-700"></span> <span class="bytes mr-2 font-bold">N/A</span>`;
+    } else {
+        html += ` <span class="text-gray-700">Pkt:</span> <span class="packets mr-2 font-bold">N/A</span>`;
+        html += ` (<span class="var_packets mr-2 font-bold">N/A</span>)`;
+        html += ` <span class="text-gray-700"></span> <span class="bytes mr-2 font-bold">N/A</span>`;
+        html += ` (<span class="var_bytes mr-2 font-bold">N/A</span>)`;
+    }
     html += `</div>`;
     return html;
 }
@@ -358,7 +359,31 @@ function updateAgentStepDataTable(agent, stepData) {
         stepSpan.html(stepData.step);
         var statusSpan = listItem.find(".status").first();
         if (stepData.status.id !== undefined) {
-            statusSpan.html(getStatusActionIcon(stepData.status.id, host));
+            html = getStatusActionIcon(stepData.status.id, host)
+            statusSpan.html(html);
+            // if (html.includes("secure.gif")) {
+
+            // }
+            // else if (html.includes("ping.gif") || html.includes("udp.gif") || html.includes("tcp.gif")) {
+
+            // }
+            // else 
+            if (html.includes("cyberterrorism.gif")) {
+                listItem.addClass("bg-orange-200");
+                listItem.removeClass("bg-red-200");
+                listItem.removeClass("bg-white");
+            }
+            else if (html.includes("ddos.gif")) {
+                listItem.addClass("bg-red-200");
+                listItem.removeClass("bg-orange-200");
+                listItem.removeClass("bg-white");
+            }
+            else {
+                listItem.addClass("bg-white");
+                listItem.removeClass("bg-orange-200");
+                listItem.removeClass("bg-red-200");
+            }
+
         }
         var actionChoosenSpan = listItem.find(".action_choosen").first();
         if (stepData.action.choosen !== undefined) {
@@ -384,11 +409,17 @@ function updateAgentStepDataTable(agent, stepData) {
 
         var correctPredictionsSpan = listItem.find(".correct_predictions").first();
         correctPredictionsSpan.html(stepData.correctPredictions !== undefined ? stepData.correctPredictions : "N/A");
-        if (stepData.packets) {
+        if (isClassificationEnv()) {
+            var packetsSpan = listItem.find(".packets").first();
+            packetsSpan.html(stepData.receivedPackets + " / " + stepData.transmittedPackets);
+            var bytesSpan = listItem.find(".bytes").first();
+            bytesSpan.html(formatBytes(stepData.receivedBytes) + " / " + formatBytes(stepData.transmittedBytes));
+        }
+        else if (stepData.host === COORDINATOR || (!isMultiAgentMode)) {
             var packetsSpan = listItem.find(".packets").first();
             packetsSpan.html(stepData.packets);
             var bytesSpan = listItem.find(".bytes").first();
-            bytesSpan.html(stepData.bytes / 1000);
+            bytesSpan.html(formatBytes(stepData.bytes));
             updateDataPercentageSpan(listItem.find(".var_packets").first(), stepData.packetsPercentageChange);
             updateDataPercentageSpan(listItem.find(".var_bytes").first(), stepData.bytesPercentageChange);
         }
@@ -396,11 +427,11 @@ function updateAgentStepDataTable(agent, stepData) {
             var packetsRxSpan = listItem.find(".packets_rx").first();
             packetsRxSpan.html(stepData.receivedPackets);
             var bytesRxSpan = listItem.find(".bytes_rx").first();
-            bytesRxSpan.html(stepData.receivedBytes);
+            bytesRxSpan.html(formatBytes(stepData.receivedBytes));
             var packetsTxSpan = listItem.find(".packets_tx").first();
-            packetsTxSpan.html(stepData.transmittedPackets / 1000);
+            packetsTxSpan.html(stepData.transmittedPackets);
             var bytesTxSpan = listItem.find(".bytes_tx").first();
-            bytesTxSpan.html(stepData.transmittedBytes / 1000);
+            bytesTxSpan.html(formatBytes(stepData.transmittedBytes));
             updateDataPercentageSpan(listItem.find(".var_packets_rx").first(), stepData.receivedPacketsPercentageChange);
             updateDataPercentageSpan(listItem.find(".var_bytes_rx").first(), stepData.receivedBytesPercentageChange);
             updateDataPercentageSpan(listItem.find(".var_packets_tx").first(), stepData.transmittedPacketsPercentageChange);
@@ -409,6 +440,32 @@ function updateAgentStepDataTable(agent, stepData) {
 
     }
 }
+
+function addTransparency(hexColor, alpha = 0.2) {
+    // Remove '#' if present
+    hexColor = hexColor.replace('#', '');
+    // Parse RGB values
+    const r = parseInt(hexColor.substring(0, 2), 16);
+    const g = parseInt(hexColor.substring(2, 4), 16);
+    const b = parseInt(hexColor.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Helper function to get a consistent color for a given agent name
+function getAgentColor(agentName) {
+    // Simple hash function to generate a unique, consistent color
+    let hash = 0;
+    for (let i = 0; i < agentName.length; i++) {
+        hash = agentName.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let color = '#';
+    for (let i = 0; i < 3; i++) {
+        const value = (hash >> (i * 8)) & 0xFF;
+        color += ('00' + value.toString(16)).substr(-2);
+    }
+    return color;
+}
+
 
 function getStatusActionIcon(id, host) {
     if (isClassificationEnv()) {

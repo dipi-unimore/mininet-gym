@@ -102,6 +102,7 @@ $(document).ready(function () {
         });
     });
 
+    // --- Modals ---
     $('#view-config-btn').click(() => {
         $('#config-modal').removeClass('hidden');
         renderConfigSummary();
@@ -109,6 +110,11 @@ $(document).ready(function () {
     $('#close-config-modal-btn').click(() => {
         $('#config-modal').addClass('hidden');
     });
+    
+    $('#close-model-dir-modal-btn').click(() => {
+        $('#load-dir-modal').addClass('hidden');
+    });
+
 
     // Load Modal Button (for future use)
     $('#load-configs-btn').click(() => {

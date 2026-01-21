@@ -53,13 +53,7 @@ class InstantState:
         self.consecutive_corrects = 0
         
     def set_state(self, status: dict):
-        # self.status = {"id" : status["id"], 
-        #                "status" : status["status"],  
-        #                "packets" :status["packets"], 
-        #                "bytes" :status["bytes"],
-        #                "packets_percentage_change" :status["packetsPercentageChange"], 
-        #                "bytes_percentage_change" :status["bytesPercentageChange"] 
-        #                }
+
         self.total_packets += status["packets"]
         self.total_bytes += status["bytes"]
         self.packets = status["packets"]
@@ -86,12 +80,7 @@ class InstantState:
            
    
     
-    def get_state(self, agent_name: str = ""):
-        """
-        Retrieves the current global state of the network.
-        """
-        return [self.packets, self.packets_percentage_change, self.bytes, self.bytes_percentage_change]
-    
+
             
     def get_host_state(self, host_id: str):
         """

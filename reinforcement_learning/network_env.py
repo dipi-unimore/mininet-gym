@@ -4,7 +4,7 @@ import inspect
 import traceback
 from utility import constants
 from utility.network_configurator import create_host, create_network, format_bytes, stop
-from utility.network_flows import get_data_flow
+from utility.network_flows import check_and_reset_if_needed, get_data_flow
 from utility.my_log import notify_client, set_log_level, information, debug, error
 from utility.params import Params
 from utility.constants import LONG_ATTACK, NORMAL, SHORT_ATTACK, HostStatus, GYM_TYPE, ATTACKS, SystemLevels
@@ -20,9 +20,13 @@ class NetworkEnv(gym.Env, ABC):
            
     def __init__(self, params, server_user = 'server_user', existing_net=None):
         super(NetworkEnv, self).__init__()
+        self.flow_reset_check_interval = 100  # Check every 100 reads
+        self.read_count = 0
+        self.reading_history = []
                 
         self.data_traffic_file = params.data_traffic_file
         self.set_gym_type(params.gym_type)
+        self.stop_update_event = None
         
         # Network creation
         self.net = existing_net
@@ -94,16 +98,18 @@ class NetworkEnv(gym.Env, ABC):
             return self.real_state
         if is_discretized_state:
             return self.get_discretized_state(self.state)
-        return get_normalize_state(self.state, self.low, self.high) 
+        return get_normalized_state(self.state, self.low, self.high) 
                   
-    def reset(self, seed = None, options=None, is_discretized_state = False, is_real_state = False):
+    def reset(self, seed = None, options={"is_discretized_state": False, "is_real_state": False}):
         """Reset environment at the beginning of an episode."""
         super().reset(seed=seed)
-
+        if "is_discretized_state" not in options:
+            options["is_discretized_state"] = False
+        if "is_real_state" not in options:
+            options["is_real_state"] = False
         #update status, in some gym_type generate traffic too
         self.update_state()
-        self.state = self.get_current_state(is_discretized_state, is_real_state) 
-        #self.status = self.global_state.status #initial status
+        self.state = self.get_current_state(options["is_discretized_state"], options["is_real_state"]) 
         
         return  self.state, {}   
         
@@ -141,16 +147,42 @@ class NetworkEnv(gym.Env, ABC):
         """
         time.sleep(0.5) 
         while (not hasattr(self,'stop_event') or not self.stop_event.is_set()) and (not hasattr(self,'stop_update_status_event') or not self.stop_update_status_event.is_set()):   
+            if self.stop_update_event and self.stop_update_event.is_set():
+                break
             while hasattr(self,'pause_event') and self.pause_event.is_set():
-                time.sleep(1)
+                time.sleep(0.01)
                 continue
-            time.sleep(self.params.wait_after_read)
+            time.sleep(self.params.wait_after_read+self.params.wait_after_read*0.05*self.n_hosts)
             self.update_state() 
         debug("Update state thread finished")  
 
     def read_from_network(self) -> bool: #read from switch
         """to retrieve new observation
         """
+        
+        self.read_count += 1
+        
+        # Periodic check for counter overflow (every 100 reads)
+        if self.read_count % self.flow_reset_check_interval == 0:
+            if check_and_reset_if_needed(
+                self.net, 
+                bridge_name="s1",
+                threshold_packets=3_500_000_000,  # Reset at 3.5B (before 4.2B limit)
+                threshold_bytes=900_000_000_000   # Reset at 900GB (before 1TB)
+            ):
+                # Reset was performed - adjust previous state to avoid false differences
+                information("Resetting previous state after flow counter reset")
+                self.reading_history.append({
+                    "total_packets": self.global_prev_state.total_packets,
+                    "total_bytes": self.global_prev_state.total_bytes,
+                    "host_states_total": copy.deepcopy(self.global_prev_state.host_states_total)
+                })
+                self.global_prev_state.total_packets = 0
+                self.global_prev_state.total_bytes = 0
+                for host_name in self.global_prev_state.host_states_total.keys():
+                    self.global_prev_state.host_states_total[host_name] = np.zeros(4, dtype=np.float32)
+
+        
         start_get_time = time.time() 
         #save previous state
         self.global_prev_state = copy.copy(self.global_state)
@@ -164,15 +196,17 @@ class NetworkEnv(gym.Env, ABC):
         total_packets = flows['packets']['transmitted']
         total_bytes = flows['bytes']['transmitted']
 
-        if total_packets == 0 and total_bytes == 0:
-            debug("No traffic detected in the network")
+        if self.gym_type is not GYM_TYPE[constants.CLASSIFICATION]:
+            if total_packets == 0 and total_bytes == 0:
+                debug("No traffic detected in the network")
+                return False
 
-        if total_packets == self.global_prev_state.total_packets and total_bytes == self.global_prev_state.total_bytes:
-            debug("No NEW traffic detected in the network")
-            end_get_time = time.time()
-            get_time = end_get_time - start_get_time
-            debug(f"Time {get_time}\n")   
-            return False
+            if total_packets == self.global_prev_state.total_packets and total_bytes == self.global_prev_state.total_bytes:
+                debug("No NEW traffic detected in the network")
+                end_get_time = time.time()
+                get_time = end_get_time - start_get_time
+                debug(f"Time {get_time}\n")   
+                return False
             
         self.global_state.total_packets = total_packets
         self.global_state.total_bytes = total_bytes
@@ -200,6 +234,21 @@ class NetworkEnv(gym.Env, ABC):
         self.global_state.host_states = {}
         self.global_state.host_states_total = {} # Resetting or initializing the total state for current reading
 
+        # for host in self.net.hosts:
+        #     total_transmitted_packets = 0
+        #     total_transmitted_bytes = 0
+        #     total_received_packets = 0
+        #     total_received_bytes = 0
+
+        #     for flow in flows['flows']:
+        #         if flow.get('src_name') == host.name:
+        #             total_transmitted_packets += flow.get('packets', 0)
+        #             total_transmitted_bytes += flow.get('bytes', 0)
+
+        #         elif flow.get('dst_name') == host.name:
+        #             total_received_packets += flow.get('packets', 0)
+        #             total_received_bytes += flow.get('bytes', 0)
+        
         for host in self.net.hosts:
             total_transmitted_packets = 0
             total_transmitted_bytes = 0
@@ -207,13 +256,32 @@ class NetworkEnv(gym.Env, ABC):
             total_received_bytes = 0
 
             for flow in flows['flows']:
-                if flow.get('src_name') == host.name:
-                    total_transmitted_packets += flow.get('packets', 0)
-                    total_transmitted_bytes += flow.get('bytes', 0)
-
-                elif flow.get('dst_name') == host.name:
+                # Check if this flow involves the current host
+                host_in_flow = (flow.get('src_name') == host.name or 
+                                flow.get('dst_name') == host.name)
+                
+                if not host_in_flow:
+                    continue
+                
+                # Get direction field (only present in port statistics)
+                direction = flow.get('direction', None)
+                
+                if direction == 'TX':
+                    # TX from switch perspective = packets going TO host (host receives)
                     total_received_packets += flow.get('packets', 0)
                     total_received_bytes += flow.get('bytes', 0)
+                elif direction == 'RX':
+                    # RX from switch perspective = packets coming FROM host (host transmits)
+                    total_transmitted_packets += flow.get('packets', 0)
+                    total_transmitted_bytes += flow.get('bytes', 0)
+                else:
+                    # Legacy OpenFlow table logic (when direction is not present)
+                    if flow.get('src_name') == host.name:
+                        total_transmitted_packets += flow.get('packets', 0)
+                        total_transmitted_bytes += flow.get('bytes', 0)
+                    elif flow.get('dst_name') == host.name:
+                        total_received_packets += flow.get('packets', 0)
+                        total_received_bytes += flow.get('bytes', 0)
                     
             # 2. Retrieve previous totals and increments (for percentage change calculation)            
             # Indices for agent_states_total (assumed: [RX_PKT_TOTAL, RX_BYTE_TOTAL, TX_PKT_TOTAL, TX_BYTE_TOTAL])
@@ -306,43 +374,6 @@ class NetworkEnv(gym.Env, ABC):
         debug(f"Time {get_time}\n")   
         return True
      
-    def show_network_status(self):       
-        agent_name = get_agent_name() #impossible to get agent name directly here    
-        state = self.global_state.get_state(agent_name)
-        t_q_v_p = self.threshold_var_packets * self.threshold_var_packets #square threshold_var_packets
-        t_q_v_b = self.threshold_var_bytes * self.threshold_var_bytes #square threshold_var_bytes
-        
-        color1 = Fore.BLUE if state[1] * state[1] < t_q_v_p else Fore.WHITE
-        color3 = Fore.BLUE if state[3] * state[3] < t_q_v_b else Fore.WHITE
-        information(
-            Fore.BLUE + f"Packet {int(state[0])} " +
-            color1 + f"{int(state[1])}%" +
-            Fore.BLUE + f" - {format_bytes(int(state[2]))}B" +
-            color3 + f" {int(state[3])}%" +
-            #Impossible to show the message for the right agent here
-            #Fore.BLUE + f" - Message {int(state[4])}\n" if len(state) == 5 else "" +
-            Fore.WHITE
-        )
-        #status by host
-        for host in self.global_state.host_states.keys():
-            host_state = self.global_state.get_host_state(host)
-            host_status = self.global_state.get_host_status(host)
-            if host_status is not None:
-                if host_status['status'] in ("under_attack", "attacking", "attacking/underattack"):
-                    debug(Fore.WHITE + 
-                                f"{host} " + Fore.RED + f"{host_status['status']} "+
-                                f"- RP {int(host_state[0])} {int(host_state[1])}% " +
-                                f"- RB {int(host_state[2])} {int(host_state[3])}% " +
-                                f"- TP {int(host_state[4])} {int(host_state[5])}% " +
-                                f"- TB {int(host_state[6])} {int(host_state[7])}%\n" + Fore.WHITE)
-                else:
-                    debug(Fore.WHITE + 
-                                f"{host} "+Fore.GREEN +
-                                f"- RP {int(host_state[0])} {int(host_state[1])}% " +
-                                f"- RB {int(host_state[2])} {int(host_state[3])}% " +
-                                f"- TP {int(host_state[4])} {int(host_state[5])}% " +
-                                f"- TB {int(host_state[6])} {int(host_state[7])}%\n" + Fore.WHITE)
-                 
     
     def eval_percentage_change(self, now, before, threshold_percentage_change=None, threshold_percentage_change_multiple = 10):
         """
@@ -415,18 +446,18 @@ class NetworkEnv(gym.Env, ABC):
         current_time = time.time()
         for host_name, task_info in self.host_tasks.items():
             # Check if the task is still active
-            if task_info["end_time"] is None or task_info["end_time"] > current_time:
-                task_type = task_info["task_type"]                
-                # Only process if the task is an attack
-                if task_type in (SHORT_ATTACK, LONG_ATTACK):
-                    dest_host_name = task_info.get("destination")
-                    
-                    # The source host is attacking
-                    attacking_hosts.add(host_name)
-                    
-                    # The destination host is under attack
-                    if dest_host_name:
-                        under_attack_hosts.add(dest_host_name)
+            #if task_info["end_time"] is None or task_info["end_time"] > current_time:
+            task_type = task_info["task_type"]                
+            # Only process if the task is an attack
+            if task_type in (SHORT_ATTACK, LONG_ATTACK):
+                dest_host_name = task_info.get("destination")
+                
+                # The source host is attacking
+                attacking_hosts.add(host_name)
+                
+                # The destination host is under attack
+                if dest_host_name:
+                    under_attack_hosts.add(dest_host_name)
         
         # --- Phase 2: Convert roles into final status string for individual hosts ---
         final_statuses = {}
@@ -511,7 +542,7 @@ def find_in_stack(target_type=None, target_function=None):
 
   
   
-def get_normalize_state(state, low_to_normalize, high_to_normalize):
+def get_normalized_state(state, low_to_normalize, high_to_normalize):
     tmp_state = np.array(state, dtype=np.float32)  # ensure it's a NumPy array
     clipped_state = np.clip(tmp_state, low_to_normalize, high_to_normalize) #limit the values in an array.
     normalized = (clipped_state - low_to_normalize) / (high_to_normalize - low_to_normalize + 1e-8)
@@ -543,7 +574,46 @@ def get_log_bin_index( val, low, high, n_bins):
         bin_index = np.digitize(val, bins) - 1  # Get the range index (from 1 to n_bins if val > high) for val. Minus one to rebase from 0 to n_bins-1
         # Clamp the bin index to valid range [0, n_bins - 1]
         # bin_index = max(0, min(bin_index, n_bins - 1))
-        return bin_index   
+        return bin_index  
+    
+def get_custom_bin_index( val, low, high, n_bins):
+        # Create dynamic bins based on the range of observation space
+        bin_edges = create_adaptive_bins(high*0.7, high, n_middle_bins=n_bins-3, very_low_max=3)
+        # Now digitize the state
+        bin_index = np.digitize(val, bin_edges) - 1  # Get the range index (from 1 to n_bins if val > high) for val. Minus one to rebase from 0 to n_bins-1
+        # Clamp the bin index to valid range [0, n_bins - 1]
+        # bin_index = max(0, min(bin_index, n_bins - 1))
+        return bin_index
+    
+def create_adaptive_bins(low_threshold, high_threshold, n_middle_bins=1, very_low_max=0.001):
+    """
+    Create custom bins with flexible subdivision of the middle range
+    
+    Args:
+        low_threshold: Upper bound for "under threshold" zone
+        high_threshold: Lower bound for "up threshold" zone
+        n_middle_bins: Number of bins to create in the "big range" (bin 1)
+        very_low_max: Maximum value for "very low" bin
+    
+    Returns:
+        bin_edges: Array of bin edges
+    """
+    # Fixed bins
+    bin_edges = [0, very_low_max]
+    
+    # Subdivide the middle range (very_low_max to low_threshold)
+    if n_middle_bins == 1:
+        bin_edges.append(low_threshold)
+    else:
+        # You can choose linear or logarithmic subdivision here
+        middle_edges = np.linspace(very_low_max, low_threshold, n_middle_bins + 1)[1:]
+        # OR: middle_edges = np.logspace(np.log10(very_low_max), np.log10(low_threshold), n_middle_bins + 1)[1:]
+        bin_edges.extend(middle_edges)
+    
+    # Fixed upper bins
+    bin_edges.extend([high_threshold, np.inf])
+    
+    return np.array(bin_edges) 
 
 
 if __name__ == '__main__':

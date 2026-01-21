@@ -1,9 +1,10 @@
+import time
+from colorama import Fore
 from stable_baselines3.common.callbacks import BaseCallback
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from reinforcement_learning.marl.constants import COORDINATOR
 from utility.constants import SystemLevels
-from utility.my_log import notify_client, set_log_level, information
-import numpy as np
-import torch
+from utility.my_log import debug, notify_client, information
 
 class CustomCallback(BaseCallback):
     """
@@ -11,7 +12,7 @@ class CustomCallback(BaseCallback):
 
     :param verbose: Verbosity level: 0 for no output, 1 for info messages, 2 for debug messages
     """    
-    def __init__(self, 
+    def __init__(self, env = None, agent_param= None, name=None,
                  training_start=None, training_end=None,
                  rollout_start=None, rollout_end=None,
                  step_start=None, step_end=None,
@@ -36,7 +37,15 @@ class CustomCallback(BaseCallback):
         # to have access to the parent object
         # self.parent = None  # type: Optional[BaseCallback]   
              
-        #
+        #custom variables
+        self.env = env
+        self.episodes = agent_param.episodes
+        self.show_action = agent_param.show_action
+        if name is not None:
+            self.name = f"{agent_param.name}_{name}" 
+        else:  
+            self.name = agent_param.name 
+            
         self.train_types = {'explorations': [], 'exploitations': [], 'steps' :[]}
         self.indicators = []
         
@@ -45,9 +54,12 @@ class CustomCallback(BaseCallback):
         self.rewards = []
         self.ground_truth = []
         self.predicted = []     
-        #self.current_step = 0
-        self.correct_predictions = 0
+        self.current_step = 0
+        self.cumulative_reward = 0  
+        self.episode_rewards = []
+        self.episode = 0 
         self.episode_statuses = []
+        self.correct_predictions = 0
          
         self.rollout_start = rollout_start
         self.step_start = step_start
@@ -70,12 +82,6 @@ class CustomCallback(BaseCallback):
             
         if self.training_start:
             self.training_start(self)
-        self.number_actions = self.env.actions_number            
-        self.count_actions = {i: 0 for i in range(self.number_actions)}
-        self.exploration_count,  self.exploitation_count = 0, 0  # Reset counters for each episode
-        self.ground_truth = []
-        self.predicted = []
-        self.correct_predictions = 0
 
     def _on_rollout_start(self) -> None:
         """
@@ -93,12 +99,15 @@ class CustomCallback(BaseCallback):
 
         For child callback (of an `EventCallback`), this will be called
         when the event is triggered.
-
         :return: If the callback returns False, training is aborted early.
         """
-        
+        if hasattr(self.env, 'stop_event') and self.env.stop_event.is_set():
+            return False     # Stop training if the stop event is set
+        while hasattr(self.env, 'pause_event') and self.env.pause_event.is_set():
+            time.sleep(0.1)  # Pause training if the pause event is set
+            
         obs = self.locals.get("new_obs")  # Observation after the last action
-        
+        #print(obs)
         # # Convert observation to PyTorch tensor
         # if obs is not None:
         #     obs_tensor = torch.tensor(obs, dtype=torch.float32)
@@ -108,54 +117,73 @@ class CustomCallback(BaseCallback):
         #     #information(f"Q-values: {q_values}")        
         
         # Store indicators and data for metrics
-        #self.training_env.envs[0].env custom_env
         action = self.locals["actions"][0]
-        self.count_actions[action] += 1        
-        ground_truth_step = self.locals["infos"][0]["Ground_truth_step"]
-        predicted_step = self.locals["infos"][0]["Predicted_step"]
-        self.action_correct = self.locals["infos"][0]["action_correct"]
-        self.truncated = self.locals["infos"][0]["TimeLimit.truncated"]
-        self.done = self.locals["dones"]
-        self.correct_predictions += 1 if self.done else 0
-        #self.current_step = self.locals["num_collected_steps"]
-        self.ground_truth.append(ground_truth_step)
-        self.predicted.append(predicted_step) 
+        self.count_actions_by_type[action] += 1        
+        self.current_step += 1 #self.locals["num_collected_steps"]
         reward = self.locals["rewards"][0]  # assuming a single environment
         self.episode_rewards.append(reward)
-        status = dict(self.env.global_state.status) #to detach to memory
-        if bool(self.action_correct):
-           self.correct_predictions+= 1
-        self.episode_statuses.append(status)
-        step_data = {
-            'episode': self.episode,
-            'step': self.current_step,
-            'status': {'id': status["id"], 'text': status["status"]},
-            'receivedPackets': status['received_packets'],
-            'receivedPacketsPercentageChange': status['received_packets_percentage_change'],
-            'receivedBytes': status['received_bytes'],
-            'receivedBytesPercentageChange': status['received_bytes_percentage_change'],
-            'transmittedPackets': status['transmitted_packets'],
-            'transmittedPacketsPercentageChange': status['transmitted_packets_percentage_change'],
-            'transmittedBytes': status['transmitted_bytes'],
-            'transmittedBytesPercentageChange': status['transmitted_bytes_percentage_change'],
-            'action': {'choosen': status["action_choosen"], 'isCorrect': status["action_correct"]},               
-            'correctPredictions': self.correct_predictions,        
-            'reward': reward
-        }
-        #name = self.locals['tb_log_name']
-        notify_client(level=SystemLevels.DATA, agent_name = self.name, step_data = step_data)
-        # if not hasattr(self, 'steps_data'):
-        #     self.steps_data = []
-        # self.steps_data.append(step_data)
-        
-        
-        self.env.execute_action(action, show_action = self.show_action, name = self.name, reward = reward)            
-       
+        self.cumulative_reward += reward
+        #next_status = dict(self.env.global_state.status) #to detach to memory
+        self.manage_step_data(action, reward, self.locals["infos"][0])
+ 
         # Custom function after each step
         if self.step_end:
             self.step_end(self)
-        return True  # Continue training, False top training   
-  
+            
+        if self.current_step == self.env.max_steps:
+            return False           
+        
+        return True  # Continue training, False stop training   
+
+    def manage_step_data(self, action, reward, infos):
+        status = infos["status"]
+        status['action_choosen'] = action
+        status['traffic_type'] = infos['action_correct']
+        self.episode_statuses.append(status)            
+        self.rewards.append(reward)
+        self.ground_truth.append(infos['Ground_truth_step'])
+        self.predicted.append(infos['Predicted_step']) 
+        if infos['is_correct_action']:
+            self.correct_predictions+=1
+        if self.name.endswith("coordinator"):
+            debug(Fore.MAGENTA + f"Coordinator correct predictions so far: {self.correct_predictions}\n"+Fore.WHITE)
+        step_data = {
+            'episode': self.episode,
+            'step': self.current_step,
+            'status': {'id': infos['action_correct'], 'text': infos["text_action_correct"]},
+            'action': {'choosen': int(action), 'isCorrect': bool(infos['is_correct_action'])},  
+            'correctPredictions': self.correct_predictions,         
+            'reward': round(float(reward),1)
+        }
+        if hasattr(self, 'is_team_member') and hasattr(self, 'is_team_coordinator'):
+            if self.is_team_member and not self.is_team_coordinator:
+                step_data['host'] = self.name.split("_").pop()
+            elif self.is_team_coordinator and self.is_team_member:
+                step_data['host'] = COORDINATOR
+        else:
+            step_data['host'] = "single_agent" 
+        if 'packets' in status:
+            step_data.update({
+                'packets': int(status['packets']),
+                'bytes': int(status['bytes']),
+                'packetsPercentageChange': float(status['packets_percentage_change']),
+                'bytesPercentageChange': float(status['bytes_percentage_change'])
+                })
+        else:
+            step_data.update({
+                'receivedPackets': int(status['received_packets']),
+                'receivedPacketsPercentageChange': float(status['received_packets_percentage_change']),
+                'receivedBytes': int(status['received_bytes']),
+                'receivedBytesPercentageChange': float(status['received_bytes_percentage_change']),
+                'transmittedPackets': int(status['transmitted_packets']),
+                'transmittedPacketsPercentageChange': float(status['transmitted_packets_percentage_change']),
+                'transmittedBytes': int(status['transmitted_bytes']),
+                'transmittedBytesPercentageChange': float(status['transmitted_bytes_percentage_change'])
+            })
+        notify_client(level=SystemLevels.DATA, agent_name = self.name, step_data = step_data)
+        #print(Fore.CYAN + f"E/S {self.episode}/{self.current_step} - Status {status['status']} - Action chosen: {action} - Reward: {reward} - Is correct: {infos['is_correct_action']}"+Fore.WHITE)
+        #print(Fore.CYAN + f"Packets: {status.get('packets', 0)} - Bytes: {status.get('bytes',0)}"+Fore.WHITE)
+        
     def _on_rollout_end(self) -> None:
         """
         This event is triggered before updating the policy. 
@@ -173,12 +201,10 @@ class CustomCallback(BaseCallback):
         if self.training_end:
             self.training_end(self)
             
-    def evaluate_episode(self, episode, cumulative_reward):
+    def evaluate_episode(self, exploration_count=0, exploitation_count=0):
         # Calculate and store metrics at the end of the episode with library sklearn
-        # ground_truth = [1 if item[0] == 0 else 0 for item in self.ground_truth]   
-        # predicted = [1 if item[0] == 0 else 0 for item in self.predicted]   
         ground_truth = [next((i for i, val in enumerate(item) if val == 1), -1) for item in self.ground_truth]   
-        predicted = [next((i for i, val in enumerate(item) if val == 1), -1) for item in self.predicted]                                
+        predicted = [next((i for i, val in enumerate(item) if val == 1), -1) for item in self.predicted]                          
         accuracy_episode = accuracy_score(ground_truth, predicted)
         precision_episode, recall_episode, f1_score_episode, _ = precision_recall_fscore_support(ground_truth, predicted, average='weighted', zero_division=0.0)
         self.metrics['accuracy'].append(accuracy_episode)
@@ -186,51 +212,69 @@ class CustomCallback(BaseCallback):
         self.metrics['recall'].append(recall_episode)
         self.metrics['f1_score'].append(f1_score_episode)
         
+        # Calculate and store train type (exploration/exploitation) at the end of the episode
+        if exploration_count > 0 or exploitation_count > 0 :
+            self.train_types['explorations'].append(exploration_count)
+            self.train_types['exploitations'].append(exploitation_count)
+            self.train_types['steps'].append(self.current_step)
         
-        if (episode > 0):
+        if (self.episode > 0):
             self.indicators.append({
-                'episode': episode,
-                'steps': self.num_timesteps,
+                'episode': self.episode,
+                'steps': self.current_step,
                 'correct_predictions': self.correct_predictions,
                 'episode_statuses': self.episode_statuses,
-                'cumulative_reward': cumulative_reward,
-            })    
+                'cumulative_reward':  float(self.cumulative_reward),
+            })             
+            try :  
+                metrics={
+                        'episode': self.episode,
+                        'steps': self.current_step,
+                        'correctPredictions': self.correct_predictions,                        
+                        'accuracy': accuracy_episode,
+                        'precision': precision_episode,
+                        'recall': recall_episode,
+                        'f1Score': f1_score_episode,
+                        'cumulativeReward': float(self.cumulative_reward)}
+                notify_client(level=SystemLevels.DATA, agent_name = self.name, metrics = metrics)   
+            except Exception as e:
+                debug(Fore.RED + f"Error notifying client with metrics: {e}\n"+Fore.WHITE)
     
-    def print_metrics(self, cumulative_reward):
+    def print_metrics(self):
         accuracy = self.metrics['accuracy'][-1]
         precision = self.metrics['precision'][-1]
         recall = self.metrics['recall'][-1]
         f1_score = self.metrics['f1_score'][-1]
-        if cumulative_reward is None:
+        if self.cumulative_reward is None:
             information(f"Accuracy {accuracy * 100 :.2f}%\nPrecision {precision * 100 :.2f}%\nRecall {recall * 100 :.2f}%\nF1-score {f1_score * 100 :.2f}%\n")    
         else:
-            information(f"\n\t\tAccuracy {accuracy * 100 :.2f}%\n\t\tPrecision {precision * 100 :.2f}%\n\t\tRecall {recall * 100 :.2f}%\n\t\tF1-score {f1_score * 100 :.2f}%\n\t\tCumulative reward {cumulative_reward}\n", self.locals['tb_log_name'])
-    
-    
+            information(f"\n\t\tAccuracy {accuracy * 100 :.2f}%\n\t\tPrecision {precision * 100 :.2f}%\n\t\tRecall {recall * 100 :.2f}%\n\t\tF1-score {f1_score * 100 :.2f}%\n\t\tCumulative reward {self.cumulative_reward}\n", self.name)
+
+        
+    def episode_reset(self):
+        self.ground_truth=[]
+        self.predicted=[]
+        self.rewards=[]
+        self.current_step=0
+        self.correct_predictions=0
+        self.cumulative_reward=0
+        self.done = self.truncated = False
+        self.count_actions_by_type =  {i: 0 for i in range(self.env.action_space.n)}        
+        self.episode_statuses = []
+        self.exploration_count,  self.exploitation_count = 0, 0  # Reset counters for each episode
+        #state, _ = self.env.reset()         
+            
     def get_metrics(self):
         return self.metrics['accuracy'][-1], self.metrics['precision'][-1], self.metrics['recall'][-1], self.metrics['f1_score'][-1]
 
-
-    # def before_episode(self):
-    #     self.episode_rewards=[]
-    #     self.episode_statuses=[]
-    #     self.episode += 1         
-    #     self.ground_truth=[]
-    #     self.predicted=[]
-    #     # callback_self.data_count_actions = {key: {0: 0, 1: 0, 2: 0, 3: 0} for key in  range(self.env.actions_number)}
-    #     # if hasattr(self, 'model'):
-    #     #     callback_self.count_actions = {action: 0 for action in range(self.training_env.action_space.n)}          
-    #     self.env.early_exit = True
-    #     #self.env.max_steps = callback_self.model.total_timesteps
-    #     information(f"************* Episode {self.episode} *************\n", self.locals['tb_log_name'])         
-    #     #return self.env.actions_number       
+    def before_episode(self, episode):
+        self.episode = episode               
+        information(f"************* Episode {self.episode} *************\n", self.name)         
+        self.episode_reset()    
         
     def after_episode(self):
-        cumulative_reward = sum(self.episode_rewards)
-        self.evaluate_episode(self.episode, cumulative_reward)
-        self.print_metrics(cumulative_reward)
-        # information(f"Evalueting...")     
-        # mean_reward, std_reward = evaluate_policy(callback_self.model, self.env, n_eval_episodes=1)
-        # information(f"{mean_reward} {std_reward}")
-        information(f"*** Episode {self.episode} finished ***\n", self.locals['tb_log_name'])             
+        self.evaluate_episode()
+        self.print_metrics()
+        information(f"*** Episode {self.episode} finished ***\n", self.name)   
+     
                 

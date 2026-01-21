@@ -7,11 +7,12 @@ import numpy as np
 from reinforcement_learning.attack_detect.network_env_attack_detect import NetworkEnvAttackDetect
 from reinforcement_learning.classification.network_env_classification import NetworkEnvClassification
 from reinforcement_learning.network_env import NetworkEnv
-from reinforcement_learning.qlearning_agent import QLearningAgent
-from reinforcement_learning.adversarial_agent import  generate_random_traffic, generate_traffic, test_dos_attack
-from utility.my_log import set_log_level, information, debug, error, notify_client
+from reinforcement_learning.agents.qlearning_agent import QLearningAgent
+from reinforcement_learning.agents.adversarial_agent import continuous_traffic_generation, generate_random_traffic, generate_traffic
+from utility.network_attacks import  test_dos_attack
 from utility.network_configurator import create_network, test_link_actions
-from utility.params import Params, read_config_file
+from utility.my_log import set_log_level, information, debug, error
+from utility.params import read_config_file
 from utility.my_statistics import plot_agent_execution_confusion_matrix, plot_radar_chart, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, plot_net_metrics
 from utility.my_files import read_data_file, save_data_to_file
 import numpy as np
@@ -257,9 +258,77 @@ def test_results_from_saved_data(env_type, execution_dir, agent_name, print_indi
             plot_radar_chart(directory_name, agents_metrics)            
     return data 
 
+def test_generate_classification_traffic(config):
+    config.env_params.data_traffic_file = config.training_directory + f"/statuses_{config.env_params.gym_type.replace(f'_{constants.FROM_DATASET}', '')}.json"
+    
+    env = NetworkEnvClassification(config.env_params, server_user = config.server_user)
+    exit = False
+    for _ in range(5000):
+        try :
+            if exit:
+                break
+            env.update_state()
+        except Exception as e:
+            print(f"Exception {e}")
+        
+    statuses = list(env.statuses)
+    timestr = time.strftime("%Y%m%d-%H%M%S")
+    save_data_to_file(statuses, config.training_directory+"/classification" , f"{timestr}_statuses")
+
+def test_generate_attacks(config):
+    config.env_params.data_traffic_file = config.training_directory + f"/statuses_{config.env_params.gym_type.replace(f'_{constants.FROM_DATASET}', '')}.json"
+    
+    env = NetworkEnvAttackDetect(config.env_params, server_user = config.server_user)
+    env.show_complete_network_status = True
+    continuous_traffic_generation(env, options={"show_normal_traffic": False, 
+                                                "send_only_attacks": False,
+                                                "only_one_can_attack": False,
+                                                "send_only_normal_traffic": False,
+                                                "send_only_tcp_traffic": False,
+                                                "send_only_udp_traffic": False }) #config.env_params.show_normal_traffic)
+    exit = False
+    for _ in range(5000):
+        try:
+            time.sleep(1)
+            #test_dos_attack(env.net)
+            #env.show_network_status()
+            if exit:
+                env.stop()
+                break
+        except Exception as e:
+            print(f"Exception {e}")
+    
+    statuses = list(env.statuses)
+    timestr = time.strftime("%Y%m%d-%H%M%S")
+    save_data_to_file(statuses, config.training_directory+"/attacks" , f"{timestr}_statuses")
+
+
 if __name__ == '__main__':
     set_log_level('info')
-    config,config_dict = read_config_file('config.yaml')     
+    # Uncomment to generate classification traffic from old statuses file, but not useful regorarly
+    # data = read_data_file('_training/statuses_classification.old.json')
+    # for status in data:
+    #     if 'receivedBytes' not in status:
+    #         status['receivedPackets'] = 0
+    #         status['transmittedPackets'] = 0
+    #         status['receivedBytes'] = 0
+    #         status['transmittedBytes'] = 0          
+    #         for host_id, host_status in status["hostStatusesStructured"].items():
+    #             status['receivedPackets'] += host_status["receivedPackets"]
+    #             status['transmittedPackets'] +=host_status["transmittedPackets"]
+    #             status['receivedBytes'] += host_status["receivedBytes"]
+    #             status['transmittedBytes'] +=host_status["transmittedBytes"]
+    
+    # timestr = time.strftime("%Y%m%d-%H%M%S")
+    # save_data_to_file(data, "_training/classification" , f"{timestr}_statuses")             
+                
+    config,config_dict = read_config_file('config.yaml')    
+    #test_generate_classification_traffic(config)
+    test_generate_attacks(config)
+    exit(0)
+    
+    
+     
     test_link_actions(config)
     
     testResultsFromSavedData = False

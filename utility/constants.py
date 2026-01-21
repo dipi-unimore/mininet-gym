@@ -1,9 +1,7 @@
 CLASSIFICATION_FROM_DATASET = 'classification_from_dataset'
 CLASSIFICATION = 'classification'
-
 ATTACKS = 'attacks'
 ATTACKS_FROM_DATASET = 'attacks_from_dataset'
-
 MARL_ATTACKS = 'marl_attacks'
 MARL_ATTACKS_FROM_DATASET = 'marl_attacks_from_dataset'   
 FROM_DATASET = 'from_dataset'
@@ -17,19 +15,19 @@ GYM_TYPE = {
     MARL_ATTACKS_FROM_DATASET: 7
 }
 
-Q_LEARNING = 'q-learning'
-DQN = 'dqn'
-SARSA = 'sarsa'
-A2C = 'a2c'
-PPO = 'ppo'
-SUPERVISED = 'supervised'
+ALGO_Q_LEARNING = 'q-learning'
+ALGO_DQN = 'dqn'
+ALGO_SARSA = 'sarsa'
+ALGO_A2C = 'a2c'
+ALGO_PPO = 'ppo'
+ALGO_SUPERVISED = 'supervised'
 
 ALGORITHMS = {
-    Q_LEARNING: 0,
-    SARSA: 1,
-    A2C: 2,
-    PPO: 3,
-    SUPERVISED: 4
+    ALGO_Q_LEARNING: 0,
+    ALGO_SARSA: 1,
+    ALGO_A2C: 2,
+    ALGO_PPO: 3,
+    ALGO_SUPERVISED: 4
 }
 
 

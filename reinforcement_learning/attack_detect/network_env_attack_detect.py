@@ -3,9 +3,9 @@ import copy
 from colorama import Fore
 from reinforcement_learning.attack_detect.constants import AGENT_ACTIONS, REWARDS
 from reinforcement_learning.attack_detect.instant_state import InstantState
-from reinforcement_learning.network_env import NetworkEnv, get_agent_name, get_linear_bin_index
+from reinforcement_learning.network_env import NetworkEnv, get_agent_name, get_custom_bin_index, get_linear_bin_index, get_log_bin_index, get_normalized_state
 from utility.my_log import debug, information, error, notify_client
-from utility.network_configurator import comunicate_normal_traffic_detected, comunicate_attack_detected
+from utility.network_configurator import comunicate_normal_traffic_detected, comunicate_attack_detected, format_bytes
 from utility.params import Params
 from utility.constants import *
 import json as jsonlib
@@ -26,23 +26,24 @@ class NetworkEnvAttackDetect(NetworkEnv):
         params.actions_number = AGENT_ACTIONS.NUMBER
         super().__init__(params, server_user, existing_net)
         self.params = params
+        self.show_complete_network_status = False
         self.statuses = []
         self.hosts = self.net.hosts # Access hosts from the parent class's network
         
         # Network params
-        self.threshold_packets = params.attack_thresholds.packets
-        self.threshold_var_packets = params.attack_thresholds.var_packets
-        self.threshold_bytes = params.attack_thresholds.bytes
-        self.threshold_var_bytes = params.attack_thresholds.var_bytes
+        self.threshold_packets = params.attacks.thresholds.packets
+        self.threshold_var_packets = params.attacks.thresholds.var_packets
+        self.threshold_bytes = params.attacks.thresholds.bytes
+        self.threshold_var_bytes = params.attacks.thresholds.var_bytes
         # Define action and observation space, gym.spaces objects
         self.low = np.array([0,-self.threshold_var_packets,0,-self.threshold_var_bytes])   
-        self.high = np.array([self.threshold_packets*len(self.net.hosts),self.threshold_var_packets,self.threshold_bytes*len(self.net.hosts),self.threshold_var_bytes])
+        self.high = np.array([self.threshold_packets*len(self.net.hosts),2*self.threshold_var_packets,self.threshold_bytes*len(self.net.hosts),2*self.threshold_var_bytes])
         self.observation_space = spaces.Box(low=self.low, high=self.high, shape=(len(self.low),), dtype=np.float32)
         
         # Define the number of discrete bins for each observation dimension
         self.n_bins = params.n_bins
-        self.low_to_normalize = self.low #np.array([0,-self.threshold_var_packets,0,-self.threshold_var_bytes]) #np.floor(np.log10(self.low)).astype(int)
-        self.high_to_normalize = self.high #np.array([self.threshold_packets*len(self.net.hosts),self.threshold_var_packets,self.threshold_bytes*len(self.net.hosts),self.threshold_var_bytes]) #np.inf
+        self.low_to_normalize = self.low 
+        self.high_to_normalize = self.high 
 
         self.global_prev_state = self.global_state = InstantState(self.hosts)
     
@@ -51,7 +52,7 @@ class NetworkEnvAttackDetect(NetworkEnv):
         
   
         if self.gym_type == GYM_TYPE[ATTACKS]:
-            self.attack_likely = self.init_attack_likely = params.attack_likely
+            self.attack_likely = self.init_attack_likely = params.attacks.likely
             self.update_state_thread_instance = threading.Thread(target=self.update_state_thread)
             self.update_state_thread_instance.start()
         
@@ -109,27 +110,83 @@ class NetworkEnvAttackDetect(NetworkEnv):
                     'destination': host_task['destination']})
             self.statuses.append(traffic_data)
             self.show_network_status()
+            
+    def show_network_status(self):         
+        state = self.global_state.get_state()
+        discrete_state = self.get_discretized_state(state)
+        normalized_state = get_normalized_state(state, self.low_to_normalize, self.high_to_normalize)         
+        t_q_v_p = self.high[1] * self.high[1] #square threshold_var_packets
+        t_q_v_b = self.high[3] * self.high[3] #square threshold_var_bytes
+        color0 = Fore.BLUE if state[0] < self.high[0] else Fore.WHITE
+        color2 = Fore.BLUE if state[2] < self.high[2] else Fore.WHITE
+        color1 = Fore.BLUE if state[1] * state[1] < t_q_v_p else Fore.WHITE
+        color3 = Fore.BLUE if state[3] * state[3] < t_q_v_b else Fore.WHITE
+        colorstatus = Fore.GREEN if self.global_state.status['status']=="normal" else Fore.RED
+        information(
+            colorstatus +  f"{self.global_state.status['status']} " +
+            Fore.BLUE +  f"Packet "+
+            color0 + f"{int(state[0])} " +
+            color1 + f"{int(state[1])}%" +
+            color2 + f" - {format_bytes(int(state[2]))}"+Fore.BLUE +"B" +
+            color3 + f" {int(state[3])}%" +
+            Fore.CYAN + f" - {int(discrete_state[0])} {int(discrete_state[1])} {int(discrete_state[2])} {int(discrete_state[3])}" +
+            Fore.MAGENTA + f" - {float(normalized_state[0]):.3f} {float(normalized_state[1]):.3f} {float(normalized_state[2]):.5f} {float(normalized_state[3]):.5f}\n" +
+
+            Fore.WHITE
+        )
+        level_function = debug
+        if self.show_complete_network_status:
+            level_function = information
+        #status by host
+        for host in self.global_state.host_states.keys():
+            host_state = self.global_state.get_host_state(host)
+            host_status = self.global_state.get_host_status(host)
+            if host_status is not None:
+                #print(f"{host}: {self.global_state.get_host_status(host)} - {self.global_state.get_host_state(host)} ")
+                if host_status['status'] in (HostStatus.ATTACKING, HostStatus.WAR):
+                    level_function(Fore.WHITE + 
+                                f"{host} " + Fore.RED + f"{host_status['status']} {self.host_tasks[host].get('attack_subtype', '').upper()}"+
+                                f"- RX Pkt {int(host_state[0])} {int(host_state[1])}% " +
+                                f"- {format_bytes(int(host_state[2]))}B {int(host_state[3])}% " +
+                                f"- TX Pkt {int(host_state[4])} {int(host_state[5])}% " +
+                                f"- {format_bytes(int(host_state[6]))}B {int(host_state[7])}%\n" + Fore.WHITE)
+                elif host_status['status'] in (HostStatus.UNDER_ATTACK):
+                    level_function(Fore.WHITE + 
+                                f"{host} " + Fore.YELLOW + f"{host_status['status']}-{self.host_tasks[host]['traffic_type'].upper()}"+
+                                f"- RX Pkt {int(host_state[0])} {int(host_state[1])}% " +
+                                f"- {format_bytes(int(host_state[2]))}B {int(host_state[3])}% " +
+                                f"- TX Pkt {int(host_state[4])} {int(host_state[5])}% " +
+                                f"- {format_bytes(int(host_state[6]))}B {int(host_state[7])}%\n" + Fore.WHITE)                    
+                else:
+                    level_function(Fore.WHITE + 
+                                f"{host} "+Fore.GREEN + f"{host_status['status']}-{self.host_tasks[host]['traffic_type'].upper()} to {self.host_tasks[host]['destination']} "+
+                                f"- RX Pkt {int(host_state[0])} {int(host_state[1])}% " +
+                                f"- {format_bytes(int(host_state[2]))}B {int(host_state[3])}% " +
+                                f"- TX Pkt {int(host_state[4])} {int(host_state[5])}% " +
+                                f"- {format_bytes(int(host_state[6]))}B {int(host_state[7])}%\n" + Fore.WHITE)            
  
    
     def initialize_storage(self):
         pass   
          
         
-    def step(self, action, is_discretized_state = False, is_real_state= False, current_step=-1, correct_predictions=0, show_action=False, name = None):
+    def step(self, action, options={"is_discretized_state": False, "is_real_state": False, "current_step": -1, "correct_predictions": 0, "show_action": False, "name": None}):
         while hasattr(self,"pause_event") and self.pause_event.is_set():
             notify_client(level=SystemLevels.STATUS, status=SystemStatus.PAUSED, message="Paused training agents...", mode=SystemModes.TRAINING)
             time.sleep(1)
             continue  
               
         # Calculate reward
-        action_correct = self.global_state.status["id"]
-        text_action_correct = self.global_state.status["status"]
+        status = self.global_state.status.copy()
+        #print(f"Env Step {options['current_step']} - Current Status: {status} - State: {self.state} - Action taken: {action}")
+        action_correct = status["id"]
+        text_action_correct = status["status"]
         reward = self.calculate_reward(action)  
-        self.execute_action(action, show_action=show_action, reward=reward)
+        self.execute_action(action, show_action=options["show_action"], reward=reward)
         is_action_correct = self.generated_traffic_type == action
         if is_action_correct:
-            correct_predictions+=1
-        percentage_correct_predictions = correct_predictions/current_step
+            options["correct_predictions"]+=1
+        percentage_correct_predictions = options["correct_predictions"]/options["current_step"] if options["current_step"]>0 else 0
            
         ground_truth_step = np.zeros(self.actions_number)
         predicted_step = np.zeros(self.actions_number)
@@ -139,7 +196,7 @@ class NetworkEnvAttackDetect(NetworkEnv):
         debug(Fore.CYAN + f"Environment reward {reward}"+Fore.WHITE )          
            
         # Check if the episode is done
-        done, truncated = self.check_if_done_or_truncated(current_step, percentage_correct_predictions) 
+        done, truncated = self.check_if_done_or_truncated(options["current_step"], percentage_correct_predictions) 
         # Update state here
         if not done and not truncated:
             if self.gym_type==GYM_TYPE[ATTACKS]:
@@ -147,10 +204,11 @@ class NetworkEnvAttackDetect(NetworkEnv):
             else:
                 self.update_state()      
         
-        next_state = self.get_current_state(is_discretized_state=is_discretized_state, is_real_state= is_real_state ) 
-            
+        next_state = self.get_current_state(is_discretized_state=options["is_discretized_state"] ) 
+        #print(f"Next state discretized: {next_state} - next state real: {self.state}  ")    
         return next_state , reward, done, truncated, {'action_correct': action_correct, 
                                                      'text_action_correct': text_action_correct, 
+                                                     'status': status,
                                                      'is_correct_action': is_action_correct, 
                                                      'TimeLimit.truncated': truncated, 
                                                      'Ground_truth_step': ground_truth_step, 
@@ -233,7 +291,9 @@ class NetworkEnvAttackDetect(NetworkEnv):
         for i, val in enumerate(state):
             if (i==1 or i==3) : #variation packet and byte for attacks gym_type
                 bin_index = get_linear_bin_index(val, low[i], high[i], n_bins-1)+1
-            else: #for attacks gym_type use linear discretization
+            elif i==0 : #for packets in attacks gym_type use linear discretization
+                bin_index = get_custom_bin_index(val, low[i], high[i], n_bins)
+            else: #for bytes in attacks gym_type use log discretization
                 bin_index = get_linear_bin_index(val, low[i], high[i], n_bins)
             discrete_state.append(bin_index)
         return tuple(discrete_state)           

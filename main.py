@@ -1,4 +1,4 @@
-from reinforcement_learning.adversarial_agent import continuous_traffic_generation
+from reinforcement_learning.agents.adversarial_agent import continuous_traffic_generation
 from reinforcement_learning.classification.network_env_classification import NetworkEnvClassification
 from reinforcement_learning.attack_detect.network_env_attack_detect import NetworkEnvAttackDetect
 from reinforcement_learning.marl.network_env_marl_attack_detect import NetworkEnvMarlAttackDetect
@@ -39,10 +39,10 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
     isMultiAgent = False
     config.env_params.data_traffic_file = config.training_directory + f"/statuses_{config.env_params.gym_type.replace(f'_{FROM_DATASET}', '')}.json"
     if config.env_params.gym_type.startswith(ATTACKS):
-        env = NetworkEnvAttackDetect(config.env_params, server_user)  
+        env = NetworkEnvAttackDetect(config.env_params, server_user)     
     elif config.env_params.gym_type.startswith(MARL_ATTACKS):
+        env = NetworkEnvMarlAttackDetect(config.env_params, server_user)
         isMultiAgent = True
-        raise NotImplementedError("MARL_ATTACKS environment is not yet supported in this version.")
     else:
         env = NetworkEnvClassification(config.env_params, server_user)
     if config.env_params.gym_type.endswith(FROM_DATASET):
@@ -76,7 +76,7 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
     
     #Start the traffic generation thread if not from dataset
     if not config.env_params.gym_type.endswith(FROM_DATASET) and not config.env_params.gym_type.startswith("classification"):
-        continuous_traffic_generation(env, config.env_params.show_normal_traffic)  
+        continuous_traffic_generation(env, options = {"show_normal_traffic": config.env_params.show_normal_traffic})  
     
     # while True:
     #     time.sleep(5)

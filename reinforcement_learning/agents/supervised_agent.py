@@ -13,6 +13,8 @@ from utility.my_files import read_data_file
 class SupervisedAgent:
     def __init__(self, gym_type, json_file = None):
 
+        self.is_classification_gym_type = False
+
         if json_file is None :
             raise ValueError("A json_file must be provided for the SupervisedAgent.")   
     
@@ -20,6 +22,7 @@ class SupervisedAgent:
             X, y = self.init_attack_detection_env(json_file)
         elif gym_type in [GYM_TYPE[CLASSIFICATION_FROM_DATASET], GYM_TYPE[CLASSIFICATION]]:
             X, y = self.init_traffic_classification_env(json_file)
+            self.is_classification_gym_type = True
         elif gym_type in [GYM_TYPE[MARL_ATTACKS_FROM_DATASET], GYM_TYPE[MARL_ATTACKS]]:
             X, y = self.init_marl_attack_env(json_file)
         else:
@@ -37,14 +40,18 @@ class SupervisedAgent:
    
     def init_traffic_classification_env(self, json_file):
         statuses = read_data_file(json_file)
-        df = pd.DataFrame(list(statuses))
+        new_statuses = []
+        for status in statuses:
+            new_status = {}
+            new_status['id'] = status['id']
+            new_status['received_packets'] = sum(host['receivedPackets'] for host in status['hostStatusesStructured'].values())
+            new_status['received_bytes'] = sum(host['receivedBytes'] for host in status['hostStatusesStructured'].values())
+            new_status['transmitted_packets'] = sum(host['transmittedPackets'] for host in status['hostStatusesStructured'].values())   
+            new_status['transmitted_bytes'] = sum(host['transmittedBytes'] for host in status['hostStatusesStructured'].values()) 
+            new_statuses.append(new_status)
+        
+        df = pd.DataFrame(list(new_statuses))
         df.head()
-        #df.info()
-
-        del df['hostStatusesStructured']
-        del df['status']
-        del df['src_host']
-        del df['dst_host']
 
         df = df.dropna()
 
@@ -54,14 +61,19 @@ class SupervisedAgent:
         
     def init_attack_detection_env(self, json_file):
         statuses = read_data_file(json_file)
-        df = pd.DataFrame(list(statuses))
+        new_statuses = []
+        for status in statuses:
+            new_status = {}
+            new_status['is_attack'] = int(status['id'] >= 2)
+            new_status['packets'] = status['packets']
+            new_status['packets_percentage_change'] = status['packetsPercentageChange'] 
+            new_status['bytes'] = status['bytes']
+            new_status['bytes_percentage_change'] = status['bytesPercentageChange']  
+            new_statuses.append(new_status)
+        
+        df = pd.DataFrame(list(new_statuses))
         df.head()
         #df.info()
-        df['is_attack'] = (df['id'] >= 2).astype(int)
-
-        del df['hostStatusesStructured']
-        del df['status']
-        del df['id']
 
         df = df.dropna()
 
@@ -69,43 +81,51 @@ class SupervisedAgent:
         y = X.pop('is_attack')
         return X,y
 
+    def train(self, statuses):
+        """
+        trains the model with new data
+        """  
+        # Convert list of statuses to DataFrame
+        new_statuses = []
+        for status in statuses:
+            new_status = {}
+            new_status['is_attack'] = int(status['id'] >= 2)
+            new_status['packets'] = status['packets']
+            new_status['packets_percentage_change'] = status['packetsPercentageChange'] 
+            new_status['bytes'] = status['bytes']
+            new_status['bytes_percentage_change'] = status['bytesPercentageChange']  
+            new_statuses.append(new_status)
+        df = pd.DataFrame(new_statuses)
+
+        X = df[['packets', 'packets_percentage_change', 'bytes', 'bytes_percentage_change']]
+        y = df['is_attack']
+
+        # Fit the model on the new data
+        self.clf.fit(X, y)
 
     def predict(self, state):
         """
         receives normal state and predicts action
-        """   
-        row_data = pd.DataFrame({
-            'packets': [state[0]],
-            'bytes': [state[2]],
-            'packetsPercentageChange': [state[1]],
-            'bytesPercentageChange': [state[3]]
-        })
+        """  
+        if not self.is_classification_gym_type: #attacks, marl attacks
+            row_data = pd.DataFrame({
+                'packets': [state[0]],
+                'packets_percentage_change': [state[1]],
+                'bytes': [state[2]],
+                'bytes_percentage_change': [state[3]]
+            })
+        else:
+            row_data = pd.DataFrame({
+                'received_packets': [state[0]],
+                'received_bytes': [state[2]],
+                'transmitted_packets': [state[1]],
+                'transmitted_bytes': [state[3]]
+            })
         row_data_df = pd.DataFrame(row_data, index=[0])
 
         return self.clf.predict(row_data_df)
     
-    def predict_attack(self, state):
-        """
-        receives normal state and predicts action
-        """   
-        #TODO adapt to global_state
-        row_data = pd.DataFrame({
-            'packets': [state[0]],
-            'bytes': [state[2]],
-            'packetsPercentageChange': [state[1]],
-            'bytesPercentageChange': [state[3]]
-        })
-        row_data_df = pd.DataFrame(row_data, index=[0])
-        
-        # # Expected feature order for the classifier
-        # try:
-        #     row_data_df = row_data_df[self.expected_feature_order]
-        # except KeyError as e:
-        #     print(f"Errore: Una o più feature attese non sono presenti nel DataFrame di input: {e}")
-        #     print(f"Feature attese: {self.expected_feature_order}")
-        #     print(f"Feature nel DataFrame di input: {list(row_data_df.columns)}")
-        #     raise # KeyError("Le feature del DataFrame di input non corrispondono a quelle attese dal classificatore.")
 
-        return self.clf.predict(row_data_df)
+
 
 

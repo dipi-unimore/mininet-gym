@@ -15,6 +15,7 @@ from utility.my_log import information, debug
 
 import torch.nn as nn
 
+
 class AgentManager:
     def __init__(self, env : NetworkEnv, config): 
         self.env = env
@@ -91,35 +92,16 @@ class AgentManager:
             agent_param.episodes = self.episodes
         model = None
         #use lower case for algorithm names check
-        if algorithm.lower() == Q_LEARNING:
-            model =  QLearningAgent(env, agent_param)
-            try:            
-                if agent_param.load:
-                    path = agent_param.load_dir if agent_param.load_dir is not None else find_latest_file(self.training_directory,name,'json',self.net_config_filter)
-                    #TODO: check if file exists e raise exception. if not exists skip load
-                    #TODO: load all instances?                    
-                    model.load(self.training_directory+"/"+path)
-            except:
-                debug(f"No {name} model file\n") 
-            if name is not None:
-                model.name = f"{agent_param.name}_{name}"              
-            return model, {}, True
-        elif algorithm.lower() == SARSA:
-            model =  SARSAAgent(env, agent_param)
-            try:
-                if agent_param.load:                
-                    path = agent_param.load_dir if agent_param.load_dir is not None else  find_latest_file(self.training_directory,name,'json',self.net_config_filter)
-                    model.load(self.training_directory+"/"+path)
-            except:
-                debug(f"No {name} model file\n")     
-            if name is not None:
-                model.name = f"{agent_param.name}_{name}"                             
-            return model, {}, True        
-        elif algorithm.lower() == SUPERVISED:
+        if algorithm.lower() == ALGO_Q_LEARNING:
+            return self.create_custom_agent(QLearningAgent, env, agent_param, name), {}, True
+        elif algorithm.lower() == ALGO_SARSA:
+            return self.create_custom_agent(SARSAAgent, env, agent_param, name), {}, True       
+        elif algorithm.lower() == ALGO_SUPERVISED:
             return SupervisedAgent(env.gym_type, self.data_traffic_file), {}, False        
-        elif algorithm.lower() == PPO:
+        elif algorithm.lower() == ALGO_PPO:
             try:
-                model = self.load_agent_model(agent_param)
+                if agent_param.load:
+                    model = self.load_agent_model(agent_param, name)
             except Exception as e: 
                 debug(f"No {algorithm} model file\n")
             if model is None:
@@ -130,17 +112,14 @@ class AgentManager:
                         gamma=agent_param.gamma, 
                         ent_coef=agent_param.ent_coef, 
                         verbose=1)
-            cc = CustomCallback(training_start=self.before_episode, 
-                                training_end=self.after_episode)
-            cc.env = self.env
-            cc.show_action = agent_param.show_action
-            if name is not None:
-                cc.name = model.name = f"{agent_param.name}_{name}"                
+            cc = CustomCallback(env = env, agent_param=agent_param, name=name)
+            model.name = cc.name               
             return model, cc, False
             
-        elif algorithm.lower() == DQN:
-            try:                
-                model = self.load_agent_model(agent_param)
+        elif algorithm.lower() == ALGO_DQN:
+            try: 
+                if agent_param.load:               
+                    model = self.load_agent_model(agent_param, name)
             except:
                 debug(f"No {algorithm} model file\n")
             if model is None:
@@ -172,17 +151,14 @@ class AgentManager:
                 model.batch_size=agent_param.batch_size
                 model.target_update_interval=agent_param.target_update_interval
                 model.verbose=1                
-            cc = CustomCallback(training_start=self.before_episode, 
-                                training_end=self.after_episode)
-            cc.env = self.env
-            cc.show_action = agent_param.show_action
-            if name is not None:
-                cc.name = model.name = f"{agent_param.name}_{name}"                
+            cc = CustomCallback(env = env, agent_param=agent_param, name=name)
+            model.name = cc.name            
             return model, cc, False
             
-        elif algorithm.lower() == A2C:
+        elif algorithm.lower() == ALGO_A2C:
             try:
-                model = self.load_agent_model(agent_param)
+                if agent_param.load:
+                    model = self.load_agent_model(agent_param, name)
             except:
                 debug(f"No {algorithm} model file\n")            
 
@@ -194,17 +170,38 @@ class AgentManager:
                        gamma=agent_param.gamma, 
                        ent_coef=agent_param.ent_coef, 
                        verbose=1)
-            cc = CustomCallback(training_start=self.before_episode, 
-                                training_end=self.after_episode)
-            cc.env = self.env
-            cc.show_action = agent_param.show_action
-            if name is not None:
-                cc.name = model.name = f"{agent_param.name}_{name}"                
+            cc = CustomCallback(env = env, agent_param=agent_param, name=name)
+            model.name = cc.name               
             return model, cc, False
             
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")      
         
+    def create_custom_agent(self, agent_class, env, agent_param, host_name):
+        """
+        Create a custom RL agent (e.g., Q-Learning, SARSA) for a given host.
+        Args:
+            agent_class: The class of the custom agent to instantiate.
+            env: The environment to bind to the agent.
+            agent_param: Parameters for the agent.
+            host_name: Name of the host (only for multi-agent scenarios).
+        Returns:
+            model: An instance of the custom agent.
+        """
+        model =  agent_class(env, agent_param)
+        try:            
+            if agent_param.load:
+                path = agent_param.load_dir if agent_param.load_dir is not None else find_latest_file(self.training_directory,host_name,'json',self.net_config_filter)
+                if host_name is not None:
+                    filename =  f"{self.training_directory}/{path}/{agent_param.name}_{host_name}.json"                
+                else:    
+                    filename =  f"{self.training_directory}/{path}"             
+                model.load(filename)
+        except Exception as e:
+            debug(f"No {agent_param.name} model file\n") 
+        if host_name is not None:
+            model.name = f"{agent_param.name}_{host_name}"              
+        return model 
    
     def create_agents(self):
         for agent_param in self.agents_params:
@@ -214,7 +211,7 @@ class AgentManager:
                 agent_param.instance, agent_param.custom_callback, agent_param.is_custom_agent = self.create_agent(agent_param)
                 agent_param.max_steps = self.env.max_steps
     
-    def load_agent_model(self, agent_param):
+    def load_agent_model(self, agent_param, name=None):
         """
         Load an RL model (DQN, PPO, A2C) for a given agent.
 
@@ -224,6 +221,7 @@ class AgentManager:
             env: The environment to bind to the model.
             training_directory (str): Path to the directory with saved models.
             net_config_filter (str): Optional filter for file selection.
+            name (str, optional): Host name only for multi-agent scenarios.
 
         Returns:
             model: Loaded RL model ready to use.
@@ -233,41 +231,47 @@ class AgentManager:
         env = self.env
         training_directory = self.training_directory 
         net_config_filter = self.net_config_filter
-        # Check if the algorithm is supported
-        # and set the path to the model        
-        if algorithm not in ['DQN', 'PPO', 'A2C']:
+        # Check if the algorithm is supported and set the path to the model        
+        if algorithm not in [ALGO_DQN, ALGO_PPO, ALGO_A2C]:
             raise ValueError(f"Unsupported algorithm: {algorithm}")    
-        if agent_param.load:
+        
+        try:
             if agent_param.load_dir == 'None':
                 path = find_latest_file(training_directory, agent_param.name, 'zip', net_config_filter)
                 agent_param.load_dir = path[:-4]  # Strip .zip
             else:
-                path = self.training_directory+"/"+agent_param.load_dir
+                path = f"{self.training_directory}/{agent_param.load_dir}"
+                if name is not None:
+                    path = f"{path}/{agent_param.name}_{name}.zip"
 
-            # Load appropriate model
-            if algorithm == 'DQN':
-                model = DQN.load(path, env=env)
-            elif algorithm == 'PPO':
-                model = PPO.load(path, env=env)
-            elif algorithm == 'A2C':
-                model = A2C.load(path, env=env)
-            return model
-        else:
+            assert os.path.isfile(path), f"Model file not found at {path}"
+        except AssertionError as e:
+            debug(str(e))
             return None
+        
+        # Load appropriate model
+        if algorithm == ALGO_DQN:
+            model = DQN.load(path, env=env)
+        elif algorithm == ALGO_PPO:
+            model = PPO.load(path, env=env)
+        elif algorithm == ALGO_A2C:
+            model = A2C.load(path, env=env)
+        return model
+
     
-    def before_episode(self, callback):
-        callback.episode_rewards=[]
-        callback.episode_statuses=[]
-        callback.ground_truth=[]
-        callback.predicted=[]        
-        self.env.early_exit = True
-        information(f"************* Episode {callback.episode} *************\n", callback.locals['tb_log_name'])         
+    # def before_episode(self, callback):
+    #     callback.episode_rewards=[]
+    #     callback.episode_statuses=[]
+    #     callback.ground_truth=[]
+    #     callback.predicted=[]        
+    #     self.env.early_exit = True
+    #     information(f"************* Episode {callback.episode} *************\n", callback.locals['tb_log_name'])         
    
-    def after_episode(self, callback):
-        cumulative_reward = sum(callback.episode_rewards)
-        callback.evaluate_episode(callback.episode, cumulative_reward)
-        callback.print_metrics(cumulative_reward)
-        # information(f"Evalueting...")     
-        # mean_reward, std_reward = evaluate_policy(callback_self.model, self.env, n_eval_episodes=1)
-        # information(f"{mean_reward} {std_reward}")
-        information(f"*** Episode {callback.episode} finished ***\n", callback.locals['tb_log_name'])             
+    # def after_episode(self, callback):
+    #     cumulative_reward = sum(callback.episode_rewards)
+    #     callback.evaluate_episode(callback.episode, cumulative_reward)
+    #     callback.print_metrics(cumulative_reward)
+    #     # information(f"Evalueting...")     
+    #     # mean_reward, std_reward = evaluate_policy(callback_self.model, self.env, n_eval_episodes=1)
+    #     # information(f"{mean_reward} {std_reward}")
+    #     information(f"*** Episode {callback.episode} finished ***\n", callback.locals['tb_log_name'])             

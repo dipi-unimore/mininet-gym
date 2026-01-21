@@ -6,8 +6,8 @@ from reinforcement_learning.attack_detect.network_env_attack_detect import Netwo
 from reinforcement_learning.agents.qlearning_agent import QLearningAgent
 from reinforcement_learning.agents.sarsa_agent import SARSAAgent
 from reinforcement_learning.agents.supervised_agent import SupervisedAgent
-from reinforcement_learning.network_env import get_normalize_state
-from utility.constants import ATTACKS, GYM_TYPE, SUPERVISED, SystemLevels, SystemModes, SystemStatus
+from reinforcement_learning.network_env import get_normalized_state
+from utility.constants import ALGO_SUPERVISED, ATTACKS, GYM_TYPE, SystemLevels, SystemModes, SystemStatus
 from utility.my_statistics import plot_agent_test_errors, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_statuses, plot_enviroment_execution_statutes, plot_radar_chart, plot_train_types, plot_agent_test, plot_test_confusion_matrix
 from utility.my_files import save_data_to_file, read_data_file, create_directory_training_execution
 from utility.my_log import error, information, debug, notify_client 
@@ -27,7 +27,7 @@ def attack_detect_main(config, env: NetworkEnvAttackDetect):
         agents_metrics = defaultdict(list)
         train_agent.env = env
         if config.env_params.gym_type==ATTACKS:
-            create_and_start_training_agent(am)
+            start_training_agent(am)
         else:
             statuses = read_data_file(config.env_params.data_traffic_file)
             episodes = int((len(statuses) - config.env_params.test_episodes) / (config.env_params.max_steps + 1))
@@ -38,8 +38,9 @@ def attack_detect_main(config, env: NetworkEnvAttackDetect):
                     continue
                 train_agent(agent)
                 #Step 2: plotting and saving agent data
-                plot_and_save_data_agent(agent, config)
-                agents_metrics[agent.name]=agent.instance.metrics
+                if config.env_params.print_training_chart :
+                    plot_and_save_data_agent(agent, config)
+                    agents_metrics[agent.name]=agent.instance.metrics
             
         if not env.stop_event.is_set():
             if config.env_params.print_training_chart:
@@ -64,6 +65,8 @@ def attack_detect_main(config, env: NetworkEnvAttackDetect):
 
         #Plotting and saving all network traffic     
         information("Plotting all network traffic\n")
+        #comunicate with web UI to change status in plotting charts. No buttons  visible
+        notify_client(level=SystemLevels.STATUS, status=SystemStatus.RUNNING, mode=SystemModes.PLOTTING, message="Plotting evaluation data...")        
         if len(env.statuses)>2:
             statuses = list(env.statuses)
             save_data_to_file(statuses, config.training_execution_directory, "statuses")
@@ -80,7 +83,7 @@ def attack_detect_main(config, env: NetworkEnvAttackDetect):
         notify_client(level=SystemLevels.STATUS, status=SystemStatus.FINISHED, mode=SystemModes.TRAINING, message="Finished. Ready to start again...") 
 
 
-def create_and_start_training_agent(am):
+def start_training_agent(am):
     # Start training threads for each agent
     notify_client(level=SystemLevels.STATUS, status=SystemStatus.RUNNING, mode=SystemModes.TRAINING, message="Started training...")
     training_threads = []
@@ -102,6 +105,10 @@ def create_and_start_training_agent(am):
     # Wait for training threads to finish
     for t in training_threads:
         t.join()
+    for agent in am.agents_params:
+        if agent.algorithm.lower() == ALGO_SUPERVISED and len(am.env.statuses)>0:
+            information(f"Training supervised agent {agent.name}")
+            agent.instance.train(am.env.statuses)
     debug("Train_agent_threads finished")
     
 def train_agent(agent):
@@ -118,9 +125,11 @@ def train_agent(agent):
             agent.instance.learn(agent.episodes, train_agent.env.stop_event)     
         else:   
             for episode in range(agent.episodes):
-                agent.custom_callback.episode = episode+1
-                agent.custom_callback.stop_event = train_agent.env.stop_event
+                if train_agent.env.stop_event.is_set():
+                    break               
+                agent.custom_callback.before_episode(episode+1)
                 agent.instance.learn(total_timesteps=agent.max_steps, callback=agent.custom_callback, progress_bar=agent.progress_bar)
+                agent.custom_callback.after_episode()                
        
     except Exception as error:
         # handle the exception
@@ -273,7 +282,7 @@ def evaluate_attack_detect_agent(am: AgentManager):
                 time.sleep(1)
             information(f"\n\n************* Episode {episode+1} *************\n")            
             #self.env.is_state_normalized = True
-            state, _ = env.reset(is_real_state= True) #state continuos
+            state, _ = env.reset(options={"is_real_state": True}) #state continuos
             
             g=np.zeros(env.actions_number)
             is_attack = 1 if env.global_state.status["id"]>0 else 0
@@ -285,12 +294,12 @@ def evaluate_attack_detect_agent(am: AgentManager):
                 if model is None:        
                     raise("The model can't be None. Create configuration")
                 if isinstance(model, SupervisedAgent):
-                    prediction = model.predict_attack(state)                    
+                    prediction = model.predict(state)                    
                 elif isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
                     #discretized_state = self.env.get_discretized_state(self.env.real_state)
                     prediction = model.predict(state)
                 else:
-                    normalized_state = get_normalize_state(state, env.low_to_normalize, env.high_to_normalize) 
+                    normalized_state = get_normalized_state(state, env.low_to_normalize, env.high_to_normalize) 
                     prediction, _states = model.predict(normalized_state, deterministic=True)
                 color = Fore.RED           
                 if prediction == is_attack:

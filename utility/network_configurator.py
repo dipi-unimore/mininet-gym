@@ -107,6 +107,19 @@ def create_network(params = {
     
     return net
 
+def get_host_agents_by_network_config(config_network: str = '1_5_5') -> List[str]:
+    """Get host agent names based on the network configuration string."""
+    try:
+        num_switches, num_hosts, num_iot = map(int, config_network.split('_'))
+    except ValueError:
+        error(f"Invalid network configuration format: {config_network}. Expected format 'num_switches_num_hosts_num_iot'.")
+        return []
+    
+    host_agents = [f'h{i+1}' for i in range(num_hosts)]
+    host_agents.extend([f'iot{i+1}' for i in range(num_iot)])
+    
+    return host_agents
+
 def stop(net: Mininet):
     regain_root()
     if net is not None and hasattr(net, 'stop'):
@@ -362,49 +375,6 @@ def format_bytes(num_bytes: int | float | None) -> str:
 
     return f"{formatted_value}{unit}"
 
-# def get_host_switch_and_port_by_host_name(net: Mininet, host_name):
-#     """
-#     Retrieves the host object, the connected switch, and the OpenFlow port number 
-#     on the switch for the specified host.
-#     """
-#     host = net.get(host_name)
-    
-#     # 1. Get the first (and usually only) network interface object of the host
-#     # This object is of type Mininet.Interface
-#     host_intf = host.intfs[0]
-    
-#     # Check if the interface is actually connected
-#     if not host_intf.link:
-#         raise Exception(f"Host {host_name} interface {host_intf.name} is not connected to a link.")
-
-#     # 2. Get the Link object connected to this interface
-#     link = host_intf.link
-    
-#     return get_host_switch_and_port_by_link(link=link, host=host)
-    
-  
-# def get_host_switch_and_port_by_link(link: os.link, host: Host):  
-#     # 3. Determine the Switch Interface and the Switch Node
-#     # The Link object holds two interfaces (intf1 and intf2).
-#     # We find which one belongs to the switch.
-    
-#     # switch_intf is the interface connected to the link that IS NOT the host's interface
-#     if link.intf1.node == host:
-#         switch_intf = link.intf2
-#     else:
-#         # This branch handles cases where the host is connected as intf2
-#         switch_intf = link.intf1
-    
-#     port_num = switch_intf.name  # The OpenFlow port number on the switch
-
-#     # 4. Get the Switch object
-#     switch = switch_intf.node
-    
-#     # 5. Check if the switch object is actually a switch (and not another host)
-#     if not switch.isSwitch:
-#          raise Exception(f"Error: {switch.name} is not a switch.")
-            
-#     return host, switch, port_num
 
 def get_switch_name_by_host_name(net: Mininet, host_name:str) -> str:
     switch_port_name = net.hosts_links[host_name]["link"].intf2.name

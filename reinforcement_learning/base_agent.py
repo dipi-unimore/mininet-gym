@@ -85,8 +85,7 @@ class BaseAgent(ABC):
        
     def manage_step_data(self, action, reward, infos, status):
         status['action_choosen'] = action
-        status['traffic_type'] = infos['action_correct']
-        self.episode_statuses.append(status)            
+        status['traffic_type'] = infos['action_correct']          
         self.rewards.append(reward)
         self.ground_truth.append(infos['Ground_truth_step'])
         self.predicted.append(infos['Predicted_step']) 
@@ -98,41 +97,57 @@ class BaseAgent(ABC):
             'episode': self.episode,
             'step': self.current_step,
             'status': {'id': infos['action_correct'], 'text': infos["text_action_correct"]},
-            'action': {'choosen': action, 'isCorrect': infos['is_correct_action']},  
+            'action': {'choosen': int(action), 'isCorrect': bool(infos['is_correct_action'])},  
             'correctPredictions': self.correct_predictions,         
-            'reward': reward
+            'reward': float(reward)
         }
         if hasattr(self, 'is_team_member') and hasattr(self, 'is_team_coordinator'):
             if self.is_team_member and not self.is_team_coordinator:
                 step_data['host'] = self.name.split("_").pop()
+                step_data.update({
+                    'receivedPackets': int(infos['status']['received_packets']),
+                    'receivedPacketsPercentageChange': float(infos['status']['received_packets_percentage_change']),
+                    'receivedBytes': int(infos['status']['received_bytes']),
+                    'receivedBytesPercentageChange': float(infos['status']['received_bytes_percentage_change']),
+                    'transmittedPackets': int(infos['status']['transmitted_packets']),
+                    'transmittedPacketsPercentageChange': float(infos['status']['transmitted_packets_percentage_change']),
+                    'transmittedBytes': int(infos['status']['transmitted_bytes']),
+                    'transmittedBytesPercentageChange': float(infos['status']['transmitted_bytes_percentage_change'])
+                })  
+                status.update({
+                    'id' :  infos['status']['id'],
+                    'status' :  infos['status']['status'],
+                    'received_packets': infos['status']['received_packets'] ,
+                    'received_bytes': infos['status']['received_bytes'] ,
+                    'received_packets_percentage_change': infos['status']['received_packets_percentage_change'] ,
+                    'received_bytes_percentage_change': infos['status']['received_bytes_percentage_change'] ,
+                    'transmitted_packets': infos['status']['transmitted_packets'] ,
+                    'transmitted_bytes': infos['status']['transmitted_bytes'] ,
+                    'transmitted_packets_percentage_change': infos['status']['transmitted_packets_percentage_change'] ,
+                    'transmitted_bytes_percentage_change': infos['status']['transmitted_bytes_percentage_change']
+                })  
+
+                            
             elif self.is_team_coordinator and self.is_team_member:
                 step_data['host'] = COORDINATOR
+                step_data.update({
+                    'packets': int(status['packets']),
+                    'bytes': int(status['bytes']),
+                    'packetsPercentageChange': float(status['packets_percentage_change']),
+                    'bytesPercentageChange': float(status['bytes_percentage_change'])
+                    })             
         else:
             step_data['host'] = "single_agent" 
-        if 'packets' in status:
             step_data.update({
                 'packets': int(status['packets']),
                 'bytes': int(status['bytes']),
                 'packetsPercentageChange': float(status['packets_percentage_change']),
                 'bytesPercentageChange': float(status['bytes_percentage_change'])
-                })
-        else:
-            step_data.update({
-                'receivedPackets': int(status['received_packets']),
-                'receivedPacketsPercentageChange': float(status['received_packets_percentage_change']),
-                'receivedBytes': int(status['received_bytes']),
-                'receivedBytesPercentageChange': float(status['received_bytes_percentage_change']),
-                'transmittedPackets': int(status['transmitted_packets']),
-                'transmittedPacketsPercentageChange': float(status['transmitted_packets_percentage_change']),
-                'transmittedBytes': int(status['transmitted_bytes']),
-                'transmittedBytesPercentageChange': float(status['transmitted_bytes_percentage_change'])
-            })
+                })  
+        self.episode_statuses.append(status)            
+               
+
         notify_client(level=SystemLevels.DATA, agent_name = self.name, step_data = step_data)
-        # if not hasattr(self, 'steps_data'):
-        #     self.steps_data = []
-        # self.steps_data.append(step_data)
-
-
     
     def evaluate_episode(self, episode, cumulative_reward, exploration_count=0, exploitation_count=0):
         # Calculate and store metrics at the end of the episode with library sklearn
@@ -168,7 +183,7 @@ class BaseAgent(ABC):
                         'precision': precision_episode,
                         'recall': recall_episode,
                         'f1Score': f1_score_episode,
-                        'cumulativeReward': cumulative_reward}
+                        'cumulativeReward': float(cumulative_reward)}
                 notify_client(level=SystemLevels.DATA, agent_name = self.name, metrics = metrics)   
             except Exception as e:
                 debug(Fore.RED + f"Error notifying client with metrics: {e}\n"+Fore.WHITE)
@@ -195,7 +210,7 @@ class BaseAgent(ABC):
         count_actions_by_type =  {i: 0 for i in range(self.env.action_space.n)}        
         self.episode_statuses = []
         self.exploration_count,  self.exploitation_count = 0, 0  # Reset counters for each episode
-        state, _ = self.env.reset(is_discretized_state = is_discretized_state)  
+        state, _ = self.env.reset(options={"is_discretized_state": is_discretized_state, "is_real_state": False})  
         return  cumulative_reward, state, done, truncated, count_actions_by_type
     
     
@@ -257,28 +272,6 @@ class BaseAgent(ABC):
             discrete_state.append(bin_index)
         return tuple(discrete_state)
     
-    def track_metrics(self, generated_traffic_type, predicted_traffic_type):
-        ground_truth = [0, 0, 0, 0]
-        predicted = [0, 0, 0, 0]
-
-        ground_truth[generated_traffic_type] = 1
-        predicted[predicted_traffic_type] = 1
-
-        for gt, pred in zip(ground_truth, predicted):
-            if gt == 1 and pred == 1:
-                self.TP += 1  # True Positive: correctly predicted traffic
-            elif gt == 0 and pred == 0:
-                self.TN += 1  # True Negative: correctly predicted no traffic
-            elif gt == 0 and pred == 1:
-                self.FP += 1  # False Positive: predicted traffic is different
-            elif gt == 1 and pred == 0:
-                self.FN += 1  # False Negative: missed the actual traffic
 
    
-    def calculate_metrics(self):
-        TP, FP, TN, FN = self.TP, self.FP, self.TN, self.FN
-        accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) != 0 else 0
-        precision = TP / (TP + FP) if (TP + FP) != 0 else 0
-        recall = TP / (TP + FN) if (TP + FN) != 0 else 0
-        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) != 0 else 0
-        return accuracy, precision, recall, f1_score    
+    

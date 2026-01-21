@@ -1,12 +1,12 @@
-import datetime
-import json
-import shutil
-import yaml
-import os
-from flask import Flask, render_template, request, jsonify, send_file
+import datetime, json, shutil, numpy as np, yaml, os
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, Blueprint
 from threading import Thread, Event
 
-from utility.constants import SystemModes, SystemStatus
+from reinforcement_learning.marl.constants import COORDINATOR
+from utility.constants import ALGO_A2C, ALGO_DQN, ALGO_PPO, ALGO_Q_LEARNING, ALGO_SARSA, ALGO_SUPERVISED, ATTACKS, ATTACKS_FROM_DATASET, CLASSIFICATION, CLASSIFICATION_FROM_DATASET, FROM_DATASET, MARL_ATTACKS, MARL_ATTACKS_FROM_DATASET, SystemModes, SystemStatus
+from utility.my_files import read_data_file
+from utility.network_configurator import get_host_agents_by_network_config
+from utility.params import read_config_file
 from .socket_handler import init_socketio
 
 # --- Config and Global Variables ---
@@ -18,6 +18,18 @@ APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__,
             static_folder=os.path.join(APP_ROOT, 'static'),
             template_folder=os.path.join(APP_ROOT, 'templates'))
+
+
+# # blueprint for "extra" section with different static folder name
+# extra_bp = Blueprint(
+#     'extra', __name__, 
+#     static_url_path='/static-training', # URL 
+#     static_folder="../_training" # Name of the folder
+# )
+# #Advantage: can call from dir in jinja2 using: {{ url_for('extra.static', filename='image.png') }}.
+
+# app.register_blueprint(extra_bp)
+
 
 current_config = {}
 main_ref = None 
@@ -33,6 +45,20 @@ def index():
     if socketio_instance and hasattr(socketio_instance, 'cfg'):
         current_config['cfg'] = socketio_instance.cfg
     return render_template('index.html', config=json.dumps(current_config))
+
+
+# Route to serve files from the training directory
+@app.route('/static-training/<path:filename>')
+def training_static(filename):
+    # Get the training directory from the current configuration
+    global current_config
+    folder_name = current_config.get("training_directory", "_training")
+    
+    # Build the absolute path to the training directory
+    base_path = os.path.abspath(os.path.join(app.root_path, "..", folder_name))
+    
+    return send_from_directory(base_path, filename)
+
 
 @app.route('/get_config', methods=['GET'])
 def get_config():
@@ -85,7 +111,7 @@ def download_results():
     
 
     
-    # Zip expreiment results and send the file to download
+    # Zip experiment results and send the file to download
     try:
         directory_to_zip = current_config.get("training_execution_directory", None)
         if directory_to_zip is None or not os.path.isdir(directory_to_zip):
@@ -133,6 +159,266 @@ def start_training():
     
     return jsonify({"status": SystemStatus.STARTING, "message": "Training starting..."}), 200
 
+
+@app.route('/get_results_dir_list', methods=['GET'])
+def get_results_dir_list():
+    results_dir_list = []
+    expected_files = ["log.txt", "metrics_comparison.png", "radar_chart.png", "statuses.json"]
+    data_file_in_agent_folder = "data.json"
+    test_dir = "TEST"
+    expected_files_in_agent_folder_print_training_chart_enabled = [ "matrix.png", "metrics.png", "metrics_combined.png", "rewards.png"]    
+    training_directory = current_config.get("training_directory", None)
+    if training_directory and os.path.isdir(training_directory):
+        for gym_type in [MARL_ATTACKS, ATTACKS, CLASSIFICATION, MARL_ATTACKS_FROM_DATASET, ATTACKS_FROM_DATASET, CLASSIFICATION_FROM_DATASET]:
+            path = os.path.join(training_directory, gym_type)
+            if os.path.isdir(path):
+                datas_gym_type = []
+                for d in os.listdir(path):
+                    dir_path = os.path.join(path, d)
+                    if os.path.isdir(dir_path):
+                        str_date = d.split('_')[0]
+                        #if date is in format YYYYMMDD_HHMMSS else skip
+                        try:
+                            date_time = datetime.datetime.strptime(str_date, "%Y%m%d-%H%M%S")
+                        except ValueError:
+                            continue
+                        #now control if there is at least an agent folder inside with the data.json with an accuracy, then test forder exists,
+                        # the config.yaml file exists, log.txt exists, metrics_comparison.png exists, radar_chart.png exists, statuses.json exists 
+                        # we do this looking for for all files and folders in dir_path, and controlling one by one the existence
+                        # from config.yaml, read the gym_type, network_config and agent_names
+                        
+                        _, config_yaml = read_config_file(os.path.join(dir_path, "config.yaml"))
+                        env_params = config_yaml.get("env_params", None)
+                        if env_params is None:
+                            continue
+                        gym_type_in_config = env_params.get("gym_type", "")
+                        if gym_type_in_config != gym_type:
+                            continue
+                        print_training_chart = env_params.get("print_training_chart", False)
+                        net_params = env_params.get("net_params", None)
+                        if net_params is None:
+                            continue
+                        training_episodes = env_params.get("episodes", 0)
+                        max_steps = env_params.get("max_steps", 0)
+                        test_episodes = env_params.get("test_episodes", 0)
+                        network_config = f"{net_params.get("num_switches", "")}_{net_params.get("num_hosts", "")}_{net_params.get("num_iot", "")}"
+                        agents = config_yaml.get("agents", [])
+                        agent_names = [agent.get("name", "") for agent in agents if 
+                                       agent.get("enabled", False) and 
+                                       not agent.get("skip_learn", True) and 
+                                       not agent.get("name", "").startswith(ALGO_SUPERVISED)]
+                        data_gym_type={
+                            "network_config": network_config,
+                            "datetime": str_date,
+                            "training_episodes": training_episodes,
+                            "max_steps": max_steps,
+                            "test_episodes": test_episodes
+                        }
+                        #check agents directories
+                        agents_ok = True
+                        agents_data = []
+                        for agent_name in agent_names:
+                            all_accuracies = []
+                            agent_path = os.path.join(dir_path, agent_name)
+                            if not os.path.isdir(agent_path):
+                                agents_ok = False
+                                break
+                            #check the files expected exist
+                            if print_training_chart and not gym_type_in_config.startswith( MARL_ATTACKS):
+                                for ef in expected_files_in_agent_folder_print_training_chart_enabled :
+                                    if not os.path.isfile(os.path.join(agent_path, ef)):
+                                        agents_ok = False
+                                        break
+                            #check the data.json file exists
+                            if not os.path.isfile(os.path.join(agent_path, data_file_in_agent_folder)):
+                                agents_ok = False
+                                break
+
+                            data = read_data_file(os.path.join(agent_path, data_file_in_agent_folder))
+                            min_accuracy = 0
+                            name_min_accuracy = ""
+                            max_accuracy = 0
+                            name_max_accuracy = ""
+                            if gym_type_in_config.startswith( MARL_ATTACKS):
+                                accuracy = []               
+                                for _,metrics in data.get("train_metrics", {}).items():
+                                    accuracy.append(float(np.mean(metrics.get("accuracy", 0))))
+                                accuracy = float(np.mean(accuracy)) if accuracy else 0
+                                training_episodes = len(data.get("ground_truth", {}).get(COORDINATOR, [])) if "ground_truth" in data else training_episodes
+                                max_steps = data["train_indicators"][COORDINATOR][0]['steps']
+                            else:
+                                max_steps = data["train_indicators"][0]['steps']                                
+                                training_episodes = len(data.get("ground_truth", {})) if "ground_truth" in data else training_episodes
+                                accuracy = float(np.mean(data.get("train_metrics", {}).get("accuracy", 0))) if data else 0
+                            if accuracy == 0:
+                                agents_ok = False
+                                break
+                            #in charts we have the name of all the png files in the agent folder
+                            charts = []
+                            if print_training_chart:
+                                for f in os.listdir(agent_path):
+                                    if f.endswith(".png"):
+                                        charts.append(f)
+                            agents_data.append({
+                                "agent_name": agent_name,
+                                "accuracy": accuracy,
+                                "charts": charts,
+                                "print_training_chart": print_training_chart
+                            })
+                            if accuracy > min_accuracy:
+                                min_accuracy = accuracy
+                                name_min_accuracy = agent_name
+                            if accuracy < max_accuracy:
+                                max_accuracy = accuracy
+                                name_max_accuracy = agent_name
+                            all_accuracies.append(accuracy)
+                        if not agents_ok:
+                            continue
+                        mean_accuracy = float(np.mean(all_accuracies)) if all_accuracies else 0
+                        data_gym_type["mean_accuracy"] = mean_accuracy
+                        data_gym_type["min_accuracy"] = min_accuracy
+                        data_gym_type["name_min_accuracy"] = name_min_accuracy
+                        data_gym_type["max_accuracy"] = max_accuracy
+                        data_gym_type["name_max_accuracy"] = name_max_accuracy
+                        data_gym_type["agents_data"] = agents_data
+                        
+                        #check the test folder exists
+                        if not os.path.isdir(os.path.join(dir_path, test_dir)):
+                            continue   
+                        #check and read test.json file
+                        test_file_path = os.path.join(dir_path, test_dir, "test.json")
+                        if not os.path.isfile(test_file_path):
+                            continue
+                        test_data = read_data_file(test_file_path)
+                        data_gym_type["test_scores"] = test_data["score"] if "score" in test_data else None
+                        if data_gym_type["test_scores"] is None:
+                            continue
+                        min_score = test_episodes
+                        name_min_score = ""
+                        max_score = 0
+                        name_max_score = ""
+                        mean_score = []   
+                        for agent_name,agent_score in test_data["score"].items():                        
+                            if gym_type_in_config.startswith( MARL_ATTACKS):
+                                mean_agent_score = []            
+                                for host_name,host_score in agent_score.items():
+                                    mean_agent_score.append(host_score)
+                                mean_agent_score = float(np.mean(mean_agent_score)) if mean_agent_score else 0
+                            else:
+                                mean_agent_score = agent_score
+                            if mean_agent_score < min_score:
+                                min_score = mean_agent_score
+                                name_min_score = agent_name
+                            if mean_agent_score > max_score:
+                                max_score = mean_agent_score
+                                name_max_score = agent_name
+                            mean_score.append(mean_agent_score)
+                        mean_score = float(np.mean(mean_score)) if mean_score else 0
+                        if gym_type_in_config.startswith( MARL_ATTACKS):
+                            test_episodes = len(test_data["ground_truth"][COORDINATOR]) if "ground_truth" in test_data else test_episodes
+                        else:
+                            test_episodes = len(test_data["ground_truth"]) if "ground_truth" in test_data else test_episodes
+                        data_gym_type["test_episodes"] = test_episodes
+                        data_gym_type["mean_score"] = mean_score
+                        data_gym_type["min_score"] = min_score
+                        data_gym_type["name_min_score"] = name_min_score
+                        data_gym_type["name_max_score"] = name_max_score
+                        data_gym_type["max_score"] = max_score
+                        
+                        #get all png filese in test folder
+                        test_charts = []
+                        for f in os.listdir(os.path.join(dir_path, test_dir)):
+                            if f.endswith(".png"):
+                                test_charts.append(f)
+                        data_gym_type["test_charts"] = test_charts                       
+                                       
+                        #check the expected files in dir_path
+                        files_ok = True
+                        for ef in expected_files:
+                            if not os.path.isfile(os.path.join(dir_path, ef)):
+                                files_ok = False
+                                print(f"Missing file: {ef} in {dir_path}")
+                                break
+                        if not files_ok:
+                            continue
+                        
+                        data_gym_type["files"] = expected_files
+                        data_gym_type["path"] = dir_path.replace(f"{training_directory}/", '')
+                        #if everything is ok, append the data                    
+                        datas_gym_type.append(data_gym_type)                               
+
+                        
+                results_dir_list.append({"gym_type": gym_type, "data": datas_gym_type})        
+                       
+
+    return jsonify({"results_dir_list": results_dir_list})
+
+
+@app.route('/get_load_dir_list', methods=['GET'])
+def get_load_dir_list():
+    gym_type = request.args.get('gym_type', '')
+    network_config = request.args.get('network_config', '')
+    agent_name = request.args.get('agent_name', '')
+    if agent_name.lower().startswith(ALGO_DQN) or agent_name.lower().startswith(ALGO_A2C) or agent_name.lower().startswith(ALGO_PPO):
+        extension = "zip"
+    elif agent_name.lower().startswith(ALGO_Q_LEARNING) or agent_name.lower().startswith(ALGO_SARSA) :                    
+        extension = "json"    
+    
+    # Logic to get the list of load directories based on the parameters
+    # This is a placeholder implementation; replace it with actual logic
+    load_dir_list = []
+    gym_type_training_directories = []
+    training_directory = current_config.get("training_directory", None)
+    gym_type_training_directory = training_directory + f"/{gym_type}"
+    gym_type_training_directories.append(gym_type_training_directory)
+    if gym_type.endswith(FROM_DATASET):
+        gym_type_training_directories.append(gym_type_training_directory.replace(f"_{FROM_DATASET}", ''))
+    else :
+        gym_type_training_directories.append(gym_type_training_directory + f"_{FROM_DATASET}")
+    
+    dir_list =  []
+    for dir in gym_type_training_directories:
+        if os.path.isdir(dir):
+            dir_list.extend([os.path.join(dir, d) for d in os.listdir(dir) if d.__contains__(network_config) and os.path.isdir(os.path.join(dir, d))])
+    
+    for d in dir_list:    
+        for da in os.listdir(d):  
+            path = os.path.join(d, da)  
+            if da == agent_name and os.path.isdir(path):
+                if gym_type.startswith(MARL_ATTACKS):
+                    #in marl we have multiple agents saved in subfolders
+                    host_agents = get_host_agents_by_network_config(network_config)
+                    host_agents.append(COORDINATOR)
+                    for host_agent in host_agents:
+                        isOk = True
+                        if not os.path.isfile(f"{path}/{agent_name}_{host_agent}.{extension}"):
+                            isOk = False
+                            break
+                    if not isOk or not os.path.isfile(f"{path}/data.json"):
+                        continue
+                    data = read_data_file(f"{path}/data.json")
+                    complete_path = path.replace(f"{training_directory}/", '')
+                    accuracy = []               
+                    for _,metrics in data.get("train_metrics", {}).items():
+                        accuracy.append(float(np.mean(metrics.get("accuracy", 0))))
+                        
+                    load_dir_list.append({
+                        "accuracy": float(np.mean(accuracy)) if accuracy else 0,
+                        "datetime": path.split('/')[2].split('_')[0],
+                        "path": complete_path
+                    })  
+                else:
+                    if not os.path.isfile(f"{path}/{agent_name}.{extension}") or not os.path.isfile(f"{path}/data.json"):
+                        continue
+                    data = read_data_file(f"{path}/data.json")
+                    complete_path = path.replace(f"{training_directory}/", '')+f"/{agent_name}.{extension}"               
+                    load_dir_list.append({
+                        "accuracy": float(np.mean(data.get("train_metrics", {}).get("accuracy", 0))) if data else 0,
+                        "datetime": path.split('/')[2].split('_')[0],
+                        "path": complete_path
+                    })            
+      
+    return jsonify({"load_dir_list": load_dir_list})
 
 @app.route('/pause_training', methods=['POST'])
 def pause_training():

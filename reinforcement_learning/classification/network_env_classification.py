@@ -1,16 +1,17 @@
-import threading
-from reinforcement_learning.adversarial_agent import generate_random_traffic
+
+from reinforcement_learning.agents.adversarial_agent import generate_random_traffic
 from reinforcement_learning.classification.constants import AGENT_ACTIONS, REWARDS
 from reinforcement_learning.classification.instant_state import InstantState
-from reinforcement_learning.network_env import NetworkEnv, get_agent_name
+from reinforcement_learning.network_env import NetworkEnv, get_agent_name, get_normalized_state
 from utility.constants import  GYM_TYPE, CLASSIFICATION_FROM_DATASET, CLASSIFICATION, NORMAL, TRAFFIC_TYPE_ID_MAPPING, SystemLevels, SystemModes, SystemStatus, TrafficTypes
+from utility.my_files import save_data_to_file
 from utility.my_log import debug, information, notify_client
 from utility.network_configurator import comunicate_no_traffic_detected, comunicate_ping_traffic_detected, comunicate_tcp_traffic_detected, comunicate_udp_traffic_detected, format_bytes
-from utility.params import Params
+from utility.params import Params, read_config_file
 from gymnasium import spaces
 from colorama import Fore
 from os import error
-import copy, time,  numpy as np, json as jsonlib
+import copy, time,  numpy as np
 
 
 class NetworkEnvClassification(NetworkEnv):     
@@ -32,14 +33,16 @@ class NetworkEnvClassification(NetworkEnv):
         self.hosts = self.net.hosts         
         
          # Network params
-        self.threshold_packets = 1e4
-        self.threshold_var_packets = 100
-        self.threshold_bytes = 1e7 
-        self.threshold_var_bytes = 100      
+        self.threshold_packets = params.classification.thresholds.packets
+        self.threshold_bytes = params.classification.thresholds.bytes
+        self.threshold_var_packets = params.classification.thresholds.var_packets
+        self.threshold_var_bytes = params.classification.thresholds.var_bytes    
         
         # Define action and observation space, gym.spaces objects
-        self.low = np.array([0,-self.threshold_var_packets,0,-self.threshold_var_bytes])        
-        self.high = np.array([self.threshold_packets, self.threshold_var_packets, self.threshold_bytes, self.threshold_var_bytes])        #fixed for every network
+        #self.low = np.array([0,-self.threshold_var_packets,0,-self.threshold_var_bytes])        
+        #self.high = np.array([self.threshold_packets, self.threshold_var_packets, self.threshold_bytes, self.threshold_var_bytes])        #fixed for every network
+        self.low = np.array([0,0,0,0])        
+        self.high = np.array([self.threshold_packets, self.threshold_packets, self.threshold_bytes, self.threshold_bytes]) 
         self.observation_space = spaces.Box(low=0, high=self.high, shape=(len(self.low),), dtype=np.float64)
         
         # Define the number of discrete bins for each observation dimension
@@ -50,15 +53,9 @@ class NetworkEnvClassification(NetworkEnv):
         high = np.floor(np.log10(self.high)).astype(int)
         self.bins = [np.logspace(low[i], high[i], self.n_bins) for i in range(self.observation_space.shape[0])]
         
-        self.sync_time = 3 #seconds
-        
-        self.global_prev_state = self.global_state = InstantState(self.hosts)
-    
-        if self.gym_type == GYM_TYPE[CLASSIFICATION]:   
-            self.update_state_thread_instance = threading.Thread(target=self.update_state_thread)
-            self.update_state_thread_instance.start()
+        self.global_prev_state = self.global_state = InstantState(self.hosts)   
             
-        self.reset()
+        self.reset()   
     
     def update_hosts_status(self, generated_traffic_type_text, src_host, dst_host):
         """
@@ -73,18 +70,23 @@ class NetworkEnvClassification(NetworkEnv):
         """
         statuses = {}
         host_tasks = {}
-        for host in self.hosts:
-            if src_host is not None and host.name == src_host.name:
-                statuses[host.name] = generated_traffic_type_text
-                host_tasks[host.name] = {'taskType': NORMAL, 'trafficType': generated_traffic_type_text, 'destination': dst_host.name}
-            elif dst_host is not None and  host.name == dst_host.name:
-                statuses[host.name] = generated_traffic_type_text
-                host_tasks[host.name] = {'taskType': NORMAL, 'trafficType': TrafficTypes.NONE} 
-            else:
-                statuses[host.name] = TrafficTypes.NONE
-                host_tasks[host.name] = {'taskType': NORMAL, 'trafficType': TrafficTypes.NONE}        
-            host_tasks[host.name]["linkStatus"] = 1  # link always ON 
-        notify_client(level=SystemLevels.DATA, host_tasks = host_tasks )
+        src_name = src_host.name if type(src_host) is not str and src_host is not None else src_host
+        dst_name = dst_host.name if type(dst_host) is not str and dst_host is not None else dst_host
+        try:
+            for host in self.hosts:
+                if src_host is not None and host.name == src_name:
+                    statuses[host.name] = generated_traffic_type_text
+                    host_tasks[host.name] = {'taskType': NORMAL, 'trafficType': generated_traffic_type_text, 'destination': dst_name}
+                elif dst_host is not None and  host.name == dst_name:
+                    statuses[host.name] = generated_traffic_type_text
+                    host_tasks[host.name] = {'taskType': NORMAL, 'trafficType': TrafficTypes.NONE} 
+                else:
+                    statuses[host.name] = TrafficTypes.NONE
+                    host_tasks[host.name] = {'taskType': NORMAL, 'trafficType': TrafficTypes.NONE}        
+                host_tasks[host.name]["linkStatus"] = 1  # link always ON 
+            notify_client(level=SystemLevels.DATA, host_tasks = host_tasks )
+        except Exception as e:
+            error(Fore.RED + f"Error updating host statuses: {e}\n" + Fore.WHITE)
         return statuses
                 
     def update_state(self, episode = None):
@@ -92,35 +94,30 @@ class NetworkEnvClassification(NetworkEnv):
         update state Evalueting gym type
         """                 
         if self.gym_type == GYM_TYPE[CLASSIFICATION] and self.state is not None:    #classification
-            # self.synchronize_controller()            
+  
             self.generated_traffic_type_text, self.src_host, self.dst_host = generate_random_traffic(self.net)  
             self.generated_traffic_type = TRAFFIC_TYPE_ID_MAPPING[self.generated_traffic_type_text]
             # wait for traffic complete generation
-            time.sleep(self.sync_time) 
+            if self.generated_traffic_type != TrafficTypes.NONE:
+                time.sleep((self.generated_traffic_type+0.5))
             if self.read_from_network(): 
                 self.evaluate_traffic() 
-        # elif self.gym_type==GYM_TYPE[CLASSIFICATION_WITHOUT_SYNCRONIZE]:  #classification_without_syncronize
-        #     self.generated_traffic_type, self.src_host, self.dst_host = generate_random_traffic(self.net)  
-        #     # try to read all traffic: slower than the other but sure to read all traffic
-        #     # to be used to record traffic to create dataset  
-        #     self.get_all_traffic_generated() 
-        #     self.evaluate_traffic()              
+            
         elif self.gym_type == GYM_TYPE[CLASSIFICATION_FROM_DATASET]: #classification_from_dataset
             try: 
                 if not hasattr(self, 'df'):
                     self.state = self.initial_state
                 elif len(self.df) > 0:
-                    state=self.df.pop(0)
+                    status=self.df.pop(0)
                     self.global_prev_state = copy.copy(self.global_state)
-                    self.global_state.set_state(state)
-                    self.generated_traffic_type = state["id"]
-                    self.generated_traffic_type_text = state["status"]
-                    self.src_host = state["src_host"]
-                    self.dst_host = state["dst_host"]
+                    self.global_state.set_state(status)
+                    self.generated_traffic_type = status["id"]
+                    self.generated_traffic_type_text = status["status"]
+                    self.src_host = status["src_host"]
+                    self.dst_host = status["dst_host"]
+                    if self.generated_traffic_type > 0:
+                        information(Fore.WHITE + f"{self.src_host} {self.generated_traffic_type_text} {self.dst_host}\n")  
                     self.state = self.global_state.get_state() #this is real state from dataset
-                    # self.show_status_classification()
-                    # traffic_data = self.global_state.get_network_traffic_status()
-                    # notify_client(level=SystemLevels.DATA, traffic_data = traffic_data)
                     self.evaluate_traffic() 
                 else:
                     error(Fore.RED+"Missing dataset row: no status read\n")
@@ -129,60 +126,41 @@ class NetworkEnvClassification(NetworkEnv):
 
     def evaluate_traffic(self):
         self.global_state.state = np.array([
-                    self.global_state.packets, 
-                    self.global_state.packets_percentage_change, 
-                    self.global_state.bytes, 
-                    self.global_state.bytes_percentage_change,
+                    self.global_state.received_packets, 
+                    self.global_state.transmitted_packets, 
+                    self.global_state.received_bytes, 
+                    self.global_state.transmitted_bytes,
                 ], dtype=np.float32) 
         statuses = self.update_hosts_status(self.generated_traffic_type_text, self.src_host, self.dst_host) #update the status: normal or attack?
         self.global_state.update_statuses(self.generated_traffic_type_text, TRAFFIC_TYPE_ID_MAPPING, statuses)
         traffic_data = self.global_state.get_network_traffic_status()
+        traffic_data.update({
+            "receivedPackets": self.global_state.received_packets,
+            "transmittedPackets": self.global_state.transmitted_packets,
+            "receivedBytes": self.global_state.received_bytes,
+            "transmittedBytes": self.global_state.transmitted_bytes
+        })
         notify_client(level=SystemLevels.DATA, traffic_data = traffic_data)
-        traffic_data["src_host"] = self.src_host.name if self.src_host is not None else None
-        traffic_data["dst_host"] = self.dst_host.name if self.dst_host is not None else None
+        traffic_data["src_host"] = self.src_host.name if type(self.src_host) is not str and self.src_host is not None else None
+        traffic_data["dst_host"] = self.dst_host.name if type(self.dst_host) is not str and self.dst_host is not None else None
         self.statuses.append(traffic_data)
         self.show_network_status()
-
-    def get_all_traffic_generated(self): #read from switch, until 0 packet and byte are found  
-        start_sync_time = time.time()        
-        debug(f"Reading traffic\n")
-        self.read_time = self.sync_time * 0.75
-
-        old_global_state = copy.copy(self.global_state)
-        while(True):
-            time.sleep(1)
-            if not self.read_from_network():
-                break
-            #the new global_state is self.prev_global_state - old_global_state
-            self.global_state = self.global_prev_state.substract(old_global_state)
-
-        end_sync_time = time.time()
-        sync_time = end_sync_time - start_sync_time + 1
-        debug(f"Traffic read time {sync_time} s\n")
-      
-            
-    def show_status_classification(self):            
-        state = self.global_state.get_state()
-        information(Fore.BLUE + 
-                    f"Packet {int(state[0])} - {format_bytes(int(state[2]))}B" +
-                    Fore.WHITE + f" - Traffic type {self.net.traffic_types[self.generated_traffic_type]}" +
-                    "\n" + Fore.WHITE)       
-    
-             
-    def step(self, action, is_discretized_state = False, is_real_state= False, current_step=-1, correct_predictions=0, show_action=False, name = None):
+                  
+    def step(self, action, options={"is_discretized_state": False, "is_real_state": False, "current_step": -1, "correct_predictions": 0, "show_action": False, "name": None}):
         while hasattr(self,"pause_event") and self.pause_event.is_set():
             notify_client(level=SystemLevels.STATUS, status=SystemStatus.PAUSED, message="Paused training agents...", mode=SystemModes.TRAINING)
             time.sleep(1)
             continue   
         # Calculate reward
+        status = self.global_state.status.copy()
         action_correct = self.generated_traffic_type
         text_action_correct = self.generated_traffic_type_text
         reward = self.calculate_reward(action, action_correct)  
-        self.execute_action(action, show_action=show_action, reward=reward)
+        self.execute_action(action, show_action=options["show_action"], reward=reward)
         is_action_correct = action_correct == action
         if is_action_correct:
-            correct_predictions+=1
-        percentage_correct_predictions = correct_predictions/current_step
+            options["correct_predictions"]+=1
+        percentage_correct_predictions = options["correct_predictions"]/options["current_step"] if options["current_step"]>0 else 0
            
         ground_truth_step = np.zeros(self.actions_number)
         predicted_step = np.zeros(self.actions_number)
@@ -192,17 +170,15 @@ class NetworkEnvClassification(NetworkEnv):
         debug(Fore.CYAN + f"Environment reward {reward}"+Fore.WHITE )          
            
         # Check if the episode is done
-        done, truncated = self.check_if_done_or_truncated(current_step, percentage_correct_predictions) 
+        done, truncated = self.check_if_done_or_truncated(options["current_step"], percentage_correct_predictions) 
         # Update state here
         if not done and not truncated:
-            if self.gym_type==GYM_TYPE[CLASSIFICATION]:
-                time.sleep(self.sync_time)
-            else:
-                self.update_state()     
-        next_state = self.get_current_state(is_discretized_state=is_discretized_state, is_real_state= is_real_state ) 
+            self.update_state()     
+        next_state = self.get_current_state(is_discretized_state=options["is_discretized_state"]) 
             
         return next_state, reward, done, truncated, {'action_correct': action_correct, 
                                                      'text_action_correct': text_action_correct, 
+                                                     'status': status,
                                                      'is_correct_action':is_action_correct, 
                                                      'TimeLimit.truncated': truncated, 
                                                      'Ground_truth_step': ground_truth_step, 
@@ -268,7 +244,7 @@ class NetworkEnvClassification(NetworkEnv):
             return REWARDS.CLOSE  # Partial penalty for close predictions
         if abs(action - action_correct) == 2:
             return REWARDS.FARTHER  # Higher penalty for farther predictions
-        return REWARDS.COMPLETELY_INCORRECT  # -0.9 Max penalty for completely incorrect predictions
+        return REWARDS.COMPLETELY_INCORRECT  # -1 Max penalty for completely incorrect predictions
      
     def get_discretized_state(self, state):
         if state is None:
@@ -277,7 +253,7 @@ class NetworkEnvClassification(NetworkEnv):
         # Ensure the state is not a tuple
         if isinstance(state, tuple):
             state = state[0]
-            
+    
         # Initialize the discrete_state list
         discrete_state = []
 
@@ -286,90 +262,40 @@ class NetworkEnvClassification(NetworkEnv):
             discrete_state.append(bin_index)
         return tuple(discrete_state)         
 
-    # def evaluate_episode(self, episode, cumulative_reward, exploration_count=0, exploitation_count=0, ground_truth = None, predicted= None):
-    #     # Calculate and store metrics at the end of the episode with library sklearn
-    #     if ground_truth is None:
-    #         ground_truth = self.ground_truth
-    #     if predicted is None:
-    #         predicted = self.predicted            
-    #     accuracy_episode = accuracy_score(ground_truth, predicted)
-    #     precision_episode, recall_episode, f1_score_episode, _ = precision_recall_fscore_support(ground_truth, predicted, average='weighted', zero_division=0.0)
-    #     self.metrics['accuracy'].append(accuracy_episode)
-    #     self.metrics['precision'].append(precision_episode)
-    #     self.metrics['recall'].append(recall_episode)
-    #     self.metrics['f1_score'].append(f1_score_episode)
-        
-    #     # Calculate and store train type (exploration/exploitation) at the end of the episode
-    #     if exploration_count > 0 or exploitation_count > 0 :
-    #         self.train_types['explorations'].append(exploration_count)
-    #         self.train_types['exploitations'].append(exploitation_count)
-    #         self.train_types['steps'].append(self.current_step)
-        
-    #     if (episode > 0):
-    #         if (self.src_host is not None):
-    #             i_src_host = self.src_host.name #int(self.src_host.name.replace('h','').replace('iot',''))
-    #         else:
-    #             i_src_host = '0'
-    #         if (self.dst_host is not None):
-    #             i_dst_host = self.dst_host.name #int(self.dst_host.name.replace('h','').replace('iot',''))
-    #         else:
-    #             i_dst_host = '0'
+      
+    def show_network_status(self):       
+        state = self.global_state.get_state()
+        discrete_state = self.get_discretized_state(state)
+        normalized_state = get_normalized_state(state, self.low_to_normalize, self.high_to_normalize) 
 
-    #         self.indicators.append({
-    #             'episode': episode,
-    #             'steps': self.current_step,
-    #             'correct_predictions': self.correct_predictions,
-    #             'packets_received': self.state[0].item(),
-    #             'bytes_received': self.state[2].item(),
-    #             'packets_transmitted': self.state[1].item(),
-    #             'bytes_transmitted': self.state[3].item(),
-    #             'cumulative_reward': cumulative_reward,
-    #             'traffic_type': self.generated_traffic_type,
-    #             'i_src_host': i_src_host,
-    #             'i_dst_host': i_dst_host
-    #         })
-
-    
-    
-    # def synchronize_controller(self, packet_received_threshold=0,byte_received_threshold=0):
-    #     start_sync_time = time.time()        
-    #     debug(f"\nController syncronization\n")
-    #     self.read_time = 4
-    #     self.read_from_network()
-        
-    #     states = [self.state]
-    #     while self.state[0] > self.n_hosts or self.state[2] > self.n_hosts: #packet received and byte received are 0
-    #         self.read_time = self.read_time * 0.75
-    #         self.read_from_network()
-    #         states.append(self.state)
-       
-    #     final_state = self.sum_states(states)
-    #     debug(f"final_state after syncronization {[int(x) for x in final_state]}\n")
-    #     end_sync_time = time.time()
-    #     sync_time = end_sync_time - start_sync_time + 1
-    #     debug(f"Controller syncronization time {sync_time} s\n")
-    #     return sync_time       
+        information(
+            Fore.BLUE + f"{self.generated_traffic_type_text} Packet {int(state[0])}/{int(state[1])}" +
+            Fore.BLUE + f" - {format_bytes(int(state[2]))}B/{format_bytes(int(state[3]))}B" +
+            Fore.CYAN + f" - {int(discrete_state[0])} {int(discrete_state[1])} {int(discrete_state[2])} {int(discrete_state[3])}" +
+            Fore.MAGENTA + f" - {float(normalized_state[0]):.3f} {float(normalized_state[1]):.3f} {float(normalized_state[2]):.5f} {float(normalized_state[3]):.5f}\n" +
+            Fore.WHITE
+        )
+        #status by host
+        for host in self.global_state.host_states.keys():
+            host_state = self.global_state.get_host_state(host)
+            host_status = self.global_state.get_host_status(host)
+            if host_status is not None:
+                debug(Fore.WHITE + f"{host} "+Fore.GREEN +
+                            f"- Packets {int(host_state[0])}/{int(host_state[4])} " +
+                            f"- {format_bytes(int(host_state[2]))}B/{format_bytes(int(host_state[6]))}B\n" + Fore.WHITE)   
+  
 
 if __name__ == '__main__':
     #setLogLevel('info')
-    env_params = {
-        'net_params' : { 
-            'num_hosts':3,
-            'num_switches':1,
-            'num_iot':0,
-            'controller': {
-                'ip':'192.168.1.226',
-                'port':6633,
-                'usr':'admin',
-                'pwd':'admin'
-            }
-        },
-        'K_steps':2,
-        'steps_min_percentage':0.9,
-        'accuracy_min':0.9        
-    } 
-    env_params = jsonlib.loads(jsonlib.dumps(env_params), object_hook=Params) 
-    env = NetworkEnv(env_params)
+    config,config_dict = read_config_file('config.yaml')
+    env = NetworkEnvClassification(config.env_params, server_user = config.server_user)
+    exit = False
+    while not exit:
+        env.update_state()
+        
+    statuses = list(env.statuses)
+    save_data_to_file(statuses, config.training_execution_directory, "statuses")
+    
     observation, info = env.reset()
     for _ in range(10):
         action = env.action_space.sample()

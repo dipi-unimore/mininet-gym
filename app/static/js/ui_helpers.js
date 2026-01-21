@@ -147,22 +147,33 @@ function navigateTo(page) {
         updateConfigurationInMemory();
 
         $('#config-page').addClass('hidden');
+        $('#results-page').addClass('hidden');
         $('#training-page').removeClass('hidden');
         $('#nav-config').removeClass('bg-blue-600 hover:bg-blue-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
         $('#nav-training').addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        $('#nav-results').removeClass('bg-green-600 hover:bg-green-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
 
         // Initialize WS only when on the training page
         initializeWebSocket();
-    } else {
+    } else if (page === 'config') {
         $('#training-page').addClass('hidden');
+        $('#results-page').addClass('hidden');
         $('#config-page').removeClass('hidden');
         $('#nav-training').removeClass('bg-blue-600 hover:bg-blue-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
         $('#nav-config').addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        $('#nav-results').removeClass('bg-green-600 hover:bg-green-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
 
         // Close WS if open
         if (socket && socket.connected) {
             socket.close();
         }
+    } else if (page === 'results') {
+        $('#config-page').addClass('hidden');
+        $('#training-page').addClass('hidden');
+        $('#results-page').removeClass('hidden');
+        $('#nav-training').removeClass('bg-blue-600 hover:bg-blue-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        $('#nav-results').addClass('bg-green-600 hover:bg-green-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        renderResultsPanel();
     }
 }
 
@@ -217,7 +228,18 @@ function createInputField(key, value, fullId, isAgent) {
             `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
         ).join('')}
                 </select>`;
-        noteElement = 'For \'from_dataset\' options, remember the dataset file. csv for classification, json for others'
+        noteElement = 'For \'from_dataset\' options, remember the json dataset file.'
+        $(document).on('change', `#${CSS.escape(fullId)}`,  function () {
+            currentConfig.env_params.gym_type = $(this).val();
+            if (isClassificationEnv()) {
+                $(`#${CSS.escape('env_params.attacks')}-section`).addClass('hidden');
+                $(`#${CSS.escape('env_params.classification')}-section`).removeClass('hidden');
+            }
+            else {
+                $(`#${CSS.escape('env_params.attacks')}-section`).removeClass('hidden');
+                $(`#${CSS.escape('env_params.classification')}-section`).addClass('hidden');
+            }
+        });
     }
     // 2. Algorithm Select (Agents only)
     else if (key === 'algorithm' && isAgent) {
@@ -226,6 +248,29 @@ function createInputField(key, value, fullId, isAgent) {
             `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
         ).join('')}
                 </select>`;
+    }
+    // 2b. Load dir modal (Agents only)
+    else if (key === 'load_dir' && isAgent) {
+        inputElement = `<input type="text" id="${fullId}" data-path="${fullId}" value="${value}" class="config-input" >`;
+
+        $(document).on('click', `#${CSS.escape(fullId)}`, async function () {
+            $('#load-dir-modal').data('target-input', fullId).removeClass('hidden');
+
+            let network_config = $(`#${CSS.escape('env_params.net_params.num_switches')}`).val() + "_" +
+                $(`#${CSS.escape('env_params.net_params.num_hosts')}`).val() + "_" +
+                $(`#${CSS.escape('env_params.net_params.num_iot')}`).val();
+
+            let gym_type = $(`#${CSS.escape('env_params.gym_type')}`).val();
+            let agent_name = currentConfig.agents[parseInt(fullId.split('.')[1])].name;
+            try {
+                list_dir = await get_load_dir_list(gym_type, network_config, agent_name);
+                renderList(list_dir);
+            } catch (err) {
+                console.error('Failed to load directory list:', err);
+            }
+
+        });
+
     }
     // 3. Log level Select
     else if (key === 'log_level') {
@@ -238,6 +283,18 @@ function createInputField(key, value, fullId, isAgent) {
     // 4. Boolean Checkbox
     else if (typeof value === 'boolean') {
         inputElement = `<input type="checkbox" id="${fullId}" data-path="${fullId}" class="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" ${value ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>`;
+        //  Enabled (Agents only)
+        if (key === 'enabled' && isAgent) {
+            $(document).on('change', `#${CSS.escape(fullId)}`, function () {
+                const agentIndex = parseInt(fullId.split('.')[1]);
+                const agentCard = $(`#agent-card-${agentIndex}`);
+                if (this.checked) {
+                    agentCard.removeClass('opacity-50');
+                } else {
+                    agentCard.addClass('opacity-50');
+                }
+            });
+        }        
     }
     // 5. Array (read-only text display)
     else if (Array.isArray(value)) {
@@ -275,6 +332,79 @@ function createInputField(key, value, fullId, isAgent) {
     return fieldHtml;
 }
 
+
+let list_dir = [];
+
+function renderList(list) {
+    const dirListEl = $('#load-dir-list');
+    dirListEl.empty();
+    if (list.length === 0) {
+        dirListEl.append('<p class="p-2 text-gray-500  load-dir-item ">No saved training sessions found.</p>');
+    }
+    list.forEach(dir => {
+        const dirItemHtml = `
+            <li class="p-2 border-b cursor-pointer hover:bg-gray-100 load-dir-item grid grid-cols-2">
+                <span>${dir.datetime}</span>
+                <span>${dir.accuracy.toFixed(4)}</span>
+                <input type="hidden" value="${dir.path}">
+            </li>`;
+        dirListEl.append(dirItemHtml);
+    });
+}
+
+
+// ✅ Sorting handlers
+$(document).on('click', '#sort-date', function () {
+    list_dir.sort((a, b) => new Date(b.datetime) - new Date(a.datetime)); // Newest first
+    renderList(list_dir);
+});
+
+$(document).on('click', '#sort-accuracy', function () {
+    list_dir.sort((a, b) => b.accuracy - a.accuracy); // Highest accuracy first
+    renderList(list_dir);
+});
+
+
+$(document).on('click', '.load-dir-item', function () {
+    const targetInputId = $('#load-dir-modal').data('target-input');
+    targetCheckId = targetInputId.replace("_dir", '');
+    const selectedPath = $(this).find('input[type="hidden"]').val();
+    if (!selectedPath) {
+        $(`#${CSS.escape(targetInputId)}`).val('');
+        $(`#${CSS.escape(targetCheckId)}`).prop('checked', false);
+    }
+    else {
+        // Set the value of the original input
+        $(`#${CSS.escape(targetInputId)}`).val(selectedPath);
+        $(`#${CSS.escape(targetCheckId)}`).prop('checked', true);
+    }
+
+    // Optionally close the modal
+    $('#load-dir-modal').addClass('hidden');
+});
+
+
+function get_load_dir_list(gym_type, network_config, agent_name) {
+    return new Promise((resolve, reject) => {
+        $.ajax({
+            url: '/get_load_dir_list?gym_type=' + encodeURIComponent(gym_type) +
+                '&network_config=' + encodeURIComponent(network_config) +
+                '&agent_name=' + encodeURIComponent(agent_name),
+            type: 'GET',
+            success: function (response) {
+                resolve(response.load_dir_list);
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Error load dir list: ' + response.message, 'error');
+                reject(response.message);
+            }
+        });
+    });
+}
+
+
+
 /**
  * Renders fields for a given configuration section, handling nesting.
  * @param {object} obj - The config object to render (e.g., currentConfig.env_params)
@@ -296,14 +426,22 @@ function renderFieldsRecursively(obj, path, isAgent = false, agentIndex = null) 
             // Start a new nested section container
             const sectionTitle = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             image = '';
+            hidden = '';
             if (sectionTitle === "Net Params") {
                 image = `<img src="/static/images/gif/network.gif" alt="Network params" title="Network params" class="inline-block w-6 h-6 ">`;
             }
-            if (sectionTitle === "Attack Thresholds") {
-                image = `<img src="/static/images/gif/ddos.gif" alt="Attack Thresholds" title="Attack Thresholds" class="inline-block w-6 h-6 ">`;
+            if (sectionTitle === "Attacks") {
+                image = `<img src="/static/images/gif/ddos.gif" alt="Attacks" title="Attacks params" class="inline-block w-6 h-6 ">`;
+                if (isClassificationEnv())
+                    hidden = 'hidden';
             }
+            if (sectionTitle === "Classification") {
+                image = `<img src="/static/images/gif/classify.gif" alt="Classification" title="Classification params" class="inline-block w-6 h-6 ">`;
+                if (!isClassificationEnv())
+                    hidden = 'hidden';
+            }            
             html += `
-                        <div class="md:col-span-5 bg-gray-50 p-4 rounded-lg border-l-4 border-indigo-500">
+                        <div class="md:col-span-5 bg-gray-50 p-4 rounded-lg border-l-4 border-indigo-500 ${hidden}" id="${fullId}-section">
                             <h5 class="text-md font-semibold text-gray-700 mb-3">${image}${sectionTitle}</h5>
                             <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                                 ${renderFieldsRecursively(value, currentPath, isAgent, agentIndex)}
@@ -341,7 +479,7 @@ function renderAgents() {
 
     currentConfig.agents.forEach((agent, index) => {
         const agentHtml = `
-                    <div id="agent-card-${index}" class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-md">
+                    <div id="agent-card-${index}" class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-md ${agent.enabled ? '' : 'opacity-50'} mb-6">
                         <div class="flex justify-between items-start mb-3 border-b pb-2">
                             <h4 class="text-lg font-semibold text-gray-800">${agent.name}</h4>
                             <button data-agent-name="${agent.name}" class="remove-agent-btn text-red-500 hover:text-red-700 transition duration-150">
@@ -583,55 +721,6 @@ function saveConfiguration() {
     });
 }
 
-// Other utilities
-function formatBytes(num_bytes) {
-    // 1. Manage value null and zero
-    if (num_bytes === null || num_bytes === undefined || num_bytes === 0) {
-        return "0";
-    }
 
-    // 2. Number must be positive
-    const num = Math.abs(Number(num_bytes));
-
-    const units = ["", "K", "M", "G", "T", "P"]; // P: Peta
-    const base = 1000;
-
-    // 3. Evaluate unit index
-    const i = Math.floor(Math.log(num) / Math.log(base));
-    const unitIndex = Math.min(units.length - 1, i);
-
-    const unit = units[unitIndex];
-    let value = num / Math.pow(base, unitIndex);
-    let precision;
-
-    // 4. Precision with 3 units
-    if (unitIndex === 0) {
-        // Value < 1000. No unit. No decimal.
-        return Math.round(num).toString();
-    }
-
-    // Logica di precisione per mantenere ~3 cifre totali (XX.X, X.XX, XXX)
-    if (value < 10) {
-        // Es: 1.25K, 9.99K -> 2 decimali
-        precision = 2;
-    } else if (value < 100) {
-        // Es: 20.3K, 99.9K -> 1 decimale
-        precision = 1;
-    } else {
-        // Es: 203K, 999K -> 0 decimali
-        precision = 0;
-    }
-
-    // 5. Formattazione e gestione del caso limite 999.x (overflow)
-    let formattedValue = value.toFixed(precision);
-
-    // Se l'arrotondamento causa l'overflow (es. 999.99K -> 1000.00K) e non siamo all'unità massima
-    if (parseFloat(formattedValue) >= 1000 && unitIndex < units.length - 1) {
-        return formatBytes(num * base);
-    }
-
-    // Remove 0 if present (eg. 20.0K -> 20K)
-    return parseFloat(formattedValue).toString() + unit;
-}
 
 

@@ -2,6 +2,7 @@ import re
 import time
 import traceback
 from typing import Any, Dict, List, Optional
+from colorama import Fore
 from mininet.node import Host, Switch
 from mininet.net import Mininet
 from utility.my_log import information, debug, error
@@ -439,6 +440,77 @@ def initialize_monitoring(net: Mininet, bridge_name: str = "s1", wait_timeout: f
     
     # Install monitoring flows once
     return install_monitoring_flows(ovs_switch, net, force=False)
+
+def reset_flow_statistics(ovs_switch: Switch, bridge_name: str) -> bool:
+    """
+    Reset all flow statistics on the OVS bridge.
+    This clears packet/byte counters without removing flows.
+    
+    Args:
+        ovs_switch: The OVS switch object
+        bridge_name: Name of the bridge
+        
+    Returns:
+        True if reset successful, False otherwise
+    """
+    try:
+        # Method 1: Reset all flow stats (keeps flows, resets counters)
+        result = ovs_switch.cmd(f"ovs-ofctl mod-flows {bridge_name} 'actions=NORMAL'")
+        
+        if result and ("error" in result.lower() or "failed" in result.lower()):
+            error(f"Failed to reset flow stats: {result}")
+            return False
+        
+        information(f"Reset flow statistics for {bridge_name}")
+        return True
+        
+    except Exception as e:
+        error(f"Error resetting flow statistics: {type(e).__name__}: {str(e)}")
+        return False
+
+
+def check_and_reset_if_needed(net: Mininet, bridge_name: str = "s1", 
+                               threshold_packets: int = 4_000_000_000,
+                               threshold_bytes: int = 1_000_000_000_000) -> bool:
+    """
+    Check if counters are approaching overflow and reset if needed.
+    
+    Args:
+        net: Mininet network object
+        bridge_name: Name of the bridge
+        threshold_packets: Reset if packet count exceeds this (default: 4 billion)
+        threshold_bytes: Reset if byte count exceeds this (default: 1 TB)
+        
+    Returns:
+        True if reset was performed, False otherwise
+    """
+    ovs_switch = next((s for s in net.switches if s.name == bridge_name and isinstance(s, Switch)), None)
+    if not ovs_switch:
+        error(f"Switch {bridge_name} not found")
+        return False
+    
+    # Get current statistics
+    flows = get_data_flow(net, bridge_name)
+    if not flows:
+        return False
+    
+    total_packets = flows['packets']['transmitted'] + flows['packets']['received']
+    total_bytes = flows['bytes']['transmitted'] + flows['bytes']['received']
+    
+    # Check if approaching limits
+    if total_packets > threshold_packets or total_bytes > threshold_bytes:
+        information(Fore.YELLOW + 
+                   f"Flow counters approaching limits (packets: {total_packets:,}, bytes: {total_bytes:,}). Resetting..." + 
+                   Fore.WHITE)
+        
+        if reset_flow_statistics(ovs_switch, bridge_name):
+            information(Fore.GREEN + "Flow statistics reset successfully" + Fore.WHITE)
+            return True
+        else:
+            error("Failed to reset flow statistics")
+            return False
+    
+    return False
 
 def get_data_flow(net: Mininet, bridge_name: str = "s1", max_retries: int = 3) -> Optional[Dict[str, Any]]:
     """

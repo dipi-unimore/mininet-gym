@@ -17,7 +17,6 @@ class InstantState(BaseInstantState):
         """
         super().__init__(hosts)
 
-
     def update_statuses(self, status: str, host_statuses: dict):
         """
         Updates the internal states. This method can be expanded to include
@@ -52,11 +51,18 @@ class InstantState(BaseInstantState):
                 }
                 
     
-def set_host_statuses(self):
-    #This is useful for attack env, for classification are always as default,NORMAL
-    for host_name, id in self.host_states.items():
-        if id==0:
-            self.host_statuses[host_name] = NORMAL
-        elif id==1:
-            self.host_statuses[host_name] = ATTACK               
+    def set_host_statuses(self):
+        #This is useful for attack env, for classification are always as default,NORMAL
+        for host_name, id in self.host_states.items():
+            if id==0:
+                self.host_statuses[host_name] = NORMAL
+            elif id==1:
+                self.host_statuses[host_name] = ATTACK   
+
+    def get_state(self):
+        """
+        Retrieves the current global state of the network.
+        """
+        return [self.packets, self.packets_percentage_change, self.bytes, self.bytes_percentage_change]
+                
     

@@ -13,14 +13,7 @@ class QLearningAgent(BaseAgent):
 
     def update_qtable(self, state, action, reward, next_state):
         try :            
-            # if isinstance(state, np.ndarray):
-            #     state = tuple(state)
-            # if isinstance(next_state, np.ndarray):
-            #     next_state = tuple(next_state)
             best_next_action = np.argmax(self.q_table[next_state])
-            # max_val = np.max(self.q_table[next_state,:])
-            # find_max_val = np.where(self.q_table[next_state, :] == max_val)
-            # best_next_action = np.random.choice(find_max_val[0]).item()
             td_target = reward + self.discount_factor * self.q_table[next_state + (best_next_action,)]
             td_error = td_target - self.q_table[state + (action,)]
             self.q_table[state + (action,)] += self.learning_rate * td_error    
@@ -34,17 +27,18 @@ class QLearningAgent(BaseAgent):
         cumulative_reward, state, done, truncated, count_actions_by_type = self.episode_reset(self.is_discretized_state) 
    
         while not done and not truncated and not self.stop_event.is_set(): #episode
-            status = self.env.global_state.status.copy()
-            action = self.choose_action(state)         # Step 1: Choose action
-            
-            count_actions_by_type[action] += 1 
             self.current_step+=1
+            status = self.env.global_state.status.copy()
+            #print(f"Agent Step {self.current_step} - Current Status: {status} -  state: {state} ")
+            action = self.choose_action(state)         # Step 1: Choose action
+            count_actions_by_type[action] += 1 
+            
             
             # Step 2: Observe result
-            next_state, reward, done, truncated, infos  = self.env.step(action, is_discretized_state = self.is_discretized_state, 
-                                                                        current_step = self.current_step, 
-                                                                        correct_predictions= self.correct_predictions, 
-                                                                        show_action = self.show_action, name = self.name)    
+            next_state, reward, done, truncated, infos  = self.env.step(action, options={"is_discretized_state": self.is_discretized_state, 
+                                                                        "current_step": self.current_step, 
+                                                                        "correct_predictions": self.correct_predictions, 
+                                                                        "show_action": self.show_action, "name": self.name})    
             
 
             self.manage_step_data(action,reward,infos, status)  # Log step data

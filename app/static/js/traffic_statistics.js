@@ -1,3 +1,6 @@
+// Constant to define the maximum size of the rolling window for the line chart
+const MAX_DATA_POINTS = 60;
+
 // ===================================================================
 //  LINE CHART: Total Traffic (Last 60 points)
 // ===================================================================
@@ -950,6 +953,76 @@ function updateHostTasksTable(hostTasks) {
             hostTaskData.append(taskItem);
         });
     }
+}
+
+function getTrendIcon(value) {
+    // Converti l'input in numero intero
+    const numericValue = parseInt(value, 10);
+
+    if (isNaN(numericValue)) {
+        return '<span class="text-gray-400 text-sm">NA</span>';
+    }
+
+    // Inizializza il contenuto della freccia (icona Lucide + classe Tailwind per il colore)
+    let iconHtml = '';
+
+    if (numericValue > 0) {
+        // Tendenza positiva: Freccia in SU, Colore ROSSO (come per un aumento negativo nel mercato)
+        // Se volessi il verde per l'aumento, cambierei 'text-red-500' in 'text-green-500' e viceversa
+        iconHtml = `
+            <span class="trend-icon text-red-500">
+                <i data-lucide="arrow-up-right" class="w-6 h-6" style="display:inline"></i>
+            </span>
+        `;
+    } else if (numericValue < 0) {
+        // Tendenza negativa: Freccia in GIÙ, Colore VERDE
+        iconHtml = `
+            <span class="trend-icon text-green-500">
+                <i data-lucide="arrow-down-right" class="w-6 h-6" style="display:inline"></i>
+            </span>
+        `;
+    } else {
+        // Nessuna tendenza: Nessun simbolo (o un trattino/punto se preferito)
+        iconHtml = `<span class="text-gray-500 text-base">Nessun cambiamento</span>`;
+    }
+
+    return iconHtml;
+}
+
+function getClassificationEnvStatusIcon(trafficType) {
+    let iconHtml = `
+            <span class="status-icon  text-green-500">
+                <i data-lucide="shield-check" class="w-6 h-6" style="display:inline"></i>${trafficType}
+            </span>
+        `;
+    return iconHtml;
+}
+
+function getAttackEnvStatusIcon(isAttack) {
+    let iconHtml = '';
+
+    if (!isAttack) {
+        iconHtml = `
+            <span class="status-icon text-green-500">
+                <i data-lucide="shield-check" class="w-6 h-6" style="display:inline"></i>
+            </span>
+        `;
+    } else {
+        iconHtml = `
+            <span class="status-icon text-red-500">
+                <i data-lucide="zap" class="w-6 h-6" style="display:inline"></i>
+            </span>
+        `;
+    }
+
+    return iconHtml;
+}
+
+function updateTrendIndicator(inputValue, trendIndicatorId) {
+    const indicatorElement = document.getElementById(trendIndicatorId);
+    const newContent = getTrendIcon(inputValue);
+    indicatorElement.innerHTML = newContent;
+    lucide.createIcons();
 }
 
 

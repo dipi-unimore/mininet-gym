@@ -2,13 +2,12 @@
 import json
 import threading
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-from reinforcement_learning.network_env import NetworkEnv, get_normalize_state
+from reinforcement_learning.network_env import NetworkEnv, get_normalized_state
 from reinforcement_learning.agent_manager import AgentManager
 #from utility.my_statistics import plot_metrics, plot_indicators, plot_train_types, plot_net_metrics
 from reinforcement_learning.agents.qlearning_agent import QLearningAgent
 from reinforcement_learning.agents.sarsa_agent import SARSAAgent
 from reinforcement_learning.agents.supervised_agent import SupervisedAgent
-from reinforcement_learning.network_env import get_normalize_state
 from utility.constants import CLASSIFICATION_FROM_DATASET, CLASSIFICATION, SystemLevels, SystemModes, SystemStatus
 from utility.my_statistics import plot_agent_test_errors, plot_combined_performance_over_time, plot_comparison_bar_charts, plot_metrics, plot_agent_cumulative_rewards, plot_agent_execution_confusion_matrix, plot_agent_execution_traffic_types, plot_enviroment_execution_statutes, plot_radar_chart, plot_train_types, plot_agent_test, plot_test_confusion_matrix
 from utility.my_files import read_data_file, save_data_to_file, create_directory_training_execution
@@ -41,7 +40,8 @@ def traffic_classification_main(config, env: NetworkEnv):
                 train_agent(agent)
                 plot_and_save_data_agent(agent, config)  
                 agents_metrics[agent.name]=agent.instance.metrics   
-            
+        
+        #env.stop_update_event.set()   
         #Step 2: plotting and saving agent data
         if not env.stop_event.is_set():
             if config.env_params.print_training_chart:
@@ -120,14 +120,17 @@ def train_agent(agent):
             #learn for all episodes each one of env.max_steps maximum
             agent.instance.learn(agent.episodes, train_agent.env.stop_event)      
         else:   
-            for episode in range(agent.episodes):                
-                agent.custom_callback.episode = episode+1
-                agent.custom_callback.stop_event = train_agent.env.stop_event
+            for episode in range(agent.episodes): 
+                if train_agent.env.stop_event.is_set():
+                    break               
+                agent.custom_callback.before_episode(episode+1)
                 agent.instance.learn(total_timesteps=agent.max_steps, callback=agent.custom_callback, progress_bar=agent.progress_bar)
+                agent.custom_callback.after_episode()
        
     except Exception as error:
         # handle the exception
         error(f"Agent {agent.name} learn:", error)  
+        #error(Fore.RED+f"Agent {agent.name} learn:!\n{error}\n{traceback.format_exc()}\n"+Fore.WHITE)
     agent.elapsed_time = time.time() - start_time 
     information(f"Training completed in {agent.elapsed_time}\n",agent.name)
 
@@ -200,7 +203,7 @@ def plot_and_save_data_agent(agent, config):
     information(f"Data saved \n",agent.name)    
 
 def start_testing_agents(am, config):
-    #comunicate with web UI to change status to prepare to Test. Buttons start test visible, again put in pause, waiting start pressed
+    #comunicate with web UI to change status to prepare to Test. Buttons start test visible, again put in pause, waiting start pressed    
     notify_client(level=SystemLevels.STATUS, status=SystemStatus.RUNNING, mode=SystemModes.EVALUATION, message="Evaluating started...")
     time.sleep(1)  #wait for web UI to update status
     directory_name = create_directory_training_execution(config, "TEST")
@@ -262,21 +265,21 @@ def evaluate_classification_agent(am: AgentManager):
 
     for episode in range(epochs):
         information(f"\n\n************* Episode {episode+1} *************\n")            
-        # self.env.is_state_normalized = True
-        state, _ = env.reset() #state continuos
+        real_state, _ = env.reset(options={"is_real_state": True}) #state continuos, not_normalized, not discretized
         
         g=np.zeros(env.actions_number)
         g[env.generated_traffic_type]+=1
         ground_truth.append(g)
-        real_state = env.real_state #not_normalized
-        normalized_state = get_normalize_state(real_state, env.low, env.high) 
-        information(f"p_r={real_state[0]}\np_t={real_state[1]}\nb_r={real_state[2]}byte\nb_t={real_state[3]}byte\n")
+        normalized_state = get_normalized_state(real_state, env.low, env.high) 
+        #information(f"p_r={real_state[0]}\np_t={real_state[1]}\nb_r={real_state[2]}byte\nb_t={real_state[3]}byte\n")
         
         for agent in agents_params: 
             model = agent.instance
             if model is None:        
                 raise("The model can't be None. Create configuration")
-            if isinstance(model, SupervisedAgent) or isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
+            if isinstance(model, SupervisedAgent) :
+                prediction = model.predict(real_state)
+            elif isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
                 prediction = model.predict(real_state)
             else:
                 prediction, _states = model.predict(normalized_state, deterministic=True)
