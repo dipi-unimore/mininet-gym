@@ -20,10 +20,9 @@
     The network is implemented using Mininet (based on Software-Defined networking).
     The design of the solution is inspired by the work 
   </p>
-  <h3 align="center">
-    <strong ><em> <a href="https://www.sciencedirect.com/science/article/pii/S235271102500278X">"MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity"</a></em></strong> <br>
-    by <strong><a href="https://finix77.github.io/index.html">Finistrella S.</a></strong> at al.</h3>
-  <h3> <a href="https://www.youtube.com/embed/pSdEV-MSdA8?si=oAijyGQ0EBfcJEZc" title="Video for AAMAS 2026 demo"><img src="linkvideo.png" title="Video for AAMAS 2026 demo" width="100"></a></h3>
+  <h3 >Paper published on SoftwareX <br>
+    <strong ><em> <a href="https://www.sciencedirect.com/science/article/pii/S235271102500278X">"MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity"</a></em><br> <a href="https://finix77.github.io/index.html">Finistrella S.</a></strong> at al. </h3> 
+  <h3> <a href="https://www.youtube.com/embed/pSdEV-MSdA8?si=oAijyGQ0EBfcJEZc" title="Video for AAMAS 2026 demo"><img src="images/Linkvideo.png" title="Video for AAMAS 2026 demo" width="200"><br>Video for AAMAS 2026 demo</a></h3>
   <p>
     <a href="https://github.com/dipi-unimore/mininet-gym-icaart-2026/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     ·
@@ -233,6 +232,7 @@ Distributed under the MIT License – see the `LICENSE.txt` file for details.
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/salvo-finistrella-970034237
 [mininet-gym-paper]: https://www.sciencedirect.com/science/article/pii/S235271102500278X
+[link-youtube-video]: images/Linkvideo.png
 [product-screenshot]: images/screenshot.png
 [schema-screenshot]: images/architecture.png
 [ODL-Ubuntu22-installation]: https://docs.opendaylight.org/en/stable-fluorine/downloads.html
