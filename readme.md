@@ -22,9 +22,8 @@
   </p>
   <h3 align="center">
     <strong ><em> <a href="https://www.sciencedirect.com/science/article/pii/S235271102500278X">"MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity"</a></em></strong> <br>
-    by <strong><a href="https://finix77.github.io/index.html">Finistrella S.</a></strong> at al.</h5>
-
-
+    by <strong><a href="https://finix77.github.io/index.html">Finistrella S.</a></strong> at al.</h3>
+  <h3> <a href="https://www.youtube.com/embed/pSdEV-MSdA8?si=oAijyGQ0EBfcJEZc" title="Video for AAMAS 2026 demo"><img src="linkvideo.png" title="Video for AAMAS 2026 demo" width="100"></a></h3>
   <p>
     <a href="https://github.com/dipi-unimore/mininet-gym-icaart-2026/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     ·
