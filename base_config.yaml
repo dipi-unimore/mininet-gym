@@ -4,29 +4,58 @@ server_user: xxx
 log_level: info  #info, #debug
 random_seed: 777
 env_params:
-  gym_type: marl_attacks #_from_dataset #How to read traffic: [classification_from_dataset, classification, attacks, attacks_from_dataset, marl_attacks, marl_attacks_from_dataset].
+  gym_type: classification #_from_dataset #How to read traffic: [classification_from_dataset, classification_with_syncronize, classification_without_syncronize, real_time, attacks, attacks_from_dataset, attacks_ho, attacks_ho_from_dataset, marl_attacks, marl_attacks_from_dataset].
+  #agent_execution_mode: "sequential"  # "parallel" (default, normal behavior) or "sequential" (an agent acts after the other, useful for debugging and to understand the environment behavior)
   #classification
-  csv_file: traffic.csv #necessary only if gym_type: classification_from_dataset and for agent supervised
+  #csv_file: traffic.csv #necessary only if gym_type: classification_from_dataset and for agent supervised
   show_normal_traffic: True
-  wait_after_read: 2  
+  print_training_chart: True
+  must_check_env: False
   n_bins: 4  
-  max_steps: 5 
   steps_min_percentage: 0.9
   accuracy_min: 0.9 #to return done during train related to steps_min_percentage
-  test_episodes: 5 #Number of episodes to test the agent
+  episodes: 30  #Number of episodes to train the agent
+  max_steps: 120  #Max number of steps per episode
+  test_episodes: 180 #Number of episodes to test the agent
+  wait_after_read: 1  
   #attack environment
-  attack_likely: 0.01 #max 0.5; likelihood that one host attacks. necessary only with gym_type=attacks
-  attack_thresholds:
-    packets: 1000 #2880 # packets  to determinate an attack
-    var_packets: 50 #percentage packet variation to determinate an attack
-    bytes: 1000000 #4230000 # bytes  to determinate an attack
-    var_bytes: 30 #percentage byte variation to determinate an attack
+  attacks:
+    likely: 0.45 #max 0.5; likelihood that one host attacks. necessary only with gym_type=attacks
+    likely_train: 0.9 #(For ATTACKS_HO only) likelihood of attack during training episodes. Range: 0.0-1.0 (default 0.9). High value = frequent attacks during training for agent learning
+    likely_eval: 0.3 #(For ATTACKS_HO only) likelihood of attack during evaluation/test episodes. Range: 0.0-1.0 (default 0.3). Lower value = sparse attacks for realistic testing
+    # NOTE: For ATTACKS_HO (per-host scenario), these timings control attack distribution:
+    # - short_attack_duration: steps that a SHORT_ATTACK lasts (default 5)
+    # - long_attack_duration: steps that a LONG_ATTACK lasts (default 30)
+    # - no_attack_timeout: delay (steps) between any two attacks on a host (default 15)
+    # Reduce timeouts to increase attack frequency; adjust durations for more/less sustained attacks
+    short_attack_duration: 5  # null = use default (5). Range: 2-10 for short spikes
+    long_attack_duration: 25   # null = use default (30). Range: 10-60 for sustained attacks
+    no_attack_timeout: 3      # null = use default (15). Range: 5-30 to control attack density
+    # Link unblock policy (ATTACKS_HO):
+    # - unblock_min_hold_rounds: minimum full rounds to keep link blocked
+    # - unblock_required_normal_streak: consecutive NORMAL decisions required while blocked
+    unblock_min_hold_rounds: 2
+    unblock_required_normal_streak: 2
+    #apply_drop_rules: if true, the environment applies drop rules to the traffic when the agent takes the "drop" action. This can be used to simulate the effect of blocking traffic in a real network. If false, the environment will not apply drop rules and will only provide feedback to the agent based on its actions.
+    apply_drop_rules: false
+    thresholds:      
+      packets: 22000 #200000 packets are an UDP an attack. This is multiply for number of hosts to obtain the high value of bins
+      var_packets: 50 #percentage packet variation 
+      bytes: 423000000 #4230000 # the bytes are not important to determinate an attack (only packets with hping3 --flood --udp) this is abnormal traffic. This is multiply for number of hosts to obtain the high value of bins
+      var_bytes: 30 #percentage byte variation 
+  classification:
+    thresholds:
+      packets: 200 
+      bytes: 1000000
+      var_packets: 100
+      var_bytes: 100
   #network environment
   net_params:
+    start_cli: False
     traffic_types: ["none", "ping",  "udp" , "tcp"] #labels normal traffic generator
-    num_hosts: 4
+    num_hosts: 5
     num_switches: 1
-    num_iot: 4
+    num_iot: 5
     controller:
       ip: 192.168.1.x #226 on ubuntu
       port: 6633
