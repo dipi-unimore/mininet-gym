@@ -276,10 +276,19 @@ def get_results_dir_list():
                             continue
                         mean_accuracy = float(np.mean(all_accuracies)) if all_accuracies else 0
                         data_gym_type["mean_accuracy"] = mean_accuracy
-                        data_gym_type["min_accuracy"] = min_accuracy
-                        data_gym_type["name_min_accuracy"] = name_min_accuracy
-                        data_gym_type["max_accuracy"] = max_accuracy
-                        data_gym_type["name_max_accuracy"] = name_max_accuracy
+                        #i have to check if we can access variable min_accuracy and max_accuracy
+                        try:
+                            data_gym_type["min_accuracy"] = min_accuracy
+                            data_gym_type["name_min_accuracy"] = name_min_accuracy
+                        except NameError:
+                            min_accuracy = 0
+                            name_min_accuracy = ""
+                        try:
+                            data_gym_type["max_accuracy"] = max_accuracy
+                            data_gym_type["name_max_accuracy"] = name_max_accuracy
+                        except NameError:
+                            max_accuracy = 0
+                            name_max_accuracy = ""
                         data_gym_type["agents_data"] = agents_data
                         
                         #check the test folder exists
