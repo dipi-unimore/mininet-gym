@@ -23,9 +23,6 @@ ehthumbs_vista.db
 training/*
 _training/*
 
-#marl directory content for
-marl
-marl/*
 
 #config file
 config.yaml
