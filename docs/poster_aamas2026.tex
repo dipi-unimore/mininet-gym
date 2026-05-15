@@ -1,0 +1,484 @@
+%% ============================================================
+%% MininetGym — AAMAS 2026 Poster
+%% A0 Portrait · Compile: pdflatex poster_aamas2026.tex
+%% Required packages: beamerposter, tcolorbox, tikz, booktabs
+%% Install: sudo apt install texlive-full  (or tlmgr install ...)
+%% ============================================================
+\documentclass[final]{beamer}
+\usepackage[orientation=portrait,size=a0,scale=1.32]{beamerposter}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows.meta,positioning,fit,backgrounds,calc}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable,raster}
+
+%% ---- Color palette ----------------------------------------
+\definecolor{cprimary}{HTML}{0D47A1}   % deep blue
+\definecolor{csecond}{HTML}{00695C}    % teal
+\definecolor{caccent}{HTML}{E64A19}    % orange-red (attacks)
+\definecolor{clightbg}{HTML}{F0F4F8}
+\definecolor{cdark}{HTML}{212121}
+\definecolor{cmid}{HTML}{607D8B}
+\definecolor{cred}{HTML}{B71C1C}
+\definecolor{cyellow}{HTML}{F57F17}
+
+%% ---- Beamer theme overrides --------------------------------
+\setbeamercolor{block title}{fg=white, bg=cprimary}
+\setbeamercolor{block body}{fg=cdark, bg=clightbg}
+\setbeamercolor{block title alerted}{fg=white, bg=caccent}
+\setbeamercolor{block body alerted}{fg=cdark, bg=clightbg}
+\setbeamercolor{headline}{fg=white, bg=cprimary!95!black}
+\setbeamercolor{footline}{fg=white, bg=cprimary!80!black}
+\setbeamercolor{separation line}{bg=caccent}
+\setbeamerfont{block title}{size=\large, series=\bfseries}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{itemize item}{\color{cprimary}$\blacktriangleright$}
+
+%% ---- tcolorbox styles -------------------------------------
+\tcbset{
+  scenbox/.style={
+    enhanced, arc=5pt, boxrule=1.5pt,
+    colback=clightbg, colframe=cprimary,
+    colbacktitle=cprimary, coltitle=white,
+    fonttitle=\bfseries\normalsize,
+    attach boxed title to top left={yshift=-2.5mm, xshift=5mm},
+    boxed title style={arc=3pt, boxrule=0.8pt},
+    left=4pt, right=4pt, top=6pt, bottom=4pt
+  },
+  demobox/.style={
+    enhanced, arc=5pt, boxrule=1.8pt,
+    colback=clightbg, colframe=csecond,
+    colbacktitle=csecond, coltitle=white,
+    fonttitle=\bfseries\normalsize,
+    attach boxed title to top left={yshift=-2.5mm, xshift=5mm},
+    boxed title style={arc=3pt, boxrule=0.8pt},
+    left=4pt, right=4pt, top=6pt, bottom=4pt
+  },
+  screenshot/.style={
+    enhanced, arc=4pt, boxrule=1pt,
+    colback=cmid!12, colframe=cmid!50,
+    halign=center, valign=center,
+    fontupper=\color{cmid}\itshape\large,
+    left=2pt, right=2pt
+  }
+}
+
+%% ---- Headline ---------------------------------------------
+\setbeamertemplate{headline}{%
+  \leavevmode
+  \begin{beamercolorbox}[wd=\paperwidth]{headline}
+    \vspace{1.8cm}
+    \begin{columns}[c,totalwidth=\paperwidth]
+      \begin{column}{0.10\paperwidth}\centering
+        %% Logo placeholder — replace with \includegraphics
+        \begin{tikzpicture}
+          \node[circle,fill=white!20,minimum size=5.5cm,
+                draw=white,line width=3pt,
+                font=\bfseries\Large\color{white}] {LOGO};
+        \end{tikzpicture}
+      \end{column}
+      \begin{column}{0.80\paperwidth}\centering
+        {\fontsize{68}{74}\selectfont\bfseries\color{white}MininetGym}\\[0.6cm]
+        {\fontsize{38}{44}\selectfont\color{white!85!cprimary}%
+          A Live Demonstration of RL-Based Cybersecurity Training}\\[0.9cm]
+        {\fontsize{28}{34}\selectfont\color{white}%
+          Salvo Finistrella \quad$\cdot$\quad [Co-authors]}\\[0.4cm]
+        {\fontsize{22}{28}\selectfont\color{white!75!cprimary}%
+          DIPI — University of Modena and Reggio Emilia \quad$\cdot$\quad
+          AAMAS 2026, Paphos, Cyprus}
+      \end{column}
+      \begin{column}{0.10\paperwidth}\centering
+        %% AAMAS logo placeholder
+        \begin{tikzpicture}
+          \node[rectangle,fill=white!20,minimum width=5cm,minimum height=5cm,
+                draw=white,line width=3pt,
+                font=\bfseries\normalsize\color{white},align=center] {AAMAS\\2026};
+        \end{tikzpicture}
+      \end{column}
+    \end{columns}
+    \vspace{1.8cm}
+  \end{beamercolorbox}
+  \begin{beamercolorbox}[wd=\paperwidth,ht=0.4cm]{separation line}\end{beamercolorbox}
+}
+
+%% ---- Footline ---------------------------------------------
+\setbeamertemplate{footline}{%
+  \begin{beamercolorbox}[wd=\paperwidth,ht=3cm,dp=0.5cm]{footline}
+    \centering\vspace{0.6cm}
+    {\large\color{white}%
+      \textbf{AAMAS 2026} $\cdot$ Paphos, Cyprus $\cdot$
+      \texttt{github.com/dipi-unimore/mininet-gym} $\cdot$
+      \texttt{finix77s@gmail.com} $\cdot$
+      Paper: \emph{doi.org/10.1016/j.simpa.2025...}%
+    }
+  \end{beamercolorbox}
+}
+
+%% ===========================================================
+\begin{document}
+\begin{frame}[t]
+\vspace{0.5cm}
+
+\begin{columns}[T,totalwidth=\textwidth]
+
+%% ============================================================
+%% COLUMN 1  (29%) — Introduction + Architecture
+%% ============================================================
+\begin{column}{0.29\textwidth}
+
+% ---- Abstract ----
+\begin{block}{Overview}
+\large
+\textbf{MininetGym} is an open-source, modular platform that turns a live
+Software-Defined Network (SDN) emulator into a \textbf{Gymnasium}
+environment for training Reinforcement Learning agents on
+\textbf{real cybersecurity tasks}.
+
+\medskip
+Agents observe live OpenFlow traffic counters, classify hosts as
+\emph{normal / victim / attacker}, and can \textbf{trigger SDN
+drop-rules} via OpenDayLight to mitigate ongoing DDoS attacks —
+all within a reproducible, browser-controlled experiment.
+\end{block}
+
+\vspace{0.7cm}
+
+% ---- Architecture TikZ ----
+\begin{block}{Framework Architecture}
+\centering
+\begin{tikzpicture}[
+    every node/.style={font=\normalsize},
+    box/.style={rectangle, rounded corners=6pt,
+                minimum width=13.5cm, minimum height=1.7cm,
+                text width=13cm, align=center,
+                draw, thick, inner sep=6pt},
+    sbox/.style={rectangle, rounded corners=5pt,
+                 minimum width=6cm, minimum height=1.5cm,
+                 text width=5.7cm, align=center,
+                 draw, thick, inner sep=5pt},
+    arr/.style={-{Stealth[length=7pt,width=5pt]}, line width=2pt}
+  ]
+
+  %% Layer 1 — Web UI
+  \node[box, fill=cprimary!18, draw=cprimary] (web) at (0,0)
+    {\textbf{Web Dashboard}\\[-2pt]
+     \small Flask · SocketIO · Chart.js · Bootstrap};
+
+  %% Layer 2 — Agent Manager
+  \node[box, fill=csecond!15, draw=csecond, below=1.1cm of web] (mgr)
+    {\textbf{Agent Manager}\\[-2pt]
+     \small Training · Evaluation · Metrics · PDF Export};
+
+  %% Layer 3 — RL Agents (two side-by-side)
+  \node[sbox, fill=cyellow!15, draw=cyellow!70,
+        below=1.2cm of mgr, xshift=-3.8cm] (tabular)
+    {\textbf{Tabular Agents}\\[-2pt]
+     \small Q-Learning · SARSA};
+  \node[sbox, fill=caccent!12, draw=caccent!60,
+        below=1.2cm of mgr, xshift=3.8cm] (deep)
+    {\textbf{Deep RL (SB3)}\\[-2pt]
+     \small DQN · PPO · A2C};
+
+  %% Layer 4 — Gymnasium Environments
+  \node[box, fill=cprimary!10, draw=cprimary!60,
+        below=3.0cm of mgr] (gym)
+    {\textbf{Gymnasium Environments}\\[-2pt]
+     \small Classif. · Attack-Net · Attack-PerHost · MARL};
+
+  %% Layer 5 — Mininet
+  \node[box, fill=csecond!20, draw=csecond!70,
+        below=1.1cm of gym] (mnt)
+    {\textbf{Mininet SDN Network}\\[-2pt]
+     \small OVS Switch · 5 Hosts · 5 IoT Devices · OpenFlow Monitor};
+
+  %% Layer 6 — SDN Controller + Traffic Gen
+  \node[sbox, fill=cred!10, draw=cred!50,
+        below=1.2cm of mnt, xshift=-3.8cm] (odl)
+    {\textbf{OpenDayLight}\\[-2pt]
+     \small SDN Controller · Drop Rules};
+  \node[sbox, fill=cred!10, draw=cred!50,
+        below=1.2cm of mnt, xshift=3.8cm] (tgen)
+    {\textbf{Attack Generator}\\[-2pt]
+     \small UDP/TCP/ICMP Flood · Slowloris};
+
+  %% Arrows
+  \draw[arr, color=cprimary]  (web.south)  -- (mgr.north);
+  \draw[arr, color=csecond]   (mgr.south)  -- ++(0,-.5) -| (tabular.north);
+  \draw[arr, color=csecond]   (mgr.south)  -- ++(0,-.5) -| (deep.north);
+  \draw[arr, color=cprimary!70] (tabular.south) -- ++(0,-.3) |- (gym.west);
+  \draw[arr, color=cprimary!70] (deep.south)    -- ++(0,-.3) |- (gym.east);
+  \draw[arr, color=csecond]   (gym.south)  -- (mnt.north);
+  \draw[arr, color=cred!70]   (mnt.south)  -- ++(0,-.5) -| (odl.north);
+  \draw[arr, color=cred!70]   (mnt.south)  -- ++(0,-.5) -| (tgen.north);
+  %% SDN feedback (dashed)
+  \draw[{Stealth[length=5pt]}-{Stealth[length=5pt]},
+        dashed, line width=1.5pt, color=csecond!60]
+    (odl.east) -- ++(1,0) node[above,font=\tiny,color=csecond]{SDN\,loop} -- ++(1.2,0);
+
+\end{tikzpicture}
+\end{block}
+
+\vspace{0.7cm}
+
+% ---- Tech Stack ----
+\begin{block}{Technology Stack}
+\large
+\setlength{\tabcolsep}{8pt}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Layer}        & \textbf{Technology} \\
+\midrule
+Network emulation     & Mininet 2.3 + Open vSwitch \\
+SDN controller        & OpenDayLight (OpenFlow 1.0) \\
+RL framework          & OpenAI Gymnasium + SB3 \\
+Deep learning         & PyTorch \\
+Web API               & Flask + Flask-SocketIO \\
+Frontend              & Bootstrap + Chart.js \\
+\bottomrule
+\end{tabular}
+\end{block}
+
+\end{column}
+
+%% ============================================================
+%% COLUMN 2  (1% spacer)
+%% ============================================================
+\begin{column}{0.01\textwidth}\end{column}
+
+%% ============================================================
+%% COLUMN 2  (34%) — Scenarios + Agents + Metrics
+%% ============================================================
+\begin{column}{0.34\textwidth}
+
+\begin{block}{Cybersecurity Scenarios}
+\vspace{0.4cm}
+
+%% Scenario 1
+\begin{tcolorbox}[scenbox, title={Scenario 1 \textnormal{—} Traffic Classification}]
+\large
+Classify live network traffic into \textbf{4 classes}:
+\textit{None / Ping / UDP / TCP}.\\[5pt]
+\begin{tabular}{@{}ll@{}}
+Observation: & $\mathbb{R}^{4}$ — global pkt/byte aggregates \\
+Action:      & $\{0,1,2,3\}$ \\
+Reward:      & graded by distance from correct label \\
+\end{tabular}
+\end{tcolorbox}
+
+\vspace{0.5cm}
+
+%% Scenario 2
+\begin{tcolorbox}[scenbox, title={Scenario 2 \textnormal{—} Network-Level Attack Detection}]
+\large
+Binary detection of ongoing flooding attacks at the
+\textbf{global network level}.\\[5pt]
+\begin{tabular}{@{}ll@{}}
+Observation: & $\mathbb{R}^{4}$ — pkts, $\Delta$pkts\%, bytes, $\Delta$bytes\% \\
+Action:      & \{Normal, Attack\} \\
+Defense:     & alert only \\
+\end{tabular}
+\end{tcolorbox}
+
+\vspace{0.5cm}
+
+%% Scenario 3
+\begin{tcolorbox}[scenbox,
+  title={Scenario 3 \textnormal{—} Per-Host Detection \textcolor{cyellow}{\normalfont(primary scenario)}}]
+\large
+Each host is classified as \textbf{Normal / Victim / Attacker}.
+Detection of an \emph{attacker} triggers an
+\textbf{\color{cred}OpenFlow drop rule} via OpenDayLight.\\[5pt]
+\begin{tabular}{@{}ll@{}}
+Observation: & $\mathbb{R}^{8}$ per host (TX+RX pkt/byte+deltas) \\
+Action:      & \{Normal, Incoming attack, Outgoing attack\} \\
+Defense:     & \textcolor{cred}{\textbf{SDN link blocking}} \\
+Wrapper:     & \textit{PerHostScanWrapper} (const obs size) \\
+\end{tabular}\\[5pt]
+\small
+Reward asymmetry compensates class imbalance:
+$r_{\text{scale}} = \min\!\left(\frac{N-1}{2},\,8\right)$, penalises
+false negatives $\times 2$.
+\end{tcolorbox}
+
+\vspace{0.5cm}
+
+%% Scenario 4
+\begin{tcolorbox}[scenbox,
+  title={Scenario 4 \textnormal{—} Multi-Agent Hierarchical (MARL)}]
+\large
+A \textbf{Coordinator} monitors global traffic and broadcasts alerts;
+independent \textbf{Host agents} act on local per-host observations.\\[5pt]
+\begin{tabular}{@{}ll@{}}
+Coordinator obs: & $\mathbb{R}^{5}$ + message count \\
+Host obs:        & $\mathbb{R}^{9}$ + message count \\
+Communication:   & shared \textit{InstantState} message bus \\
+Training:        & parallel threads (one per agent) \\
+\end{tabular}
+\end{tcolorbox}
+
+\vspace{0.3cm}
+\end{block}
+
+\vspace{0.6cm}
+
+\begin{block}{Supported RL Agents}
+\large
+\begin{columns}[T]
+\begin{column}{0.46\textwidth}
+\textbf{Tabular}
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt]
+  \item Q-Learning\\\small(log-bin discretization)
+  \item SARSA (on-policy)
+\end{itemize}
+\bigskip
+\textbf{Supervised Baseline}
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt]
+  \item Supervised Agent
+\end{itemize}
+\end{column}
+\begin{column}{0.46\textwidth}
+\textbf{Deep RL — Stable Baselines 3}
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt]
+  \item DQN (Deep Q-Network)
+  \item PPO (Proximal Policy Opt.)
+  \item A2C (Advantage Actor-Critic)
+\end{itemize}
+\end{column}
+\end{columns}
+\end{block}
+
+\vspace{0.6cm}
+
+\begin{block}{Key Evaluation Metrics}
+\large
+\begin{itemize}[leftmargin=1.2em,itemsep=4pt]
+  \item \textbf{Accuracy · Precision · Recall · F1} per agent
+  \item \textbf{Mitigation Ratio} — fraction of attacking hosts
+        successfully blocked by SDN
+  \item \textbf{False Negative Rate} — missed attacks
+        (high-cost errors, penalised $\times$2)
+  \item Live \textbf{reward curves} \& \textbf{confusion matrices}
+  \item \textbf{Attack latency} — steps from attack start to blocking
+\end{itemize}
+\end{block}
+
+\end{column}
+
+%% ============================================================
+%% COLUMN 3  (1% spacer)
+%% ============================================================
+\begin{column}{0.01\textwidth}\end{column}
+
+%% ============================================================
+%% COLUMN 3  (35%) — Live Demo Walkthrough
+%% ============================================================
+\begin{column}{0.35\textwidth}
+
+\begin{block}{Live Demo Walkthrough}
+\vspace{0.5cm}
+
+%% ---- STEP 1 ----
+\begin{tcolorbox}[demobox,
+  title={\large\raisebox{1pt}{\textbf{\textsf{①}}}~Introduction}]
+\large
+The attendee opens a \textbf{URL} on their device (laptop or mobile).
+The single-page application presents three tabs:
+\textit{Configuration}, \textit{Training}, and \textit{Results}.
+
+\vspace{0.5cm}
+\begin{tcolorbox}[screenshot, height=9cm]
+\textbf{[ Screenshot — Landing Page ]}\\[4pt]
+Tab navigation · Status bar · System info
+\end{tcolorbox}
+\end{tcolorbox}
+
+\vspace{0.55cm}
+
+%% ---- STEP 2 ----
+\begin{tcolorbox}[demobox,
+  title={\large\raisebox{1pt}{\textbf{\textsf{②}}}~Configuration}]
+\large
+The demonstrator sets the \textbf{network topology}
+(5 hosts + 5 IoT), selects \emph{Scenario 3 — attacks\_ho},
+adds three agents (PPO, DQN, Q-Learning), and tunes
+hyperparameters — all via the web form.
+
+\vspace{0.5cm}
+\begin{tcolorbox}[screenshot, height=9cm]
+\textbf{[ Screenshot — Configuration Panel ]}\\[4pt]
+Topology · Agent cards · Attack parameters
+\end{tcolorbox}
+\end{tcolorbox}
+
+\vspace{0.55cm}
+
+%% ---- STEP 3 ----
+\begin{tcolorbox}[demobox,
+  title={\large\raisebox{1pt}{\textbf{\textsf{③}}}~Experiment \textnormal{(also on mobile)}}]
+\large
+Training starts. \textbf{Reward and accuracy charts} update in
+real time via WebSocket. Host-status indicators show
+which hosts are under attack and whether the agent has
+triggered \textbf{\color{cred}SDN blocking}.
+The UI is \textbf{fully responsive} — accessible from a phone.
+
+\vspace{0.4cm}
+\begin{columns}[T]
+  \begin{column}{0.61\textwidth}
+    \begin{tcolorbox}[screenshot, height=12cm]
+      \textbf{[ Screenshot — Training Dashboard ]}\\[4pt]
+      Live charts · Host status grid
+    \end{tcolorbox}
+  \end{column}
+  \hfill
+  \begin{column}{0.36\textwidth}
+    \begin{tcolorbox}[screenshot, height=12cm]
+      \textbf{[ Mobile View ]}\\[4pt]
+      Responsive layout
+    \end{tcolorbox}
+  \end{column}
+\end{columns}
+\end{tcolorbox}
+
+\vspace{0.55cm}
+
+%% ---- STEP 4 ----
+\begin{tcolorbox}[demobox,
+  title={\large\raisebox{1pt}{\textbf{\textsf{④}}}~Result Evaluation}]
+\large
+The \textit{Results} tab displays per-agent
+accuracy tables, confusion matrices, and a
+\textbf{mitigation gauge} showing the fraction
+of attacks successfully blocked by OpenFlow rules.
+A \textbf{PDF report} can be exported in one click.
+
+\vspace{0.4cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{tcolorbox}[screenshot, height=10cm]
+      \textbf{[ Screenshot — Metrics Table ]}\\[4pt]
+      Accuracy · Recall · F1
+    \end{tcolorbox}
+  \end{column}
+  \hfill
+  \begin{column}{0.48\textwidth}
+    \begin{tcolorbox}[screenshot, height=10cm]
+      \textbf{[ Screenshot — Mitigation Gauge ]}\\[4pt]
+      SDN block rate
+    \end{tcolorbox}
+  \end{column}
+\end{columns}
+\end{tcolorbox}
+
+\end{block}
+
+\end{column}
+
+\end{columns}
+
+\end{frame}
+\end{document}

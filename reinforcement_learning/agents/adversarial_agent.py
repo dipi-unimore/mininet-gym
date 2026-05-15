@@ -6,7 +6,7 @@ from utility.my_log import information, debug, error
 from mininet.net import Mininet
 from mininet.node import Host
 
-from utility.network_attacks import AttackType, launch_attack_smart, launch_udp_flood, launch_http_flood, launch_icmp_flood, launch_tcp_syn_flood
+from utility.network_attacks import AttackType, launch_attack_smart, launch_udp_flood_async
 
 global_is_dos_attack_active = False
 
@@ -28,10 +28,33 @@ def generate_random_traffic(net: Mininet):
 def choose_task_type(net_env):
     """
     Choose the task type based on the attack likely.
-    Args:        attack_likely (float): Probability of choosing an attack (0 to 0.5).
-    Returns:        str: The chosen task type ("normal", "short_attack", or "long_attack").
+    Args:
+        net_env: Network environment with params.attacks.likely and params.attacks.max_attack_percentage
+    Returns:
+        str: The chosen task type ("normal", "short_attack", or "long_attack").
     """
-    attack_likely = max(0, min(net_env.attack_likely, 0.5))
+    default_likely = getattr(
+        getattr(getattr(net_env, "params", None), "attacks", None),
+        "likely",
+        0.2,
+    )
+    # Get max_attack_percentage from config, default to 0.5 for backward compatibility
+    max_attack_percentage = getattr(
+        getattr(getattr(net_env, "params", None), "attacks", None),
+        "max_attack_percentage",
+        0.5,
+    )
+    
+    if not hasattr(net_env, "attack_likely"):
+        net_env.attack_likely = default_likely
+    if not hasattr(net_env, "init_attack_likely"):
+        net_env.init_attack_likely = default_likely
+    if not hasattr(net_env, "last_long_attack_timestamp"):
+        net_env.last_long_attack_timestamp = 0
+    if not hasattr(net_env, "last_short_attack_timestamp"):
+        net_env.last_short_attack_timestamp = 0
+
+    attack_likely = max(0, min(net_env.attack_likely, max_attack_percentage))
     
     rand = random.random()
     now = time.time()
@@ -330,7 +353,7 @@ def host_task_async(host: Host, net_env, options):
                     
                 elif task_type == SHORT_ATTACK or task_type == LONG_ATTACK:
                     # For attacks, start the attack FIRST, then store task info
-                    attack_started = launch_dos_attack_hping3_async(
+                    attack_started = launch_udp_flood_async(
                         attacker=host, 
                         victim=destination, 
                         duration=task_duration
@@ -513,6 +536,42 @@ def is_serious_warning(output: str) -> bool:
 # Port management to avoid conflicts
 _used_ports = set()
 _port_lock = threading.Lock()
+_host_cmd_locks = {}
+_host_cmd_locks_lock = threading.Lock()
+
+
+def _get_host_cmd_lock(host):
+    host_name = getattr(host, 'name', str(id(host)))
+    with _host_cmd_locks_lock:
+        lock = _host_cmd_locks.get(host_name)
+        if lock is None:
+            lock = threading.Lock()
+            _host_cmd_locks[host_name] = lock
+        return lock
+
+
+def _host_cmd(host, command, wait_timeout=5.0, retries=5, retry_delay=0.1):
+    if wait_timeout is not None and wait_timeout > 0:
+        wait_for_host_ready(host, timeout=wait_timeout)
+
+    lock = _get_host_cmd_lock(host)
+    last_error = None
+    with lock:
+        for _ in range(retries):
+            try:
+                return host.cmd(command)
+            except (AssertionError, OSError, IOError) as exc:
+                last_error = exc
+                time.sleep(retry_delay)
+            except RuntimeError as exc:
+                if 'concurrent poll() invocation' not in str(exc):
+                    raise
+                last_error = exc
+                time.sleep(retry_delay)
+
+    if last_error is not None:
+        raise last_error
+    return ""
 
 def get_available_port(min_port=10000, max_port=60000):
     """
@@ -612,7 +671,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             # Don't return None - try to proceed anyway
         if traffic_type == TrafficTypes.PING:
             # Generate ping traffic
-            client_output = src_host.cmd(f"ping -c {int(duration)} {dst_host.IP()} 2>&1 &")
+            client_output = _host_cmd(src_host, f"ping -c {int(duration)} {dst_host.IP()} 2>&1 &")
             
             if color is not Fore.BLACK:
                 color = Fore.GREEN if color is None else color
@@ -627,7 +686,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             # Kill any stale iperf processes on this host first
             # Use shorter timeout here since we already waited above
             if wait_for_host_ready(dst_host, timeout=1.0):
-                dst_host.cmd(f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null")
+                _host_cmd(dst_host, f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null", wait_timeout=0)
                 time.sleep(0.05)
             else:
                 debug(f"{dst_host.name} busy during cleanup, skipping pkill")
@@ -638,7 +697,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             
             server_cmd = f"timeout {duration+2}s iperf -s -u -p {port_number} >/tmp/iperf_server_{dst_host.name}_{port_number}.log 2>&1 &"
             try:
-                dst_host.cmd(server_cmd)
+                _host_cmd(dst_host, server_cmd, wait_timeout=0)
             except AssertionError:
                 error(f"Failed to start server on {dst_host.name} - host still busy")
                 release_port(port_number)
@@ -648,8 +707,8 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             
             # Verify server started
             if wait_for_host_ready(dst_host, timeout=1.0):
-                check = dst_host.cmd(f"pgrep -f 'iperf.*{port_number}'")
-                if not check.strip():
+                check = _host_cmd(dst_host, f"pgrep -f 'iperf.*{port_number}'", wait_timeout=0)
+                if not (check and check.strip()):
                     error(f"Failed to start iperf server on {dst_host.name}:{port_number}")
                     release_port(port_number)
                     return TrafficTypes.NONE, None, None
@@ -662,12 +721,12 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             client_log_file = f"/tmp/iperf_client_{src_host.name}_{port_number}.log"
             
             try:
-                src_host.cmd(f"bash -c 'timeout {duration+1}s iperf -c {dst_host.IP()} -u -p {port_number} -t {duration} >{client_log_file} 2>&1 & echo $! >{client_pid_file}'")
+                _host_cmd(src_host, f"bash -c 'timeout {duration+1}s iperf -c {dst_host.IP()} -u -p {port_number} -t {duration} >{client_log_file} 2>&1 & echo $! >{client_pid_file}'", wait_timeout=0)
             except AssertionError:
                 error(f"Failed to start client on {src_host.name} - host still busy")
                 # Clean up server
                 if wait_for_host_ready(dst_host, timeout=1.0):
-                    dst_host.cmd(f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null")
+                    _host_cmd(dst_host, f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null", wait_timeout=0)
                 release_port(port_number)
                 return TrafficTypes.NONE, None, None
             
@@ -676,19 +735,19 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             for i in range(int(max_wait * 2)):  # Check every 0.5s
                 time.sleep(0.5)
                 if wait_for_host_ready(src_host, timeout=0.5):
-                    pid_check = src_host.cmd(f"test -f {client_pid_file} && kill -0 $(cat {client_pid_file}) 2>/dev/null && echo 'running' || echo 'done'")
-                    if 'done' in pid_check:
+                    pid_check = _host_cmd(src_host, f"test -f {client_pid_file} && kill -0 $(cat {client_pid_file}) 2>/dev/null && echo 'running' || echo 'done'", wait_timeout=0)
+                    if pid_check and 'done' in pid_check:
                         break
             
             # Read outputs
             if wait_for_host_ready(src_host, timeout=2.0):
-                client_output = src_host.cmd(f"cat {client_log_file} 2>/dev/null")
-                src_host.cmd(f"rm -f {client_log_file} {client_pid_file} 2>/dev/null")
+                client_output = _host_cmd(src_host, f"cat {client_log_file} 2>/dev/null", wait_timeout=0)
+                _host_cmd(src_host, f"rm -f {client_log_file} {client_pid_file} 2>/dev/null", wait_timeout=0)
             
             time.sleep(0.5)
             if wait_for_host_ready(dst_host, timeout=2.0):
-                server_output = dst_host.cmd(f"cat /tmp/iperf_server_{dst_host.name}_{port_number}.log 2>/dev/null")
-                dst_host.cmd(f"rm -f /tmp/iperf_server_{dst_host.name}_{port_number}.log 2>/dev/null")
+                server_output = _host_cmd(dst_host, f"cat /tmp/iperf_server_{dst_host.name}_{port_number}.log 2>/dev/null", wait_timeout=0)
+                _host_cmd(dst_host, f"rm -f /tmp/iperf_server_{dst_host.name}_{port_number}.log 2>/dev/null", wait_timeout=0)
             
             if color is not Fore.BLACK:
                 color = Fore.YELLOW if color is None else color
@@ -702,7 +761,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             
             # Kill any stale iperf processes on this port
             if wait_for_host_ready(dst_host, timeout=1.0):
-                dst_host.cmd(f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null")
+                _host_cmd(dst_host, f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null", wait_timeout=0)
                 time.sleep(0.1)
             
             # Start server with output to file
@@ -712,7 +771,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             server_cmd = f"timeout {duration+3}s iperf -s -p {port_number} >{server_log} 2>&1 &"
             
             try:
-                dst_host.cmd(server_cmd)
+                _host_cmd(dst_host, server_cmd, wait_timeout=0)
             except AssertionError:
                 error(f"Failed to start server on {dst_host.name} - host still busy")
                 release_port(port_number)
@@ -724,24 +783,26 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             # Verify server started and is listening
             if wait_for_host_ready(dst_host, timeout=1.0):
                 # Check process exists
-                check_process = dst_host.cmd(f"pgrep -f 'iperf.*-s.*{port_number}'").strip()
+                check_process_out = _host_cmd(dst_host, f"pgrep -f 'iperf.*-s.*{port_number}'", wait_timeout=0)
+                check_process = (check_process_out or "").strip()
                 if not check_process:
                     error(f"iperf server process not found on {dst_host.name}:{port_number}")
                     # Check server log for error
-                    server_output = dst_host.cmd(f"cat {server_log} 2>/dev/null")
+                    server_output = _host_cmd(dst_host, f"cat {server_log} 2>/dev/null", wait_timeout=0)
                     error(f"Server log: {server_output}")
                     release_port(port_number)
                     return TrafficTypes.NONE, None, None
-                
+
                 # Check if port is actually listening
-                check_port = dst_host.cmd(f"netstat -tln | grep ':{port_number}' || ss -tln | grep ':{port_number}'").strip()
+                check_port_out = _host_cmd(dst_host, f"netstat -tln | grep ':{port_number}' || ss -tln | grep ':{port_number}'", wait_timeout=0)
+                check_port = (check_port_out or "").strip()
                 if not check_port:
                     error(f"Port {port_number} not listening on {dst_host.name}")
                     # Check server log
-                    server_output = dst_host.cmd(f"cat {server_log} 2>/dev/null")
+                    server_output = _host_cmd(dst_host, f"cat {server_log} 2>/dev/null", wait_timeout=0)
                     error(f"Server log: {server_output}")
                     # Kill the process and retry with different port
-                    dst_host.cmd(f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null")
+                    _host_cmd(dst_host, f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null", wait_timeout=0)
                     release_port(port_number)
                     return TrafficTypes.NONE, None, None
                 
@@ -753,14 +814,6 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             client_pid_file = f"/tmp/iperf_client_{src_host.name}_{port_number}.pid"
             client_log_file = f"/tmp/iperf_client_{src_host.name}_{port_number}.log"
             
-            # Test connection first with a quick ping
-            connectivity_test = src_host.cmd(f"ping -c 1 -W 1 {dst_host.IP()}").strip()
-            if "1 received" not in connectivity_test and "1 packets received" not in connectivity_test:
-                error(f"No connectivity between {src_host.name} and {dst_host.name}")
-                dst_host.cmd(f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null")
-                release_port(port_number)
-                return TrafficTypes.NONE, None, None
-            
             try:
                 # Start client with better error handling
                 client_cmd = (
@@ -768,12 +821,12 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
                     f"-p {port_number} -t {duration} -i 1 "
                     f">{client_log_file} 2>&1 & echo $! >{client_pid_file}'"
                 )
-                src_host.cmd(client_cmd)
+                _host_cmd(src_host, client_cmd, wait_timeout=0)
             except AssertionError:
                 error(f"Failed to start client on {src_host.name} - host still busy")
                 # Clean up server
                 if wait_for_host_ready(dst_host, timeout=1.0):
-                    dst_host.cmd(f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null")
+                    _host_cmd(dst_host, f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null", wait_timeout=0)
                 release_port(port_number)
                 return TrafficTypes.NONE, None, None
             
@@ -782,15 +835,15 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             
             # Verify client started
             if wait_for_host_ready(src_host, timeout=1.0):
-                client_pid = src_host.cmd(f"cat {client_pid_file} 2>/dev/null").strip()
+                client_pid = _host_cmd(src_host, f"cat {client_pid_file} 2>/dev/null", wait_timeout=0).strip()
                 if client_pid:
-                    client_check = src_host.cmd(f"ps -p {client_pid} -o pid=").strip()
+                    client_check = _host_cmd(src_host, f"ps -p {client_pid} -o pid=", wait_timeout=0).strip()
                     if not client_check:
                         error(f"iperf client failed to start on {src_host.name}")
-                        client_output = src_host.cmd(f"cat {client_log_file} 2>/dev/null")
+                        client_output = _host_cmd(src_host, f"cat {client_log_file} 2>/dev/null", wait_timeout=0)
                         error(f"Client log: {client_output[:300]}")
                         # Clean up
-                        dst_host.cmd(f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null")
+                        _host_cmd(dst_host, f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null", wait_timeout=0)
                         release_port(port_number)
                         return TrafficTypes.NONE, None, None
                     else:
@@ -801,8 +854,8 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             for i in range(int(max_wait * 2)):  # Check every 0.5s
                 time.sleep(0.5)
                 if wait_for_host_ready(src_host, timeout=0.5):
-                    pid_check = src_host.cmd(f"test -f {client_pid_file} && kill -0 $(cat {client_pid_file}) 2>/dev/null && echo 'running' || echo 'done'")
-                    if 'done' in pid_check:
+                    pid_check = _host_cmd(src_host, f"test -f {client_pid_file} && kill -0 $(cat {client_pid_file}) 2>/dev/null && echo 'running' || echo 'done'", wait_timeout=0)
+                    if pid_check and 'done' in pid_check:
                         break
             
             # Small delay before reading outputs
@@ -810,16 +863,16 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             
             # Read outputs
             if wait_for_host_ready(src_host, timeout=2.0):
-                client_output = src_host.cmd(f"cat {client_log_file} 2>/dev/null")
-                src_host.cmd(f"rm -f {client_log_file} {client_pid_file} 2>/dev/null")
+                client_output = _host_cmd(src_host, f"cat {client_log_file} 2>/dev/null", wait_timeout=0)
+                _host_cmd(src_host, f"rm -f {client_log_file} {client_pid_file} 2>/dev/null", wait_timeout=0)
             
             time.sleep(0.5)
             if wait_for_host_ready(dst_host, timeout=2.0):
-                server_output = dst_host.cmd(f"cat {server_log} 2>/dev/null")
-                dst_host.cmd(f"rm -f {server_log} 2>/dev/null")
+                server_output = _host_cmd(dst_host, f"cat {server_log} 2>/dev/null", wait_timeout=0)
+                _host_cmd(dst_host, f"rm -f {server_log} 2>/dev/null", wait_timeout=0)
             
             # Ensure cleanup
-            dst_host.cmd(f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null")
+            _host_cmd(dst_host, f"pkill -9 -f 'iperf.*{port_number}' 2>/dev/null", wait_timeout=0)
             
             # Check if data was actually transferred
             if client_output:
@@ -867,6 +920,16 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
         
         return traffic_type, src_host, dst_host
         
+    except AssertionError:
+        # Frequent during teardown/race windows in Mininet host shells.
+        # Keep a concise managed message to avoid noisy traceback spam.
+        debug(
+            Fore.YELLOW
+            + f"generate_normal_traffic skipped: host shell busy/unavailable "
+            + f"({src_host.name}->{dst_host.name}, type={traffic_type})"
+            + Fore.WHITE
+        )
+        return TrafficTypes.NONE, None, None
     except Exception as e:
         error(Fore.RED + f"Exception in generate_normal_traffic: {type(e).__name__}: {str(e)}\n{traceback.format_exc()}" + Fore.WHITE)
         return TrafficTypes.NONE, None, None
@@ -876,4 +939,32 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             release_port(port_number)
 
 
-
+def _generate_normal_traffic_once(host, destination, traffic_type, duration):
+    """Generate normal traffic for ~duration seconds (fire and forget)."""
+    from reinforcement_learning.agents.adversarial_agent import generate_normal_traffic
+    try:
+        generate_normal_traffic(host, destination, traffic_type,
+                                duration=duration, color=None)
+    except Exception:
+        pass
+ 
+ 
+def _launch_attack_once(host, destination, attack_type, duration):
+    """Launch one attack burst of ~duration seconds (fire and forget)."""
+    from utility.network_attacks import launch_attack_smart
+    try:
+        launch_attack_smart(attacker=host, victim=destination,
+                            duration=duration, attack_type=attack_type)
+    except Exception:
+        pass
+ 
+ 
+def _name_to_attack_type(name: str) -> dict:
+    """Map attack subtype name string to AttackType dict."""
+    from utility.network_attacks import AttackType
+    mapping = {
+        "udp_flood":  AttackType.UDP_FLOOD,
+        "syn_flood":  AttackType.SYN_FLOOD,
+        "icmp_flood": AttackType.ICMP_FLOOD,
+    }
+    return mapping.get(name, AttackType.UDP_FLOOD)

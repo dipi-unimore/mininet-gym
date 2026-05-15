@@ -40,6 +40,8 @@ class InstantState:
         self.bytes = 0
         self.packets_percentage_change = 0
         self.bytes_percentage_change = 0  
+        # Backward-compatibility vector used by NetworkEnv.get_current_state().
+        self._state = np.array([0, 0, 0, 0], dtype=np.float32)
         self.host_states = {host.name: np.zeros(8, dtype=np.float32) for host in hosts}
         self.host_states_total = {host_id: np.zeros(4) for host_id, _ in self.host_states.items() }
         self.host_statuses = { host_id: NORMAL for host_id in self.host_states.keys()} #default status
@@ -60,23 +62,83 @@ class InstantState:
         self.bytes = status["bytes"]
         self.packets_percentage_change = status["packetsPercentageChange"]
         self.bytes_percentage_change = status["bytesPercentageChange"]
-        #self.host_statuses = status["hostStatusesStructured"]  
-        for host_id, host_status in status["hostStatusesStructured"].items():
-            if host_id in self.host_states_total:
-                self.host_states_total[host_id][0] += host_status["receivedPackets"]
-                self.host_states_total[host_id][1] += host_status["receivedBytes"]
-                self.host_states_total[host_id][2] += host_status["transmittedPackets"]
-                self.host_states_total[host_id][3] += host_status["transmittedBytes"]
-                
-            if host_id in self.host_states:
-                self.host_states[host_id][0] = host_status["receivedPackets"]
-                self.host_states[host_id][1] = host_status["receivedPacketsPercentageChange"]
-                self.host_states[host_id][2] = host_status["receivedBytes"]
-                self.host_states[host_id][3] = host_status["receivedBytesPercentageChange"]
-                self.host_states[host_id][4] = host_status["transmittedPackets"]
-                self.host_states[host_id][5] = host_status["transmittedPacketsPercentageChange"]
-                self.host_states[host_id][6] = host_status["transmittedBytes"]
-                self.host_states[host_id][7] = host_status["transmittedBytesPercentageChange"]   
+        self._state = np.array(
+            [
+                self.packets,
+                self.packets_percentage_change,
+                self.bytes,
+                self.bytes_percentage_change,
+            ],
+            dtype=np.float32,
+        )
+
+    @property
+    def state(self):
+        return self._state
+
+    @state.setter
+    def state(self, value):
+        # Allow setting with either a raw state array (np.ndarray/list)
+        # or with a structured status dict that contains hostStatusesStructured.
+        if isinstance(value, (np.ndarray, list, tuple)):
+            self._state = np.array(value, dtype=np.float32)
+            return
+
+        # If a dict-like status object is provided, update both the main
+        # state vector and the per-host structures.
+        if isinstance(value, dict):
+            # If a flat state vector is embedded, try to read it
+            if "packets" in value and "bytes" in value:
+                try:
+                    self.packets = value.get("packets", self.packets)
+                    self.bytes = value.get("bytes", self.bytes)
+                    self.packets_percentage_change = value.get("packetsPercentageChange", self.packets_percentage_change)
+                    self.bytes_percentage_change = value.get("bytesPercentageChange", self.bytes_percentage_change)
+                    self._state = np.array([
+                        self.packets,
+                        self.packets_percentage_change,
+                        self.bytes,
+                        self.bytes_percentage_change,
+                    ], dtype=np.float32)
+                except Exception:
+                    # fallback: attempt to coerce any provided raw state
+                    try:
+                        self._state = np.array(value, dtype=np.float32)
+                    except Exception:
+                        pass
+
+            # Update host-level information if present
+            host_struct = value.get("hostStatusesStructured") or value.get("host_statuses_structured")
+            if isinstance(host_struct, dict):
+                for host_id, host_status in host_struct.items():
+                    # update totals if present
+                    if host_id in self.host_states_total:
+                        self.host_states_total[host_id][0] += host_status.get("receivedPackets", 0)
+                        self.host_states_total[host_id][1] += host_status.get("receivedBytes", 0)
+                        self.host_states_total[host_id][2] += host_status.get("transmittedPackets", 0)
+                        self.host_states_total[host_id][3] += host_status.get("transmittedBytes", 0)
+
+                    # update current host state vector if the host exists
+                    if host_id in self.host_states:
+                        self.host_states[host_id][0] = host_status.get("receivedPackets", self.host_states[host_id][0])
+                        self.host_states[host_id][1] = host_status.get("receivedPacketsPercentageChange", self.host_states[host_id][1])
+                        self.host_states[host_id][2] = host_status.get("receivedBytes", self.host_states[host_id][2])
+                        self.host_states[host_id][3] = host_status.get("receivedBytesPercentageChange", self.host_states[host_id][3])
+                        self.host_states[host_id][4] = host_status.get("transmittedPackets", self.host_states[host_id][4])
+                        self.host_states[host_id][5] = host_status.get("transmittedPacketsPercentageChange", self.host_states[host_id][5])
+                        self.host_states[host_id][6] = host_status.get("transmittedBytes", self.host_states[host_id][6])
+                        self.host_states[host_id][7] = host_status.get("transmittedBytesPercentageChange", self.host_states[host_id][7])
+
+                    # keep a copy of the structured host status
+                    self.host_statuses[host_id] = host_status
+
+            # update top-level status field if present
+            if "status" in value:
+                self.status = value.get("status", self.status)
+            return
+
+        # Fallback: coerce whatever is given into the float32 state
+        self._state = np.array(value, dtype=np.float32)
            
    
     
@@ -149,20 +211,54 @@ class InstantState:
         Returns:
             InstantState: A new InstantState representing the difference.
         """
-        new_host_states = {}
-        for host_id in self.host_states:
-            if host_id in other_state.host_states:
-                new_host_states[host_id] = self.host_states[host_id] - other_state.host_states[host_id]
+        # Create a new InstantState instance without invoking __init__
+        # (avoids expecting host objects with a .name attribute).
+        new_state = object.__new__(InstantState)
+
+        # Copy and compute numeric differences
+        new_state.total_packets = self.total_packets - getattr(other_state, "total_packets", 0)
+        new_state.total_bytes = self.total_bytes - getattr(other_state, "total_bytes", 0)
+        new_state.packets = self.packets - getattr(other_state, "packets", 0)
+        new_state.bytes = self.bytes - getattr(other_state, "bytes", 0)
+        new_state.packets_percentage_change = self.packets_percentage_change - getattr(other_state, "packets_percentage_change", 0)
+        new_state.bytes_percentage_change = self.bytes_percentage_change - getattr(other_state, "bytes_percentage_change", 0)
+
+        # Compute state vector difference if available
+        try:
+            new_state._state = self._state - other_state._state
+        except Exception:
+            try:
+                new_state._state = np.array([
+                    new_state.packets,
+                    new_state.packets_percentage_change,
+                    new_state.bytes,
+                    new_state.bytes_percentage_change,
+                ], dtype=np.float32)
+            except Exception:
+                new_state._state = np.array([0, 0, 0, 0], dtype=np.float32)
+
+        # Per-host differences
+        new_state.host_states = {}
+        for host_id, hs in self.host_states.items():
+            other_hs = other_state.host_states.get(host_id) if hasattr(other_state, "host_states") else None
+            if other_hs is not None:
+                new_state.host_states[host_id] = hs - other_hs
             else:
-                new_host_states[host_id] = self.host_states[host_id]
-        
-        new_state = InstantState(new_host_states)
-        new_state.total_packets = self.total_packets
-        new_state.total_bytes = self.total_bytes
-        new_state.packets = self.packets - other_state.packets
-        new_state.bytes = self.bytes - other_state.bytes
-        new_state.packets_percentage_change = self.packets_percentage_change - other_state.packets_percentage_change
-        new_state.bytes_percentage_change = self.bytes_percentage_change - other_state.bytes_percentage_change
+                new_state.host_states[host_id] = hs.copy()
+
+        # Totals per host
+        new_state.host_states_total = {}
+        for host_id, total in self.host_states_total.items():
+            other_total = other_state.host_states_total.get(host_id) if hasattr(other_state, "host_states_total") else None
+            if other_total is not None:
+                new_state.host_states_total[host_id] = total - other_total
+            else:
+                new_state.host_states_total[host_id] = total.copy()
+
+        # Shallow copy statuses and metadata
+        new_state.host_statuses = {k: v for k, v in self.host_statuses.items()}
+        new_state.status = dict(self.status) if isinstance(self.status, dict) else self.status
+        new_state.consecutive_corrects = 0
 
         return new_state
 

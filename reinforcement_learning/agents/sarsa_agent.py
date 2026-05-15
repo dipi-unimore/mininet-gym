@@ -1,61 +1,86 @@
+# sarsa_agent.py
 import time
 from reinforcement_learning.network_env import NetworkEnv
 from reinforcement_learning.base_agent import BaseAgent
 from utility.my_log import set_log_level
 
+
 class SARSAAgent(BaseAgent):
     """
-    Model free, value based, on policy
+    Model-free, value-based, on-policy tabular SARSA agent.
+
+    Compatible with both the base env and the PerHostScanWrapper.
+    When running under the wrapper, env.step() returns a normalised (8,)
+    slice which is discretized here before Q-table lookup.
     """
+
     def __init__(self, env: NetworkEnv, params):
-        super().__init__(env, params) 
-        self.is_discretized_state = True  
-        
+        super().__init__(env, params)
+        self.is_discretized_state = True
+
     def update_qtable(self, state, action, reward, next_state, next_action):
-        # SARSA Update Rule
-        td_target = reward + self.discount_factor * self.q_table[next_state + (next_action,)]
+        td_target = (reward
+                     + self.discount_factor
+                     * self.q_table[next_state + (next_action,)])
         td_error = td_target - self.q_table[state + (action,)]
         self.q_table[state + (action,)] += self.learning_rate * td_error
-                 
+
     def train(self):
-        cumulative_reward, state, done, truncated, count_actions_by_type = self.episode_reset(self.is_discretized_state) 
-        status = dict(self.env.global_state.status)  
+        # episode_reset returns the initial state already discretized
+        cumulative_reward, state, done, truncated, count_actions_by_type = \
+            self.episode_reset(self.is_discretized_state)
+
+        status = dict(self.env.global_state.status)
         action = self.choose_action(state)
-                      
-        while not done and not truncated and not self.stop_event.is_set(): #episode             
-            count_actions_by_type[action] += 1 
-            self.current_step+=1
-            next_state, reward, done, truncated, infos = self.env.step(action, options={"is_discretized_state": self.is_discretized_state, 
-                                                                        "current_step": self.current_step, 
-                                                                        "correct_predictions": self.correct_predictions, 
-                                                                        "show_action": self.show_action, "name": self.name})     
-            self.manage_step_data(action,reward,infos,status)
-            cumulative_reward += reward            
-            
-            status = dict(self.env.global_state.status) 
+
+        while not done and not truncated and not self.stop_event.is_set():
+            count_actions_by_type[action] += 1
+            self.current_step += 1
+
+            raw_next_state, reward, done, truncated, infos = self.env.step(
+                action,
+                options={
+                    "is_discretized_state": self.is_discretized_state,
+                    "current_step":         self.current_step,
+                    "correct_predictions":  self.correct_predictions,
+                    "show_action":          self.show_action,
+                    "name":                 self.name,
+                }
+            )
+
+            # Discretize next_state for Q-table indexing.
+            # PerHostScanWrapper always returns a normalised array → discretize.
+            # The classification env with is_discretized_state=True already returns
+            # a discretized tuple → skip to avoid double-discretization.
+            if isinstance(raw_next_state, tuple):
+                next_state = raw_next_state
+            else:
+                next_state = self.env.get_discretized_state(raw_next_state)
+
+            self.manage_step_data(action, reward, infos, status)
+            cumulative_reward += reward
+
+            status      = dict(self.env.global_state.status)
             next_action = self.choose_action(next_state)
-                      
+
             self.update_qtable(state, action, reward, next_state, next_action)
             state, action = next_state, next_action
-            
-            self.exploration_rate *= self.exploration_decay   
-            # if self.env.gym_type==4: #attack            
-            #     time.sleep(1)            
-            # else:
-            #     self.env.update_state()    
+
+            self.exploration_rate *= self.exploration_decay
+
         self.exploration_count -= 1
         self.exploitation_count -= 1
-        return cumulative_reward, count_actions_by_type                  
-   
-# Initialize the environment and agent
+        return cumulative_reward, count_actions_by_type
+
+
 if __name__ == '__main__':
     set_log_level('info')
     env = NetworkEnv()
     params = {
-        'learning_rate': 0.1,
-        'discount_factor': 0.99,
+        'learning_rate':    0.1,
+        'discount_factor':  0.99,
         'exploration_rate': 1.0,
-        'exploration_decay': 0.99995
+        'exploration_decay': 0.99995,
     }
     sarsa_agent = SARSAAgent(env, params)
     sarsa_agent.learn(episodes=1000)

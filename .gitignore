@@ -1,9 +1,3 @@
-.vs/VSWorkspaceState.json
-.vs/mininet-gym/v17/.wsuo
-.vs/mininet-gym/v17/DocumentLayout.json
-
-*.env
-
 # Created by .ignore support plugin (hsz.mobi)
 ### Diff template
 *.patch
@@ -23,9 +17,14 @@ ehthumbs_vista.db
 training/*
 _training/*
 
+#notes directory content
+notes/*
 
 #config file
 config.yaml
+config/*.yaml
+#to exclude all yaml files, use *.yaml in this config directory and its subdirectories
+config/**/*.yaml
 
 #vscode dir
 .vscode
@@ -34,7 +33,7 @@ config.yaml
 __pycache__
 
 #Json file
-*.json
+#*.json
 
 # Folder config file
 [Dd]esktop.ini
@@ -53,8 +52,8 @@ $RECYCLE.BIN/
 *.lnk
 
 # images
-*.png
-!images/*.png
+#*.png
+#!images/*.png
 
 ### Python template
 # Byte-compiled / optimized / DLL files
@@ -172,6 +171,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+MarlEnv
+MYenv11
 
 # Spyder project settings
 .spyderproject

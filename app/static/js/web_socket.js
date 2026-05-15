@@ -39,6 +39,63 @@ function logWebSocketMessage(message, level) {
     wsLog.scrollTop(wsLog.prop("scrollHeight"));
 }
 
+// Sync training state when socket reconnects
+async function syncTrainingStateOnReconnect() {
+    try {
+        const response = await $.ajax({
+            url: '/get_training_status',
+            type: 'GET',
+            timeout: 5000
+        });
+        
+        if (response.is_training) {
+            console.log('Training state synced after reconnect:', response.message);
+            // Map the status response to system status
+            let newState = SYSTEM_STATUS.IDLE;
+            if (response.is_paused) {
+                newState = SYSTEM_STATUS.PAUSED;
+            } else if (response.is_stopping) {
+                newState = SYSTEM_STATUS.STOPPED;
+            } else if (response.status === 'RUNNING') {
+                newState = SYSTEM_STATUS.TRAINING_RUNNING;
+            }
+            setStatus(newState, response.message);
+
+            // Show charts and initialize for all gym types (classification/attacks have no
+            // continuous data stream, so we must do this explicitly instead of relying on updateData)
+            if (typeof showCharts === 'function') showCharts();
+            if (currentConfig && currentConfig.cfg && currentConfig.cfg.agents && currentConfig.cfg.hosts) {
+                initializeAgentsCharts(currentConfig.cfg.isMultiAgent, currentConfig.cfg.agents, currentConfig.cfg.hosts);
+            }
+
+            // Restore chart data — pass server-side agent_chart_data for page-refresh recovery
+            let chartDataRestored = false;
+            if (typeof restoreChartDataFromSession === 'function') {
+                chartDataRestored = restoreChartDataFromSession(response.agent_chart_data);
+            }
+
+            if (chartDataRestored) {
+                showStatus(`Synchronized: ${response.message}. Chart data recovered.`, 'info');
+            } else {
+                showStatus(`Synchronized: ${response.message}`, 'info');
+            }
+        } else {
+            // No active training, clear status
+            localStorage.removeItem('trainingStatus');
+            setStatus(SYSTEM_STATUS.IDLE, 'No active training');
+        }
+    } catch (error) {
+        console.warn('Could not sync training state on reconnect:', error);
+        // Try to use localStorage as fallback
+        const storedState = getTrainingStateFromStorage();
+        if (storedState && storedState.status) {
+            setStatus(storedState.status, 'Recovered from local state');
+            if (typeof restoreChartDataFromSession === 'function') {
+                restoreChartDataFromSession();
+            }
+        }
+    }
+}
 
 function initializeWebSocket() {
     if (socket && socket.connected) {
@@ -53,12 +110,20 @@ function initializeWebSocket() {
 
     socket.on('connect', function () {
         wsLog.append('<p class="text-green-400">[SYSTEM] SocketIO Connected.</p>');
+        // On reconnect, sync the training state if we're on the training page
+        if (currentPage === 'training') {
+            syncTrainingStateOnReconnect();
+        }
     });
 
     socket.on('live_update', function (messages) {
         for (const data of messages) {
             if (data.level == 'config' && data.config) {
                 initializeAgentsCharts(data.config.isMultiAgent, data.config.agents, data.config.hosts); // Initialize all charts with config data
+                // Keep currentConfig.cfg in sync so recovery helpers can use it
+                if (typeof currentConfig !== 'undefined' && currentConfig) {
+                    currentConfig.cfg = data.config;
+                }
                 continue;
             }
             if (data.level == 'data') {
@@ -135,6 +200,10 @@ function initializeWebSocket() {
             newState = SYSTEM_STATUS.UNKNOWN; //unknown
         }
         setStatus(newState, msg);
+        // Save state to localStorage for persistence across disconnections
+        if (newState !== SYSTEM_STATUS.IDLE && newState !== SYSTEM_STATUS.DISCONNECTED) {
+            saveTrainingStateToStorage(newState);
+        }
         showStatus(`${data.message || msg}`, 'success');
     });
 }

@@ -29,6 +29,143 @@ function showStatus(message, type = 'info') {
     statusEl.data('timeout', setTimeout(() => statusEl.fadeOut(500), 5000));
 }
 
+const loadingOverlayReasons = new Set();
+
+function ensureLoadingOverlay() {
+    if (!$('#loading-overlay').length) {
+        return;
+    }
+}
+
+function updateLoadingOverlay() {
+    ensureLoadingOverlay();
+    const overlay = $('#loading-overlay');
+    if (!overlay.length) {
+        return;
+    }
+
+    if (loadingOverlayReasons.size > 0) {
+        overlay.removeClass('hidden');
+    } else {
+        overlay.addClass('hidden');
+        $('#loading-overlay-message').text('Loading...');
+    }
+}
+
+function showLoadingOverlay(reason = 'global', message = 'Loading...') {
+    ensureLoadingOverlay();
+    loadingOverlayReasons.add(String(reason));
+    $('#loading-overlay-message').text(message || 'Loading...');
+    updateLoadingOverlay();
+}
+
+function hideLoadingOverlay(reason = 'global') {
+    loadingOverlayReasons.delete(String(reason));
+    updateLoadingOverlay();
+}
+
+function trackContainerImagesLoading(containerSelector, reason = 'images', message = 'Loading images...') {
+    const container = $(containerSelector);
+    if (!container.length) {
+        return;
+    }
+
+    const images = container.find('img').toArray();
+    if (!images.length) {
+        return;
+    }
+
+    const loadingReason = String(reason);
+    let remaining = images.length;
+    showLoadingOverlay(loadingReason, message);
+
+    const markDone = () => {
+        remaining -= 1;
+        if (remaining <= 0) {
+            hideLoadingOverlay(loadingReason);
+        }
+    };
+
+    images.forEach((img) => {
+        if (img.complete) {
+            markDone();
+            return;
+        }
+
+        $(img).one('load.loading-spinner error.loading-spinner', markDone);
+    });
+}
+
+function ensureInfoPopup(title = 'Info', icon = '/static/images/icon/info.png') {
+    if ($('#info-popup-overlay').length) {
+        $('#info-popup-title').text(title);
+        $('#info-popup-icon').attr('src', icon);
+        return;
+    }
+
+    const popupHtml = `
+        <div id="info-popup-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[120] flex items-center justify-center p-4">
+            <div id="info-popup-card" class="bg-white rounded-xl shadow-2xl max-w-7xl w-[96vw] max-h-[92vh] flex flex-col border border-blue-100">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-blue-50 rounded-t-xl">
+                    <div class="flex items-center gap-2">
+                        <img id="info-popup-icon" src="${icon}" alt="Info" class="w-5 h-5">
+                        <h4 id="info-popup-title" class="text-base font-semibold text-blue-800">${title}</h4>
+                    </div>
+                    <button id="info-popup-close" class="px-2 py-1 text-sm font-semibold text-gray-600 hover:text-gray-900" aria-label="Close">X</button>
+                </div>
+                <div class="px-4 py-4 flex-1 min-h-0 overflow-y-auto">
+                    <div id="info-popup-text" class="text-sm text-gray-800 break-words"></div>
+                </div>
+                <div class="px-4 pb-4 flex justify-end">
+                    <button id="info-popup-ok" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">OK</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    $('body').append(popupHtml);
+}
+
+function closeInfoPopup() {
+    $('#info-popup-overlay').addClass('hidden');
+}
+
+function openInfoPopup(message) {
+    ensureInfoPopup();
+    $('#info-popup-text').text(String(message || 'No additional information available.'));
+    $('#info-popup-overlay').removeClass('hidden');
+}
+
+function openInfoPopupHtml(htmlContent, title = 'Info', icon = '/static/images/icon/info.png') {
+    ensureInfoPopup(title, icon);
+    $('#info-popup-text').html(String(htmlContent || '<p>No additional information available.</p>'));
+    $('#info-popup-overlay').removeClass('hidden');
+    trackContainerImagesLoading('#info-popup-text', 'info-popup-images', 'Loading preview images...');
+}
+
+$(document).on('click', 'img[src$="/static/images/icon/info.png"][title]', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const titleText = $(this).attr('title') || '';
+    openInfoPopup(titleText);
+});
+
+$(document).on('click', '#info-popup-close, #info-popup-ok', function () {
+    closeInfoPopup();
+});
+
+$(document).on('click', '#info-popup-overlay', function (event) {
+    if (event.target && event.target.id === 'info-popup-overlay') {
+        closeInfoPopup();
+    }
+});
+
+$(document).on('keydown', function (event) {
+    if (event.key === 'Escape' && $('#info-popup-overlay').length && !$('#info-popup-overlay').hasClass('hidden')) {
+        closeInfoPopup();
+    }
+});
+
 
 function setStatus(newSystemStatus, message) {
     var img1 = $('#training-status-text span img.system-status-image1');
@@ -140,18 +277,56 @@ function setStatus(newSystemStatus, message) {
 // PAGE NAVIGATION
 // ====================================================================\
 
-function navigateTo(page) {
+function updateNavigationButtons(page) {
+    const desktop = {
+        config: $('#nav-config'),
+        training: $('#nav-training'),
+        results: $('#nav-results'),
+    };
+    const mobile = {
+        config: $('#nav-config-mobile'),
+        training: $('#nav-training-mobile'),
+        results: $('#nav-results-mobile'),
+    };
+
+    const resetButton = (btn) => {
+        btn.removeClass('bg-blue-600 hover:bg-blue-700 bg-green-600 hover:bg-green-700 text-white')
+            .addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+    };
+
+    Object.values(desktop).forEach(resetButton);
+    Object.values(mobile).forEach(resetButton);
+
+    if (page === 'results') {
+        desktop.results.addClass('bg-green-600 hover:bg-green-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        mobile.results.addClass('bg-green-600 hover:bg-green-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+    } else if (page === 'training') {
+        desktop.training.addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        mobile.training.addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+    } else {
+        desktop.config.addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        mobile.config.addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+    }
+
+    $('#mobile-nav-toast').addClass('hidden');
+    $('#mobile-nav-toggle').attr('aria-expanded', 'false');
+}
+
+async function navigateTo(page) {
     currentPage = page;
     if (page === 'training') {
+        const synced = await syncTrainingParamsFromLoadedScenario();
+        if (!synced) {
+            return;
+        }
+
         // MANDATORY: Update config in memory on the backend before navigating
         updateConfigurationInMemory();
 
         $('#config-page').addClass('hidden');
         $('#results-page').addClass('hidden');
         $('#training-page').removeClass('hidden');
-        $('#nav-config').removeClass('bg-blue-600 hover:bg-blue-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
-        $('#nav-training').addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
-        $('#nav-results').removeClass('bg-green-600 hover:bg-green-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        updateNavigationButtons('training');
 
         // Initialize WS only when on the training page
         initializeWebSocket();
@@ -159,9 +334,7 @@ function navigateTo(page) {
         $('#training-page').addClass('hidden');
         $('#results-page').addClass('hidden');
         $('#config-page').removeClass('hidden');
-        $('#nav-training').removeClass('bg-blue-600 hover:bg-blue-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
-        $('#nav-config').addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
-        $('#nav-results').removeClass('bg-green-600 hover:bg-green-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        updateNavigationButtons('config');
 
         // Close WS if open
         if (socket && socket.connected) {
@@ -171,9 +344,65 @@ function navigateTo(page) {
         $('#config-page').addClass('hidden');
         $('#training-page').addClass('hidden');
         $('#results-page').removeClass('hidden');
-        $('#nav-training').removeClass('bg-blue-600 hover:bg-blue-700 text-white').addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
-        $('#nav-results').addClass('bg-green-600 hover:bg-green-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        updateNavigationButtons('results');
         renderResultsPanel();
+    }
+}
+
+async function syncTrainingParamsFromLoadedScenario() {
+    const envParams = (currentConfig && currentConfig.env_params) ? currentConfig.env_params : null;
+    if (!envParams) return true;
+
+    const source = String(envParams.scenario_source || '').toLowerCase();
+    if (source !== 'load') {
+        return true;
+    }
+
+    const selectedScenarioPath = String(envParams.scenario_file || '').trim();
+    if (!selectedScenarioPath) {
+        showStatus('Load existing is selected but no scenario file is set.', 'error');
+        openInfoPopup('Select a scenario row before entering Training.');
+        return false;
+    }
+
+    try {
+        const response = await getScenarioDetails(selectedScenarioPath);
+        const summary = (response && response.summary) ? response.summary : {};
+        const statistics = (response && response.statistics) ? response.statistics : {};
+        const training = statistics.training || {};
+        const evaluation = statistics.evaluation || {};
+
+        const toFiniteNumber = (value) => {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : null;
+        };
+
+        const trainEpisodes = toFiniteNumber(summary.train_episodes ?? training.episodes);
+        const trainMaxSteps = toFiniteNumber(summary.train_max_steps ?? training.max_steps);
+        const evalEpisodes = toFiniteNumber(summary.eval_episodes ?? evaluation.episodes);
+
+        if (trainEpisodes !== null) envParams.episodes = trainEpisodes;
+        if (trainMaxSteps !== null) envParams.max_steps = trainMaxSteps;
+        if (evalEpisodes !== null) envParams.test_episodes = evalEpisodes;
+
+        const syncInputValue = (path, value) => {
+            const input = $(`[data-path="${path}"]`);
+            if (input.length && value !== null) {
+                input.val(value);
+            }
+        };
+
+        syncInputValue('env_params.episodes', trainEpisodes);
+        syncInputValue('env_params.max_steps', trainMaxSteps);
+        syncInputValue('env_params.test_episodes', evalEpisodes);
+
+        showStatus('Training parameters synced from selected scenario.', 'success');
+        return true;
+    } catch (errorMessage) {
+        const message = String(errorMessage || 'Unknown error');
+        showStatus('Unable to sync training params from selected scenario: ' + message, 'error');
+        openInfoPopup('Unable to load selected scenario details before Training.\n\n' + message);
+        return false;
     }
 }
 
@@ -206,6 +435,59 @@ function isFieldReadOnly(section, key) {
     return READ_ONLY_FIELDS.some(field => field.section === section && field.key === key);
 }
 
+
+/**
+ * Checks if a field is explicitly hidden.
+ * @param {string} section 
+ * @param {string} key 
+ * @returns {boolean}
+ */
+function isFieldHidden(section, key) {
+    return HIDDEN_FIELDS.some(field => field.section === section && field.key === key);
+}
+
+
+function escapeHtml(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function resolveConfigComment(path) {
+    if (!path || !window.configComments) return '';
+    if (window.configComments[path]) return window.configComments[path];
+
+    // Root section in UI uses 'root.<key>', YAML paths are '<key>'
+    if (path.startsWith('root.')) {
+        const rootPath = path.replace(/^root\./, '');
+        if (window.configComments[rootPath]) return window.configComments[rootPath];
+    }
+
+    // Fallback for agent-indexed paths: agents.0.foo -> agents.*.foo
+    const wildcardPath = path.replace(/^agents\.\d+\./, 'agents.*.');
+    return window.configComments[wildcardPath] || '';
+}
+
+function loadConfigComments() {
+    return new Promise((resolve) => {
+        $.ajax({
+            url: '/static/json/config_parameter_comments.json',
+            type: 'GET',
+            success: function (response) {
+                window.configComments = response || {};
+                resolve(window.configComments);
+            },
+            error: function () {
+                window.configComments = {};
+                resolve(window.configComments);
+            }
+        });
+    });
+}
+
 /**
  * Creates an input field or select element HTML.
  * @param {string} key - The property name (e.g., 'packets')
@@ -217,6 +499,8 @@ function isFieldReadOnly(section, key) {
 function createInputField(key, value, fullId, isAgent) {
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const isReadonly = isFieldReadOnly(isAgent ? 'agents' : fullId.split('.').slice(0, -1).join('.'), key);
+    const isHidden = isFieldHidden(isAgent ? 'agents' : fullId.split('.').slice(0, -1).join('.'), key);
+    const commentFromYaml = resolveConfigComment(fullId);
 
     let inputElement;
     let noteElement;
@@ -225,27 +509,61 @@ function createInputField(key, value, fullId, isAgent) {
     if (fullId === 'env_params.gym_type') {
         inputElement = `<select id="${fullId}" data-path="${fullId}" class="config-select">
                     ${GYM_TYPE_OPTIONS.map(opt =>
-            `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
+            `<option value="${opt}" ${value.toLowerCase() === opt.toLowerCase() ? 'selected' : ''}>${opt}</option>`
         ).join('')}
                 </select>`;
         noteElement = 'For \'from_dataset\' options, remember the json dataset file.'
-        $(document).on('change', `#${CSS.escape(fullId)}`,  function () {
+        $(document).on('change', `#${CSS.escape(fullId)}`, async function () {
             currentConfig.env_params.gym_type = $(this).val();
+            try {
+                const scenarioParams = await getScenarioEnvParams(currentConfig.env_params.gym_type);
+                if (scenarioParams && Object.keys(scenarioParams).length > 0) {
+                    Object.assign(currentConfig.env_params, scenarioParams);
+                    const sectionKey = Object.keys(scenarioParams)[0]; // 'attacks' or 'classification'
+                    const sectionExists = $(`#${CSS.escape('env_params.' + sectionKey)}-section`).length > 0;
+                    if (!sectionExists) {
+                        // Cross-type switch: the target section was never rendered; re-render env params.
+                        // Strip UI-injected keys that only belong to specific scenario types (attacks_ho /
+                        // marl_attacks) so they don't appear as regular fields after re-render.
+                        if (!shouldShowScenarioSelector()) {
+                            delete currentConfig.env_params.scenario_source;
+                            delete currentConfig.env_params.scenario_file;
+                        }
+                        if (!shouldShowDatasetSelector()) {
+                            delete currentConfig.env_params.data_traffic_file;
+                        }
+                        // Detach #env-extra-selectors first: placeExtraSelectorsBeforeEnvSection may have
+                        // moved it inside #env-params-config-list, and .html() would destroy it.
+                        const extraSelectors = $('#env-extra-selectors').detach();
+                        // Remove the listener first to avoid duplicates — createInputField will re-add it.
+                        $(document).off('change', `#${CSS.escape(fullId)}`);
+                        const envHtml = renderFieldsRecursively(reorderEnvParamsForDisplay(currentConfig.env_params), 'env_params');
+                        $('#env-params-config-list').html(envHtml);
+                        // Re-attach after the list; renderDataSourceSelectors will reposition it.
+                        $('#env-params-config-list').after(extraSelectors);
+                    } else {
+                        updateEnvParamInputs(scenarioParams, 'env_params');
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to load scenario env params:', err);
+            }
             if (isClassificationEnv()) {
                 $(`#${CSS.escape('env_params.attacks')}-section`).addClass('hidden');
                 $(`#${CSS.escape('env_params.classification')}-section`).removeClass('hidden');
-            }
-            else {
+            } else {
                 $(`#${CSS.escape('env_params.attacks')}-section`).removeClass('hidden');
                 $(`#${CSS.escape('env_params.classification')}-section`).addClass('hidden');
             }
+            renderDataSourceSelectors();
         });
     }
     // 2. Algorithm Select (Agents only)
     else if (key === 'algorithm' && isAgent) {
-        inputElement = `<select id="${fullId}" data-path="${fullId}" class="config-select">
+        const agentIdx = parseInt(fullId.split('.')[1]);
+        inputElement = `<select id="${fullId}" data-path="${fullId}" data-agent-index="${agentIdx}" class="config-select agent-algorithm-select">
                     ${ALGORITHM_OPTIONS.map(opt =>
-            `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
+            `<option value="${opt}" ${value.toLowerCase() === opt.toLowerCase() ? 'selected' : ''}>${opt}</option>`
         ).join('')}
                 </select>`;
     }
@@ -258,7 +576,7 @@ function createInputField(key, value, fullId, isAgent) {
 
             let network_config = $(`#${CSS.escape('env_params.net_params.num_switches')}`).val() + "_" +
                 $(`#${CSS.escape('env_params.net_params.num_hosts')}`).val() + "_" +
-                $(`#${CSS.escape('env_params.net_params.num_iot')}`).val();
+                $(`#${CSS.escape('env_params.net_params.num_iots')}`).val();
 
             let gym_type = $(`#${CSS.escape('env_params.gym_type')}`).val();
             let agent_name = currentConfig.agents[parseInt(fullId.split('.')[1])].name;
@@ -276,33 +594,45 @@ function createInputField(key, value, fullId, isAgent) {
     else if (key === 'log_level') {
         inputElement = `<select id="${fullId}" data-path="${fullId}" class="config-select">
                     ${LOG_LEVELS.map(opt =>
-            `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
+            `<option value="${opt}" ${value.toLowerCase() === opt.toLowerCase() ? 'selected' : ''}>${opt}</option>`
         ).join('')}
                 </select>`;
     }
     // 4. Boolean Checkbox
     else if (typeof value === 'boolean') {
-        inputElement = `<input type="checkbox" id="${fullId}" data-path="${fullId}" class="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500" ${value ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>`;
+        inputElement = `<input type="checkbox" id="${fullId}" data-path="${fullId}" class="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 config-checkbox ${isHidden ? 'hidden' : ''}" ${value ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>`;
         //  Enabled (Agents only)
         if (key === 'enabled' && isAgent) {
             $(document).on('change', `#${CSS.escape(fullId)}`, function () {
                 const agentIndex = parseInt(fullId.split('.')[1]);
                 const agentCard = $(`#agent-card-${agentIndex}`);
+                if (Array.isArray(currentConfig.agents) && currentConfig.agents[agentIndex]) {
+                    currentConfig.agents[agentIndex].enabled = this.checked;
+                }
                 if (this.checked) {
                     agentCard.removeClass('opacity-50');
                 } else {
                     agentCard.addClass('opacity-50');
                 }
+                updateAgentsEnabledCount();
             });
         }        
     }
-    // 5. Array (read-only text display)
+    // 5. State input mode Select
+    else if (key === 'state_input_mode') {
+        inputElement = `<select id="${fullId}" data-path="${fullId}" class="config-select">
+                    ${STATE_INPUT_MODES.map(opt =>
+            `<option value="${opt}" ${value.toLowerCase() === opt.toLowerCase() ? 'selected' : ''}>${opt}</option>`
+        ).join('')}
+                </select>`;
+    }    
+    // 6. Array (read-only text display)
     else if (Array.isArray(value)) {
         inputElement = `<input type="text" id="${fullId}" data-path="${fullId}" value="${value.join(', ')}" class="config-input" readonly>`;
     }
-    // 6. Number or Text
+    // 7. Number or Text
     else {
-        const type = typeof value === 'number' ? 'number' : 'text';
+        const type = typeof value === 'number' ? 'number' : key === 'pwd' ? 'password' : 'text';
         let stepAttribute = '';
 
         if (type === 'number') {
@@ -319,14 +649,19 @@ function createInputField(key, value, fullId, isAgent) {
             }
         }
 
-        inputElement = `<input type="${type}" id="${fullId}" data-path="${fullId}" value="${value}" class="config-input" ${stepAttribute} ${isReadonly ? 'readonly' : ''}>`;
+        inputElement = `<input type="${type}" id="${fullId}" data-path="${fullId}" value="${value}" class="config-input ${isHidden ? 'hidden' : ''} " ${stepAttribute} ${isReadonly ? 'readonly' : ''}>`;
 
     }
 
+    const mergedNote = [noteElement, commentFromYaml].filter(Boolean).join(' | ');
+    // const noteBelowHtml = mergedNote
+    //     ? `<p class="text-xs text-gray-500">${escapeHtml(mergedNote)}</p>`
+    //     : '';
+    const icoInfo = mergedNote ? `<img src="/static/images/icon/info.png" alt="Info" title="${escapeHtml(mergedNote)}" class="inline-block w-4 h-4 ml-1 opacity-50">` : '';
     let fieldHtml = `
-                <div class="${typeof value === 'boolean' ? 'flex items-center space-x-3' : 'space-y-1'}">
-                    <label for="${fullId}" class="block text-sm font-medium text-gray-700 flex-shrink-0" title=" ${noteElement ?? ""}">${label} ${noteElement ? "(?)" : ""}</label>
-                    ${inputElement}                   
+                <div class="${isHidden ? 'hidden' : ''} ${typeof value === 'boolean' ? 'flex items-center space-x-3' : 'space-y-1'}">
+                    <label for="${fullId}" class="block text-sm font-medium text-gray-700 flex-shrink-0" title="${escapeHtml(mergedNote)} ">${label} ${mergedNote ? icoInfo : ''}</label>
+                    ${inputElement}
                 </div>
             `;
     return fieldHtml;
@@ -334,6 +669,102 @@ function createInputField(key, value, fullId, isAgent) {
 
 
 let list_dir = [];
+let selectedSavedConfigPath = '';
+
+let _datasetList = [];
+let _datasetSort = { col: null, asc: true };
+let _scenarioList = [];
+let _scenarioSort = { col: null, asc: true };
+
+function _sortInd(sortState, col) {
+    if (sortState.col !== col) return ' <span class="sort-ind text-gray-400 font-normal text-[10px]">⇅</span>';
+    return sortState.asc
+        ? ' <span class="sort-ind text-blue-500 font-normal text-[10px]">↑</span>'
+        : ' <span class="sort-ind text-blue-500 font-normal text-[10px]">↓</span>';
+}
+
+function _getSortVal(item, col) {
+    const s = item.summary || {};
+    switch (col) {
+        case 'datetime':       return new Date(item.datetime || 0).getTime();
+        case 'file':           return String(item.file || '').toLowerCase();
+        case 'path':           return String(item.path || '').toLowerCase();
+        case 'entries':        return Number(s.entries || 0);
+        case 'hosts':          return Number(s.hosts || 0);
+        case 'status_kinds':   return Number(s.status_kinds || 0);
+        case 'attack_like':    return Number(s.attack_like_entries || 0);
+        case 'mean_packets':   return Number(s.mean_packets || 0);
+        case 'train_episodes': return Number(s.train_episodes || 0);
+        case 'train_max_steps':return Number(s.train_max_steps || 0);
+        case 'train_steps':    return Number(s.train_steps || 0);
+        case 'eval_episodes':  return Number(s.eval_episodes || 0);
+        case 'eval_steps':     return Number(s.eval_steps || 0);
+        case 'attack_likely':  return String(s.attack_likely_used ?? '').toLowerCase();
+        default: return '';
+    }
+}
+
+function _applySort(list, sortState) {
+    if (!sortState.col) return list;
+    return [...list].sort((a, b) => {
+        const va = _getSortVal(a, sortState.col);
+        const vb = _getSortVal(b, sortState.col);
+        const cmp = typeof va === 'number' && typeof vb === 'number'
+            ? va - vb : String(va).localeCompare(String(vb));
+        return sortState.asc ? cmp : -cmp;
+    });
+}
+
+function renderDatasetRows(list) {
+    const selectedPath = currentConfig.env_params.data_traffic_file || '';
+    return list.map(item => {
+        const summary = item.summary || {};
+        const selectedClass = item.path === selectedPath ? 'bg-yellow-500' : '';
+        return `
+            <tr class="dataset-row border-b hover:bg-gray-50 cursor-pointer ${selectedClass}" data-path="${item.path}">
+                <td class="p-2">${item.datetime || '-'}</td>
+                <td class="p-2">${item.file || '-'}</td>
+                <td class="p-2">${summary.entries || 0}</td>
+                <td class="p-2">${summary.hosts || 0}</td>
+                <td class="p-2">${summary.status_kinds || 0}</td>
+                <td class="p-2">${summary.attack_like_entries || 0}</td>
+                <td class="p-2">${summary.mean_packets || 0}</td>
+                <td class="p-2 text-xs">${item.path}</td>
+            </tr>
+        `;
+    }).join('') || '<tr><td class="p-2 text-gray-500" colspan="8">No dataset found</td></tr>';
+}
+
+function renderScenarioRows(list) {
+    const selectedScenario = currentConfig.env_params.scenario_file || '';
+    const source = currentConfig.env_params.scenario_source || 'generate';
+    return list.map(item => {
+        const summary = item.summary || {};
+        const selectedClass = (source === 'load' && item.path === selectedScenario) ? 'bg-yellow-500' : '';
+        const encodedStatistics = encodeURIComponent(JSON.stringify(item.statistics || {}));
+        return `
+            <tr class="scenario-row border-b hover:bg-gray-50 cursor-pointer ${selectedClass}" data-path="${item.path}" data-statistics="${encodedStatistics}">
+                <td class="p-2">${item.datetime || '-'}</td>
+                <td class="p-2">${summary.train_episodes || 0}</td>
+                <td class="p-2">${summary.train_max_steps || 0}</td>
+                <td class="p-2">${summary.train_steps || 0}</td>
+                <td class="p-2">${summary.eval_episodes || 0}</td>
+                <td class="p-2">${summary.eval_steps || 0}</td>
+                <td class="p-2">${summary.attack_likely_used ?? '-'}</td>
+                <td class="p-2 text-xs">${item.path}</td>
+            </tr>
+        `;
+    }).join('') || '<tr><td class="p-2 text-gray-500" colspan="8">No scenario.json found</td></tr>';
+}
+
+function updateLoadSelectedConfigButtonState() {
+    const btn = $('#load-selected-config-btn');
+    if (!btn.length) return;
+
+    const hasSelection = Boolean(selectedSavedConfigPath);
+    btn.prop('disabled', !hasSelection);
+    btn.toggleClass('opacity-50 cursor-not-allowed', !hasSelection);
+}
 
 function renderList(list) {
     const dirListEl = $('#load-dir-list');
@@ -425,6 +856,7 @@ function renderFieldsRecursively(obj, path, isAgent = false, agentIndex = null) 
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
             // Start a new nested section container
             const sectionTitle = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            const sectionComment = resolveConfigComment(currentPath);
             image = '';
             hidden = '';
             if (sectionTitle === "Net Params") {
@@ -442,7 +874,8 @@ function renderFieldsRecursively(obj, path, isAgent = false, agentIndex = null) 
             }            
             html += `
                         <div class="md:col-span-5 bg-gray-50 p-4 rounded-lg border-l-4 border-indigo-500 ${hidden}" id="${fullId}-section">
-                            <h5 class="text-md font-semibold text-gray-700 mb-3">${image}${sectionTitle}</h5>
+                            <h5 class="text-md font-semibold text-gray-700 mb-3">${image}${sectionTitle} ${sectionComment ? `<span class="text-xs text-gray-400 mb-3">${escapeHtml(sectionComment)}</span>` : ''}</h5>
+                            
                             <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                                 ${renderFieldsRecursively(value, currentPath, isAgent, agentIndex)}
                             </div>
@@ -457,6 +890,7 @@ function renderFieldsRecursively(obj, path, isAgent = false, agentIndex = null) 
 }
 
 function renderConfig() {
+    const render = () => {
     // 1. Render General (Root) Config
     const generalConfig = {};
     ROOT_KEYS.forEach(key => generalConfig[key] = currentConfig[key]);
@@ -466,11 +900,1016 @@ function renderConfig() {
     $('#general-config-list').html(generalHtml);
 
     // 2. Render Environment Parameters (env_params)
-    const envHtml = renderFieldsRecursively(currentConfig.env_params, 'env_params');
+    const envHtml = renderFieldsRecursively(reorderEnvParamsForDisplay(currentConfig.env_params), 'env_params');
     $('#env-params-config-list').html(envHtml);
+    renderDataSourceSelectors();
 
     // 3. Render Agents
     renderAgents();
+    };
+
+    if (!window.configCommentsLoaded) {
+        window.configCommentsLoaded = true;
+        loadConfigComments().then(render);
+        return;
+    }
+
+    render();
+}
+
+function getCurrentNetworkConfigString() {
+    return `${currentConfig.env_params.net_params.num_switches}_${currentConfig.env_params.net_params.num_hosts}_${currentConfig.env_params.net_params.num_iots}`;
+}
+
+function shouldShowDatasetSelector() {
+    return String(currentConfig.env_params.gym_type || '').includes('_from_dataset');
+}
+
+function shouldShowScenarioSelector() {
+    const gymType = String(currentConfig.env_params.gym_type || '');
+    return gymType.startsWith('attacks_ho') || gymType.startsWith('marl_attacks');
+}
+
+function defaultDatasetPathForGymType(gymType) {
+    const baseType = String(gymType || '').replace('_from_dataset', '');
+    return `${currentConfig.training_directory}/statuses_${baseType}.json`;
+}
+
+function buildSummaryBadge(label, value) {
+    return `<span class="inline-block mr-2 mb-2 px-2 py-1 bg-gray-100 rounded text-xs"><b>${label}:</b> ${value}</span>`;
+}
+
+function renderScenarioStatsDetails(statistics) {
+    if (!statistics || typeof statistics !== 'object' || Object.keys(statistics).length === 0) {
+        return '<p class="text-xs text-gray-500">No scenario statistics available.</p>';
+    }
+
+    const sections = Object.entries(statistics).map(([sectionName, sectionValue]) => {
+        if (!sectionValue || typeof sectionValue !== 'object') {
+            return '';
+        }
+
+        const rows = Object.entries(sectionValue).map(([k, v]) => {
+            const printable = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+            return `<div><b>${k}:</b> ${escapeHtml(printable)}</div>`;
+        }).join('');
+
+        return `
+            <div class="mb-2">
+                <div class="text-xs font-semibold text-gray-700 mb-1 capitalize">${escapeHtml(sectionName)}</div>
+                <div class="text-xs text-gray-700 grid grid-cols-1 md:grid-cols-3 gap-2">${rows}</div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="bg-white border rounded-lg p-2 mt-2">
+            <div class="text-xs font-semibold text-gray-700 mb-1">Selected Scenario Stats</div>
+            ${sections || '<p class="text-xs text-gray-500">No scenario statistics available.</p>'}
+        </div>
+    `;
+}
+
+function renderTestScenarioPreviewPopup(response) {
+    const summary = response && response.summary ? response.summary : {};
+    const statistics = response && response.statistics ? response.statistics : {};
+    const training = statistics.training || {};
+    const evaluation = statistics.evaluation || {};
+    const envCfg = (currentConfig && currentConfig.env_params) ? currentConfig.env_params : {};
+    const attacksCfg = (envCfg && envCfg.attacks) ? envCfg.attacks : {};
+    const netCfg = (envCfg && envCfg.net_params) ? envCfg.net_params : {};
+
+    function toNumber(value, fallback = 0) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+    }
+
+    function pct(value, total) {
+        if (!total) return '0.0%';
+        return `${((toNumber(value, 0) / total) * 100).toFixed(1)}%`;
+    }
+
+    function statusLabel(status) {
+        if (status === 'good') return 'Good';
+        if (status === 'warn') return 'Watch';
+        return 'Low quality';
+    }
+
+    function statusColorClass(status) {
+        if (status === 'good') return 'bg-green-50 text-green-800 border-green-300';
+        if (status === 'warn') return 'bg-yellow-50 text-yellow-800 border-yellow-300';
+        return 'bg-red-50 text-red-800 border-red-300';
+    }
+
+    function buildQualityTable(assessment) {
+        const rows = (assessment && assessment.qualityRows) ? assessment.qualityRows : [];
+        if (!rows.length) return '';
+
+        const body = rows.map((row) => {
+            const colorClass = statusColorClass(row.status);
+            return `
+                <tr class="border-b last:border-b-0">
+                    <td class="p-1.5 text-left">${escapeHtml(row.label)}</td>
+                    <td class="p-1.5 text-right font-medium">${escapeHtml(row.value)}</td>
+                    <td class="p-1.5 text-right">
+                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 border rounded text-[10px] font-bold ${colorClass}">
+                            <span class="inline-block w-1.5 h-1.5 rounded-full ${row.status === 'good' ? 'bg-green-500' : (row.status === 'warn' ? 'bg-yellow-500' : 'bg-red-500')}"></span>
+                            ${escapeHtml(statusLabel(row.status))}
+                        </span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        return `
+            <div class="overflow-x-auto border-b">
+                <table class="w-full text-xs">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="p-1 text-left">Quality Check</th>
+                            <th class="p-1 text-right">Value</th>
+                            <th class="p-1 text-right">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${body}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function evaluateSection(section, expectedAttackPct) {
+        const totalSteps = toNumber(section.total_steps, 0);
+        const globalStats = section.global || {};
+        const normal = globalStats.normal || {};
+        const attack = globalStats.attack || {};
+
+        const attackTotal = toNumber(attack.total, 0);
+        const shortAttack = toNumber(attack.short, 0);
+        const longAttack = toNumber(attack.long, 0);
+        const attackPct = totalSteps > 0 ? (attackTotal * 100.0 / totalSteps) : 0;
+
+        const attackDelta = Math.abs(attackPct - expectedAttackPct);
+        let attackStatus = 'bad';
+        if (attackDelta <= 8) attackStatus = 'good';
+        else if (attackDelta <= 15) attackStatus = 'warn';
+
+        const trafficTypesActive = ['none', 'ping', 'udp', 'tcp']
+            .map((key) => toNumber(normal[key], 0))
+            .filter((n) => n > 0).length;
+        const diversityStatus = trafficTypesActive >= 3 ? 'good' : (trafficTypesActive === 2 ? 'warn' : 'bad');
+
+        const mixStatus = (shortAttack > 0 && longAttack > 0) ? 'good' : ((shortAttack > 0 || longAttack > 0) ? 'warn' : 'bad');
+
+        const statusScore = (status) => (status === 'good' ? 2 : (status === 'warn' ? 1 : 0));
+        const score = statusScore(attackStatus) + statusScore(diversityStatus) + statusScore(mixStatus);
+        let overall = 'bad';
+        if (score >= 5) overall = 'good';
+        else if (score >= 3) overall = 'warn';
+
+        const qualityRows = [
+            {
+                label: 'Attack rate',
+                value: `${attackPct.toFixed(1)}% (target ${expectedAttackPct.toFixed(1)}%, Δ ${attackDelta.toFixed(1)}pp)`,
+                status: attackStatus,
+            },
+            {
+                label: 'Traffic diversity',
+                value: `${trafficTypesActive}/4`,
+                status: diversityStatus,
+            },
+            {
+                label: 'Attack mix short/long',
+                value: `${shortAttack}/${longAttack}`,
+                status: mixStatus,
+            },
+        ];
+
+        return {
+            overall,
+            score,
+            scoreMax: 6,
+            attackPct,
+            attackDelta,
+            trafficTypesActive,
+            qualityRows,
+        };
+    }
+
+    function sectionRows(section) {
+        const totalSteps = toNumber(section.total_steps, 0);
+        const globalStats = section.global || {};
+        const normal = globalStats.normal || {};
+        const attack = globalStats.attack || {};
+
+        const rows = [
+            { label: 'Normal total', count: toNumber(normal.total, 0) },
+            { label: 'Attack total', count: toNumber(attack.total, 0) },
+            { label: 'Short attack', count: toNumber(attack.short, 0) },
+            { label: 'Long attack', count: toNumber(attack.long, 0) },
+            { label: 'None traffic', count: toNumber(normal.none, 0) },
+            { label: 'Ping traffic', count: toNumber(normal.ping, 0) },
+            { label: 'UDP traffic', count: toNumber(normal.udp, 0) },
+            { label: 'TCP traffic', count: toNumber(normal.tcp, 0) },
+        ];
+
+        return rows.map((row) => `
+            <tr class="border-b last:border-b-0">
+                <td class="p-1 text-left">${escapeHtml(row.label)}</td>
+                <td class="p-1 text-right font-medium">${row.count}</td>
+                <td class="p-1 text-right text-gray-600">${pct(row.count, totalSteps)}</td>
+            </tr>
+        `).join('');
+    }
+
+    function resolveExpectedAttackPct(section, fallbackPct) {
+        const likelyRaw = toNumber(section.attack_likely_used, NaN);
+        if (Number.isNaN(likelyRaw)) {
+            return fallbackPct;
+        }
+        const likely = likelyRaw > 1 ? (likelyRaw / 100.0) : likelyRaw;
+        return Math.max(0, Math.min(100, likely * 100));
+    }
+
+    function buildConfigScenarioTable() {
+        const trainGlobal = training.global || {};
+        const evalGlobal = evaluation.global || {};
+        const trainAttack = trainGlobal.attack || {};
+        const evalAttack = evalGlobal.attack || {};
+        const trainNormal = trainGlobal.normal || {};
+        const evalNormal = evalGlobal.normal || {};
+
+        const hostCount = toNumber(netCfg.num_hosts, 0);
+        const iotCount = toNumber(netCfg.num_iots ?? netCfg.num_iot, 0);
+        const totalHosts = hostCount + iotCount;
+
+        const configRows = [
+            ['Episodes', envCfg.episodes ?? '-'],
+            ['Max steps', envCfg.max_steps ?? '-'],
+            ['Test episodes', envCfg.test_episodes ?? '-'],
+            ['Hosts total (hosts + iots)', `${totalHosts} (${hostCount} + ${iotCount})`],
+            ['Max attack %', attacksCfg.max_attack_percentage ?? '-'],
+            ['Short duration', attacksCfg.short_attack_duration ?? '-'],
+            ['Long duration', attacksCfg.long_attack_duration ?? '-'],
+            ['No-attack timeout', attacksCfg.no_attack_timeout ?? '-'],
+        ];
+
+        const resultRows = [
+            ['Train attack_likely_used', training.attack_likely_used ?? summary.attack_likely_used ?? '-'],
+            ['Eval attack_likely_used', evaluation.attack_likely_used ?? '-'],
+            ['Train total steps', summary.train_steps ?? training.total_steps ?? '-'],
+            ['Eval total steps', summary.eval_steps ?? evaluation.total_steps ?? '-'],
+            ['Train attack total', trainAttack.total ?? '-'],
+            ['Eval attack total', evalAttack.total ?? '-'],
+            ['Train normal total', trainNormal.total ?? '-'],
+            ['Eval normal total', evalNormal.total ?? '-'],
+        ];
+
+        const cfgBody = configRows.map(([k, v]) => `
+            <tr class="border-b last:border-b-0">
+                <td class="p-1 text-left">${escapeHtml(String(k))}</td>
+                <td class="p-1 text-right font-medium">${escapeHtml(String(v))}</td>
+            </tr>
+        `).join('');
+
+        const resBody = resultRows.map(([k, v]) => `
+            <tr class="border-b last:border-b-0">
+                <td class="p-1 text-left">${escapeHtml(String(k))}</td>
+                <td class="p-1 text-right font-medium">${escapeHtml(String(v))}</td>
+            </tr>
+        `).join('');
+
+        return `
+            <div class="border rounded-lg bg-white overflow-hidden">
+                <div class="px-2 py-1 bg-gray-50 border-b text-xs font-semibold text-gray-800">Config + Scenario Results</div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-0">
+                    <div class="overflow-x-auto border-r border-gray-200">
+                        <table class="w-full text-xs">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="p-1 text-left">Config parameter</th>
+                                    <th class="p-1 text-right">Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>${cfgBody}</tbody>
+                        </table>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="p-1 text-left">Scenario result</th>
+                                    <th class="p-1 text-right">Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>${resBody}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function buildSectionCard(title, section, episodesFallback, maxStepsFallback) {
+        const totalSteps = toNumber(section.total_steps, 0);
+        const episodes = toNumber(section.episodes, episodesFallback);
+        const maxSteps = toNumber(section.max_steps, maxStepsFallback);
+        const attackLikelyUsed = (section.attack_likely_used ?? summary.attack_likely_used ?? '-');
+        const expectedAttackPct = resolveExpectedAttackPct(section, title === 'Training' ? 90.0 : 30.0);
+        const assessment = evaluateSection(section, expectedAttackPct);
+
+        const overallLabel = assessment.overall === 'good'
+            ? '<span class="text-green-700">Overall quality: Good</span>'
+            : (assessment.overall === 'warn'
+                ? '<span class="text-yellow-700">Overall quality: Watch</span>'
+                : '<span class="text-red-700">Overall quality: Low quality</span>');
+        const scoreBadgeClass = assessment.overall === 'good'
+            ? 'text-green-800 border-green-300 bg-green-50'
+            : (assessment.overall === 'warn'
+                ? 'text-yellow-800 border-yellow-300 bg-yellow-50'
+                : 'text-red-800 border-red-300 bg-red-50');
+
+        const sectionKey = title === 'Training' ? 'training' : 'evaluation';
+
+        return `
+            <div class="border rounded-lg bg-white overflow-hidden h-[43vh] flex flex-col">
+                <div class="sticky top-0 z-10 bg-gray-50 border-b">
+                    <div class="px-2 py-1">
+                    <div class="font-semibold text-gray-800">${escapeHtml(title)}</div>
+                    <div class="text-xs text-gray-600">
+                        Episodes: <b>${episodes}</b> | Max steps: <b>${maxSteps}</b> | Total steps: <b>${totalSteps}</b> | attack_likely_used: <b>${escapeHtml(String(attackLikelyUsed))}</b>
+                    </div>
+                    <div class="text-xs font-semibold mt-0.5 flex items-center justify-between gap-2">
+                        ${overallLabel}
+                        <span class="px-2 py-0.5 rounded border text-xs font-bold ${scoreBadgeClass}">Score ${assessment.score}/${assessment.scoreMax}</span>
+                    </div>
+                    <div class="text-[11px] text-gray-600">Attack observed: <b>${assessment.attackPct.toFixed(1)}%</b> (target ${expectedAttackPct.toFixed(1)}%)</div>
+                    </div>
+                </div>
+                <div class="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
+                    ${buildQualityTable(assessment)}
+                    <div class="border-b bg-slate-50 px-2 py-1.5">
+                        <div class="text-[11px] font-semibold text-slate-700 mb-1">Attack distribution over time (binned)</div>
+                        <div class="h-24">
+                            <canvas id="scenario-attack-trend-${sectionKey}"></canvas>
+                        </div>
+                        <div class="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-700">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 px-2 py-0.5 font-semibold text-red-700">
+                                <span class="inline-block h-2 w-2 rounded-full bg-red-600"></span>
+                                Above mean
+                            </span>
+                            <span class="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 font-semibold text-amber-700">
+                                <span class="inline-block h-2 w-2 rounded-full bg-amber-500"></span>
+                                Below mean
+                            </span>
+                            <span class="text-slate-500">Bars are colored relative to the average attack rate for the selected section.</span>
+                        </div>
+                    </div>
+                    <table class="w-full text-xs">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="p-1 text-left">Metric</th>
+                                <th class="p-1 text-right">Count</th>
+                                <th class="p-1 text-right">% of steps</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sectionRows(section)}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    const scenarioFilePath = response && response.scenario_file ? String(response.scenario_file) : '';
+    const sourceTitle = scenarioFilePath ? 'Scenario file under evaluation' : 'Test scenario generated in memory';
+    const sourceDescription = scenarioFilePath
+        ? `Scenario path: ${escapeHtml(scenarioFilePath)}`
+        : 'No scenario.json file is saved during this preview.';
+
+    return `
+        <div class="space-y-1 text-sm">
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-1.5 text-blue-900">
+                <div>
+                    <div class="font-semibold">${sourceTitle}</div>
+                    <div class="text-xs break-all">${sourceDescription}</div>
+                </div>
+            </div>
+            ${buildConfigScenarioTable()}
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-1 items-start">
+                <div>
+                    ${buildSectionCard('Training', training, summary.train_episodes || 0, summary.train_max_steps || 0)}
+                </div>
+                <div>
+                    ${buildSectionCard('Evaluation', evaluation, summary.eval_episodes || 0, 1)}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function buildAttackTrendBins(series, options = {}) {
+    if (!Array.isArray(series) || !series.length) {
+        return { labels: [], values: [], tooltipLabels: [] };
+    }
+
+    const total = series.length;
+    const mode = String(options.mode || 'evaluation');
+    const width = Math.max(260, Number(options.width) || 360);
+    const episodes = Math.max(0, Number(options.episodes) || 0);
+    const maxSteps = Math.max(1, Number(options.maxSteps) || 1);
+
+    const labels = [];
+    const tooltipLabels = [];
+    const values = [];
+
+    if (mode === 'training' && episodes > 0) {
+        const episodesPerBar = width < 520 ? 3 : 2;
+        for (let epStart = 0; epStart < episodes; epStart += episodesPerBar) {
+            const epEnd = Math.min(epStart + episodesPerBar, episodes);
+            const sliceStart = epStart * maxSteps;
+            const sliceEnd = Math.min(epEnd * maxSteps, total);
+            const slice = series.slice(sliceStart, sliceEnd);
+            const attacks = slice.reduce((acc, value) => acc + (Number(value) > 0 ? 1 : 0), 0);
+            const pct = slice.length ? (attacks * 100.0 / slice.length) : 0;
+
+            labels.push(`E${epStart + 1}-${epEnd}`);
+            tooltipLabels.push(`Episodes ${epStart + 1}-${epEnd} | Steps ${sliceStart + 1}-${sliceEnd}`);
+            values.push(Number(pct.toFixed(2)));
+        }
+        return { labels, values, tooltipLabels };
+    }
+
+    const stepChunk = width < 520 ? 10 : 5;
+    const safeBins = Math.max(8, Math.min(Math.ceil(total / stepChunk), 80));
+    const bucketSize = Math.max(stepChunk, Math.ceil(total / safeBins));
+
+    for (let i = 0; i < total; i += bucketSize) {
+        const slice = series.slice(i, i + bucketSize);
+        const attacks = slice.reduce((acc, value) => acc + (Number(value) > 0 ? 1 : 0), 0);
+        const pct = slice.length ? (attacks * 100.0 / slice.length) : 0;
+        const label = `${i + 1}-${Math.min(i + slice.length, total)}`;
+        labels.push(label);
+        tooltipLabels.push(`Steps ${label}`);
+        values.push(Number(pct.toFixed(2)));
+    }
+
+    return { labels, values, tooltipLabels };
+}
+
+function renderTestScenarioPreviewCharts(response) {
+    if (typeof Chart === 'undefined') {
+        return;
+    }
+
+    const statistics = response && response.statistics ? response.statistics : {};
+    const training = statistics.training || {};
+    const evaluation = statistics.evaluation || {};
+
+    const sections = [
+        {
+            key: 'training',
+            section: training,
+            color: 'rgba(37, 99, 235, 0.85)',
+            bg: 'rgba(37, 99, 235, 0.20)',
+        },
+        {
+            key: 'evaluation',
+            section: evaluation,
+            color: 'rgba(14, 116, 144, 0.90)',
+            bg: 'rgba(14, 116, 144, 0.22)',
+        },
+    ];
+
+    if (!window.__scenarioPreviewCharts) {
+        window.__scenarioPreviewCharts = {};
+    }
+
+    for (const item of sections) {
+        const canvas = document.getElementById(`scenario-attack-trend-${item.key}`);
+        if (!canvas) {
+            continue;
+        }
+
+        const series = Array.isArray(item.section.attack_step_series)
+            ? item.section.attack_step_series
+            : [];
+        const width = (canvas.parentElement && canvas.parentElement.clientWidth)
+            ? canvas.parentElement.clientWidth
+            : (canvas.clientWidth || 360);
+        const episodes = Number(item.section.episodes) || 0;
+        const maxSteps = Number(item.section.max_steps) || 1;
+        const { labels, values, tooltipLabels } = buildAttackTrendBins(series, {
+            mode: item.key,
+            width,
+            episodes,
+            maxSteps,
+        });
+        const mean = values.length ? values.reduce((acc, v) => acc + v, 0) / values.length : 0;
+        const backgroundColors = values.map((v) => (
+            v >= mean
+                ? 'rgba(185, 28, 28, 0.75)'
+                : 'rgba(245, 158, 11, 0.75)'
+        ));
+        const borderColors = values.map((v) => (
+            v >= mean
+                ? 'rgba(153, 27, 27, 0.95)'
+                : 'rgba(180, 83, 9, 0.95)'
+        ));
+
+        const previous = window.__scenarioPreviewCharts[item.key];
+        if (previous && typeof previous.destroy === 'function') {
+            previous.destroy();
+        }
+
+        window.__scenarioPreviewCharts[item.key] = new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Attack %',
+                    data: values,
+                    borderColor: borderColors,
+                    backgroundColor: backgroundColors,
+                    borderWidth: 1,
+                    barPercentage: 1.0,
+                    categoryPercentage: 1.0,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: (ctx) => tooltipLabels[ctx[0].dataIndex] || `Steps ${ctx[0].label}`,
+                            label: (ctx) => `Attack rate: ${ctx.parsed.y.toFixed(1)}% (media ${mean.toFixed(1)}%)`,
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        ticks: { display: false },
+                        grid: { display: false },
+                    },
+                    y: {
+                        min: 0,
+                        max: 100,
+                        ticks: {
+                            maxTicksLimit: 4,
+                            callback: (v) => `${v}%`,
+                        },
+                        grid: {
+                            color: 'rgba(148, 163, 184, 0.2)',
+                        },
+                    },
+                },
+            },
+        });
+    }
+}
+
+function renderDatasetTable(datasetList) {
+    _datasetList = datasetList;
+    return `
+        <div class="mt-4 bg-gray-50 border rounded-lg p-3">
+            <h5 class="text-md font-semibold mb-2">Dataset Source</h5>
+            <div class="mb-2">
+                ${buildSummaryBadge('Scenario', currentConfig.env_params.gym_type)}
+                ${buildSummaryBadge('Default', defaultDatasetPathForGymType(currentConfig.env_params.gym_type))}
+            </div>
+            <input id="dataset-path-input" data-path="env_params.data_traffic_file" class="config-input mb-2" value="${currentConfig.env_params.data_traffic_file || ''}" />
+            <div class="max-h-56 overflow-y-auto border rounded bg-white">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-gray-100">
+                        <tr>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="dataset" data-col="datetime">Date${_sortInd(_datasetSort, 'datetime')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="dataset" data-col="file">File${_sortInd(_datasetSort, 'file')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="dataset" data-col="entries">Entries${_sortInd(_datasetSort, 'entries')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="dataset" data-col="hosts">Hosts${_sortInd(_datasetSort, 'hosts')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="dataset" data-col="status_kinds">Status Kinds${_sortInd(_datasetSort, 'status_kinds')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="dataset" data-col="attack_like">Attack-like${_sortInd(_datasetSort, 'attack_like')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="dataset" data-col="mean_packets">Mean Packets${_sortInd(_datasetSort, 'mean_packets')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="dataset" data-col="path">Path${_sortInd(_datasetSort, 'path')}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dataset-tbody">${renderDatasetRows(_applySort(datasetList, _datasetSort))}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function renderScenarioTable(scenarioList) {
+    _scenarioList = scenarioList;
+    const selectedScenario = currentConfig.env_params.scenario_file || '';
+    const source = currentConfig.env_params.scenario_source || 'generate';
+    const isGenerateTest = source === 'generate_test';
+    const scenarioSourceInfo = resolveConfigComment('ui.scenario_source_help') || [
+        'Missing ui.scenario_source_help comment in config_comments.json. Expected to explain the difference between scenario_source options, especially the "generate_test" mode and its use for quick scenario previews without saving scenario.json files.',
+    ].join('\n');
+    const selectedScenarioItem = scenarioList.find((item) => item.path === selectedScenario) || null;
+    const selectedScenarioStatsHtml = selectedScenarioItem
+        ? renderScenarioStatsDetails(selectedScenarioItem.statistics || {})
+        : '<p class="text-xs text-gray-500 mt-2">Click a row to inspect scenario statistics.</p>';
+
+    return `
+        <div class="mt-4 bg-gray-50 border rounded-lg p-3">
+            <h5 class="text-md font-semibold mb-2">Scenario Source<img src="/static/images/icon/info.png" alt="Info" title="${escapeHtml(scenarioSourceInfo)}" class="inline-block w-4 h-4 ml-1 opacity-50"></h5>
+            <div class="mb-2">
+                <label class="mr-3"><input type="radio" name="scenario-source" value="generate" ${source === 'generate' ? 'checked' : ''}> Generate new (default)</label>
+                <button type="button" id="scenario-generate-test-btn" class="mr-3 px-2 py-1 text-xs border rounded ${isGenerateTest ? 'bg-blue-100 border-blue-300 text-blue-900' : 'bg-white border-gray-300 text-gray-700'}">Generate test scenario</button>
+                <label><input type="radio" name="scenario-source" value="load" ${source === 'load' ? 'checked' : ''}> Load existing</label>
+                <input type="hidden" id="scenario-source-hidden" data-path="env_params.scenario_source" value="${source}">
+            </div>
+            ${isGenerateTest ? '<p class="text-xs text-blue-700 mb-2">Test scenario mode selected: scenario_source=generate_test.</p>' : ''}
+            ${source === 'load' ? `
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-2 mb-2">
+                    <input id="scenario-file-input" data-path="env_params.scenario_file" class="config-input w-full md:col-span-2" value="${selectedScenario}" readonly />
+                    <div id="scenario-selected-stats" class="md:col-span-5">${selectedScenarioStatsHtml}</div>
+                </div>
+            ` : ''}
+            <div class="max-h-56 overflow-y-auto border rounded bg-white">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-gray-100">
+                        <tr>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="scenario" data-col="datetime">Date${_sortInd(_scenarioSort, 'datetime')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="scenario" data-col="train_episodes">Train Eps${_sortInd(_scenarioSort, 'train_episodes')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="scenario" data-col="train_max_steps">Train Max Steps${_sortInd(_scenarioSort, 'train_max_steps')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="scenario" data-col="train_steps">Train Steps${_sortInd(_scenarioSort, 'train_steps')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="scenario" data-col="eval_episodes">Eval Eps${_sortInd(_scenarioSort, 'eval_episodes')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="scenario" data-col="eval_steps">Eval Steps${_sortInd(_scenarioSort, 'eval_steps')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="scenario" data-col="attack_likely">Attack likely${_sortInd(_scenarioSort, 'attack_likely')}</th>
+                            <th class="sort-th p-2 text-left cursor-pointer hover:bg-gray-200 select-none" data-table="scenario" data-col="path">Path${_sortInd(_scenarioSort, 'path')}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scenario-tbody">${renderScenarioRows(_applySort(scenarioList, _scenarioSort))}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function placeExtraSelectorsBeforeEnvSection(container) {
+    if (!container || !container.length) return;
+
+    const preferredTargets = [
+        '#env_params.attacks-section',
+        '#env_params.classification-section',
+    ];
+
+    let target = null;
+    for (const selector of preferredTargets) {
+        const candidate = $(selector).first();
+        if (candidate.length) {
+            target = candidate;
+            break;
+        }
+    }
+
+    if (!target || !target.length) {
+        target = $('#env-params-config-list').find('[id^="env_params."][id$="-section"]').first();
+    }
+
+    if (target && target.length) {
+        container.insertBefore(target);
+    }
+}
+
+async function renderDataSourceSelectors() {
+    const container = $('#env-extra-selectors');
+    if (!container.length) return;
+
+    const gymType = currentConfig.env_params.gym_type;
+    const networkConfig = getCurrentNetworkConfigString();
+    let html = '';
+
+    if (shouldShowDatasetSelector()) {
+        if (!currentConfig.env_params.data_traffic_file || currentConfig.env_params.data_traffic_file === 'None') {
+            currentConfig.env_params.data_traffic_file = defaultDatasetPathForGymType(gymType);
+        }
+        const response = await getDatasetList(gymType, networkConfig);
+        html += renderDatasetTable(response);
+    }
+
+    if (shouldShowScenarioSelector()) {
+        if (!currentConfig.env_params.scenario_source) {
+            currentConfig.env_params.scenario_source = 'generate';
+        }
+        if (!currentConfig.env_params.scenario_file) {
+            currentConfig.env_params.scenario_file = '';
+        }
+        const response = await getScenarioList(gymType, networkConfig);
+        html += renderScenarioTable(response);
+    }
+
+    const hasSelectors = html.trim().length > 0;
+    container.toggleClass('md:col-span-5 w-full border-gray-200', hasSelectors);
+    container.html(html);
+    placeExtraSelectorsBeforeEnvSection(container);
+}
+
+$(document).on('click', 'th.sort-th', function () {
+    const table = $(this).data('table');
+    const col = $(this).data('col');
+
+    if (table === 'dataset') {
+        _datasetSort = { col, asc: _datasetSort.col === col ? !_datasetSort.asc : true };
+        $('#dataset-tbody').html(renderDatasetRows(_applySort(_datasetList, _datasetSort)));
+        $('th.sort-th[data-table="dataset"]').each(function () {
+            $(this).find('.sort-ind').replaceWith($(_sortInd(_datasetSort, $(this).data('col')))[0]);
+        });
+    } else if (table === 'scenario') {
+        _scenarioSort = { col, asc: _scenarioSort.col === col ? !_scenarioSort.asc : true };
+        $('#scenario-tbody').html(renderScenarioRows(_applySort(_scenarioList, _scenarioSort)));
+        $('th.sort-th[data-table="scenario"]').each(function () {
+            $(this).find('.sort-ind').replaceWith($(_sortInd(_scenarioSort, $(this).data('col')))[0]);
+        });
+    }
+});
+
+$(document).on('click', '.dataset-row', function () {
+    const selectedPath = $(this).data('path');
+    $('#dataset-path-input').val(selectedPath);
+    currentConfig.env_params.data_traffic_file = selectedPath;
+    $('.dataset-row').removeClass('bg-yellow-500');
+    $(this).addClass('bg-yellow-500');
+});
+
+$(document).on('change', '#dataset-path-input', function () {
+    currentConfig.env_params.data_traffic_file = $(this).val();
+});
+
+$(document).on('change', 'input[name="scenario-source"]', function () {
+    const source = $(this).val();
+    currentConfig.env_params.scenario_source = source;
+    if (source !== 'load') {
+        currentConfig.env_params.scenario_file = '';
+    }
+    renderDataSourceSelectors();
+});
+
+$(document).on('click', '#scenario-generate-test-btn', function () {
+    currentConfig.env_params.scenario_source = 'generate_test';
+    currentConfig.env_params.scenario_file = '';
+    updateConfigurationInMemory();
+    renderDataSourceSelectors();
+    previewTestScenario();
+});
+
+function getScenarioDetails(scenarioPath) {
+    return new Promise((resolve, reject) => {
+        $.ajax({
+            url: '/get_scenario_details',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ scenario_path: scenarioPath }),
+            success: function (response) {
+                resolve(response || {});
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                reject(response.message || 'Unknown error');
+            }
+        });
+    });
+}
+
+function inspectLoadedScenario(scenarioPath) {
+    getScenarioDetails(scenarioPath)
+        .then((response) => {
+            const popupHtml = renderTestScenarioPreviewPopup(response || {});
+            openInfoPopupHtml(popupHtml, 'Saved Scenario Details', '/static/images/gif/test.gif');
+            renderTestScenarioPreviewCharts(response || {});
+            showStatus('Scenario details loaded.', 'success');
+        })
+        .catch((errorMessage) => {
+            const message = String(errorMessage || 'Unknown error');
+            showStatus('Error loading scenario: ' + message, 'error');
+            openInfoPopup('Unable to load scenario details.\n\n' + message);
+        });
+}
+
+function previewTestScenario() {
+    const configToPreview = collectConfigFromUI();
+    currentConfig = configToPreview;
+
+    $.ajax({
+        url: '/preview_test_scenario',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ config: configToPreview }),
+        success: function (response) {
+            const popupHtml = renderTestScenarioPreviewPopup(response || {});
+            openInfoPopupHtml(popupHtml, 'Test Scenario Preview', '/static/images/gif/test.gif');
+            renderTestScenarioPreviewCharts(response || {});
+            showStatus('Test scenario preview generated in memory.', 'success');
+        },
+        error: function (xhr) {
+            const response = xhr.responseJSON || { message: xhr.statusText };
+            showStatus('Error generating test scenario preview: ' + response.message, 'error');
+            openInfoPopup('Unable to generate test scenario preview.\n\n' + (response.message || 'Unknown error'));
+        }
+    });
+}
+
+$(document).on('click', '.scenario-row', function () {
+    const selectedPath = $(this).data('path');
+
+    let statistics = {};
+    try {
+        statistics = JSON.parse(decodeURIComponent($(this).attr('data-statistics') || '{}'));
+    } catch (e) {
+        statistics = {};
+    }
+
+    $('#scenario-file-input').val(selectedPath);
+    $('#scenario-file-input').prop('readonly', true);
+    $('#scenario-selected-stats').html(renderScenarioStatsDetails(statistics));
+    currentConfig.env_params.scenario_source = 'load';
+    currentConfig.env_params.scenario_file = selectedPath;
+    $('input[name="scenario-source"][value="load"]').prop('checked', true);
+    $('#scenario-source-hidden').val('load');
+    $('.scenario-row').removeClass('bg-yellow-500');
+    $(this).addClass('bg-yellow-500');
+    updateConfigurationInMemory();
+    renderDataSourceSelectors();
+    inspectLoadedScenario(selectedPath);
+});
+
+$(document).on('change', '#scenario-file-input', function () {
+    currentConfig.env_params.scenario_file = $(this).val();
+});
+
+function reorderEnvParamsForDisplay(envParams) {
+    const SCENARIO_KEYS = ['attacks', 'classification'];
+    const present = SCENARIO_KEYS.filter(k => k in envParams);
+    if (!present.length) return envParams;
+    const ordered = {};
+    for (const [key, val] of Object.entries(envParams)) {
+        if (SCENARIO_KEYS.includes(key)) continue;
+        ordered[key] = val;
+        if (key === 'gym_type') {
+            for (const sk of present) ordered[sk] = envParams[sk];
+        }
+    }
+    return ordered;
+}
+
+function getScenarioEnvParams(gymType) {
+    return new Promise((resolve, reject) => {
+        $.ajax({
+            url: '/get_scenario_env_params?gym_type=' + encodeURIComponent(gymType),
+            type: 'GET',
+            success: function (response) {
+                resolve(response);
+            },
+            error: function (xhr) {
+                reject(new Error(xhr.responseText));
+            }
+        });
+    });
+}
+
+function updateEnvParamInputs(obj, pathPrefix) {
+    for (const key in obj) {
+        if (!obj.hasOwnProperty(key)) continue;
+        const value = obj[key];
+        const fullPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            updateEnvParamInputs(value, fullPath);
+        } else {
+            const el = $(`#${CSS.escape(fullPath)}`);
+            if (!el.length) continue;
+            if (el.attr('type') === 'checkbox') {
+                el.prop('checked', Boolean(value));
+            } else {
+                el.val(value);
+            }
+        }
+    }
+}
+
+function getDatasetList(gymType, networkConfig) {
+    return new Promise((resolve, reject) => {
+        $.ajax({
+            url: '/get_dataset_list?gym_type=' + encodeURIComponent(gymType) + '&network_config=' + encodeURIComponent(networkConfig),
+            type: 'GET',
+            success: function (response) {
+                resolve(response.dataset_list || []);
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Error loading dataset list: ' + response.message, 'error');
+                reject(response.message);
+            }
+        });
+    });
+}
+
+function getScenarioList(gymType, networkConfig) {
+    return new Promise((resolve, reject) => {
+        $.ajax({
+            url: '/get_scenario_list?gym_type=' + encodeURIComponent(gymType) + '&network_config=' + encodeURIComponent(networkConfig),
+            type: 'GET',
+            success: function (response) {
+                resolve(response.scenario_list || []);
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Error loading scenario list: ' + response.message, 'error');
+                reject(response.message);
+            }
+        });
+    });
+}
+
+function renderSavedConfigsTable(configList) {
+    const tbody = $('#saved-configs-table-body');
+    tbody.empty();
+
+    let hasSelectedRow = false;
+    if (!configList || configList.length === 0) {
+        selectedSavedConfigPath = '';
+        updateLoadSelectedConfigButtonState();
+        tbody.append('<tr><td class="p-2 text-gray-500" colspan="6">No saved configs found</td></tr>');
+        return;
+    }
+
+    configList.forEach((cfg) => {
+        const isSelected = cfg.path === selectedSavedConfigPath;
+        if (isSelected) hasSelectedRow = true;
+        const selectedClass = isSelected ? 'bg-blue-100' : '';
+        tbody.append(`
+            <tr class="saved-config-row border-b hover:bg-gray-50 cursor-pointer ${selectedClass}" data-path="${cfg.path}">
+                <td class="p-2">${cfg.modified || '-'}</td>
+                <td class="p-2">${cfg.gym_type || '-'}</td>
+                <td class="p-2">${cfg.network_config || '-'}</td>
+                <td class="p-2">${cfg.episodes || 0}/${cfg.test_episodes || 0}</td>
+                <td class="p-2">${cfg.enabled_agents || 0}</td>
+                <td class="p-2 text-xs">${cfg.path}</td>
+            </tr>
+        `);
+    });
+
+    if (!hasSelectedRow) {
+        selectedSavedConfigPath = '';
+    }
+    updateLoadSelectedConfigButtonState();
+}
+
+function loadSavedConfigsTable() {
+    updateLoadSelectedConfigButtonState();
+    $.ajax({
+        url: '/get_saved_configs_list',
+        type: 'GET',
+        success: function (response) {
+            renderSavedConfigsTable(response.config_list || []);
+        },
+        error: function (xhr) {
+            const response = xhr.responseJSON || { message: xhr.statusText };
+            showStatus('Error loading saved configs: ' + response.message, 'error');
+        }
+    });
+}
+
+$(document).on('click', '.saved-config-row', function () {
+    selectedSavedConfigPath = $(this).data('path');
+    $('.saved-config-row').removeClass('bg-blue-100');
+    $(this).addClass('bg-blue-100');
+    updateLoadSelectedConfigButtonState();
+});
+
+function loadSelectedSavedConfig() {
+    if (!selectedSavedConfigPath) {
+        alert('Please select a saved configuration before loading.');
+        showStatus('Select a saved configuration first.', 'info');
+        return;
+    }
+
+    $.ajax({
+        url: '/load_saved_config',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ path: selectedSavedConfigPath }),
+        success: function (response) {
+            currentConfig = response.config;
+            renderConfig();
+            updateConfigurationInMemory();
+            showStatus('Saved configuration loaded successfully.', 'success');
+            $('#config-list-modal').addClass('hidden');
+            selectedSavedConfigPath = '';
+            updateLoadSelectedConfigButtonState();
+        },
+        error: function (xhr) {
+            const response = xhr.responseJSON || { message: xhr.statusText };
+            showStatus('Error loading saved config: ' + response.message, 'error');
+        }
+    });
 }
 
 function renderAgents() {
@@ -481,10 +1920,15 @@ function renderAgents() {
         const agentHtml = `
                     <div id="agent-card-${index}" class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-md ${agent.enabled ? '' : 'opacity-50'} mb-6">
                         <div class="flex justify-between items-start mb-3 border-b pb-2">
-                            <h4 class="text-lg font-semibold text-gray-800">${agent.name}</h4>
-                            <button data-agent-name="${agent.name}" class="remove-agent-btn text-red-500 hover:text-red-700 transition duration-150">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                            </button>
+                            <h4 id="agents.${index}.title" class="text-lg font-semibold text-gray-800">${agent.name}</h4>
+                            <div class="flex items-center gap-2">
+                                <button data-agent-name="${agent.name}" class="duplicate-agent-btn text-blue-400 hover:text-blue-600 transition duration-150" title="Duplicate agent">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                </button>
+                                <button data-agent-name="${agent.name}" class="remove-agent-btn text-red-500 hover:text-red-700 transition duration-150" title="Remove agent">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-4">
                             ${renderFieldsRecursively(agent, `agents.${index}`, true, index)}
@@ -493,6 +1937,20 @@ function renderAgents() {
                 `;
         agentsListEl.append(agentHtml);
     });
+
+    updateAgentsEnabledCount();
+}
+
+function updateAgentsEnabledCount() {
+    const counterEl = $('#agents_enabled');
+    if (!counterEl.length) {
+        return;
+    }
+
+    const enabledCount = Array.isArray(currentConfig.agents)
+        ? currentConfig.agents.filter((agent) => agent && agent.enabled).length
+        : 0;
+    counterEl.text(enabledCount);
 }
 
 /**
@@ -558,22 +2016,37 @@ function collectConfigFromUI() {
 // ====================================================================\
 
 function addAgent() {
-    const newAgent = {
-        name: "New_Agent_" + currentConfig.agents.length,
-        algorithm: "DQN",
-        enabled: true,
-        episodes: 100,
-        net_arch: [8, 8],
-        learning_rate: 0.001,
-        gamma: 0.99,
-        show_action: false,
-        load: false,
-        save: true,
-        progress_bar: true,
-    };
+    const selectedAlgo = $('#add-agent-algo-select').val() || 'DQN';
+    const defaults = algoDefaults[selectedAlgo.toLowerCase()] || { algorithm: selectedAlgo, enabled: true };
+    const newAgentName = "New_Agent_" + (currentConfig.agents.length + 1);
+    const newAgent = Object.assign({}, defaults, { name: newAgentName, enabled: true });
     currentConfig.agents.push(newAgent);
     renderAgents();
-    showStatus(`Agent ${newAgent.name} added.`, 'info');
+    showStatus(`Agent "${newAgentName}" added with ${selectedAlgo} defaults.`, 'info');
+}
+
+function duplicateAgent(agentName) {
+    const source = currentConfig.agents.find(a => a.name === agentName);
+    if (!source) return;
+    const copy = JSON.parse(JSON.stringify(source));
+    copy.name = agentName + '_copy';
+    currentConfig.agents.push(copy);
+    renderAgents();
+    showStatus(`Agent "${agentName}" duplicated as "${copy.name}".`, 'success');
+}
+
+function applyAlgorithmDefaults(agentIndex, newAlgo) {
+    const defaults = algoDefaults[newAlgo.toLowerCase()];
+    if (!defaults) {
+        showStatus(`No defaults found for algorithm "${newAlgo}".`, 'error');
+        return;
+    }
+    const current = currentConfig.agents[agentIndex];
+    const name = current.name;
+    const enabled = current.enabled;
+    currentConfig.agents[agentIndex] = Object.assign({}, defaults, { name, enabled });
+    renderAgents();
+    showStatus(`Agent "${name}": switched to ${newAlgo} — defaults applied.`, 'info');
 }
 
 function removeAgent(agentName) {
@@ -584,6 +2057,18 @@ function removeAgent(agentName) {
         showStatus(`Agent ${agentName} removed.`, 'success');
     }
 }
+
+function selectAllAgents(enabled) {
+    currentConfig.agents.forEach(agent => {
+        agent.enabled = enabled;
+    });
+    renderAgents();
+    showStatus(enabled ? 'All agents enabled.' : 'All agents disabled.', 'info');
+}
+
+// ====================================================================\
+// FILE HANDLING
+// ====================================================================\
 
 
 function readYamlFile() {
@@ -600,17 +2085,22 @@ function readYamlFile() {
         try {
             const yamlContent = event.target.result;
             currentConfig = jsyaml.load(yamlContent); // Convert YAML to JS object
-            // document.getElementById('yamlOutput').textContent = JSON.stringify(parsedData, null, 2);
-            // console.log('YAML Data:', parsedData);
+            renderConfig();
+            showStatus('YAML configuration loaded successfully.', 'success');
+            updateConfigurationInMemory();
+            $('#config-list-modal').addClass('hidden');
         } catch (error) {
             alert('Error parsing YAML file: ' + error.message);
+            showStatus('Error parsing YAML file: ' + error.message, 'error');
         }
     };
+
+    reader.onerror = function () {
+        const errorMessage = reader.error ? reader.error.message : 'Unknown file read error';
+        showStatus('Error reading YAML file: ' + errorMessage, 'error');
+    };
+
     reader.readAsText(file);
-    renderConfig();
-    showStatus('YAML configuration loaded successfully.', 'success');
-    updateConfigurationInMemory();
-    $('#config-list-modal').addClass('hidden');
 }
 
 function closeResultModal() {
@@ -720,7 +2210,5 @@ function saveConfiguration() {
         }
     });
 }
-
-
 
 

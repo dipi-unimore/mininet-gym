@@ -1,0 +1,15 @@
+algorithm: "PPO"
+enabled: true
+progress_bar: false
+skip_learn: false
+show_action: false
+load: false
+load_dir: ""
+save: true
+state_input_mode: "normalized"
+net_arch: [8, 8]
+learning_rate: 0.001
+gamma: 0.9
+ent_coef: 0.05
+n_steps: 20
+batch_size: 1

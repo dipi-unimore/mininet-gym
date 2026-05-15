@@ -320,7 +320,15 @@ def parse_flow_ovs_dpctl(flow_data: str, net: Mininet) -> Dict[str, Any]:
     }
 
 def parse_flow_ovs_ports(flow_data: str, net: Mininet, bridge_name: str) -> Dict[str, Any]:
-    """Parses ovs-ofctl dump-ports output."""
+    """
+    Parse `ovs-ofctl dump-ports` output.
+
+    Important for blocked outgoing attacks:
+    port RX counters on the switch-side host port still increase when packets
+    arrive from the host to the OVS switch, even if a higher-priority DROP rule
+    prevents forwarding them further. We intentionally use these port counters
+    so the observation can still "see" traffic hitting the blocked segment.
+    """
     if not hasattr(net, 'port_to_host_map'):
         net.port_to_host_map = _get_port_to_host_map(net, bridge_name)
     

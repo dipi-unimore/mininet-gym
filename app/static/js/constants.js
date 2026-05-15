@@ -11,10 +11,13 @@ const GYM_TYPE_OPTIONS = [
     "classification",
     "classification_from_dataset",
     "attacks",
-    "attacks_from_dataset"
+    "attacks_from_dataset",
+    "attacks_ho",
+    "attacks_ho_from_dataset"
 ];
 
 const CLASSIFICATION = "classification";
+const SINGLE_AGENT_HOST_OBSERVABLE = "attacks_ho";
 const MARL = "marl";
 
 const COORDINATOR = "coordinator";
@@ -28,8 +31,19 @@ const ROOT_KEYS = Object.keys(currentConfig).filter(key => {
 const READ_ONLY_FIELDS = [
     { section: 'root', key: 'training_directory' },
     { section: 'root', key: 'enable_web_interface' },
+    { section: 'root', key: 'web_server_port' },
+    { section: 'root', key: 'server_user' },
     { section: 'root', key: 'net_config_filter' },
     { section: 'env_params.net_params', key: 'traffic_types' }
+];
+
+// List of fields that MUST remain read-only
+const HIDDEN_FIELDS = [
+    { section: 'root', key: 'training_directory' },
+    { section: 'root', key: 'enable_web_interface' },
+    { section: 'root', key: 'web_server_port' },
+    { section: 'root', key: 'server_user' },
+    { section: 'root', key: 'net_config_filter' },
 ];
 
 // Agent algorithm options
@@ -40,6 +54,12 @@ const ALGORITHM_OPTIONS = [
 const LOG_LEVELS = [
     'info', 'debug'
 ];
+
+const STATE_INPUT_MODES = [
+    'normalized', 'raw'
+];
+
+let algoDefaults = {}; // keyed by lowercase algorithm name, loaded from /get_algo_defaults
 
 let socket = null;
 let systemStatus = 0; //o idle, 1 stopped/to start, 2 paused, 3 training, negative value to indicate action refused, but never set

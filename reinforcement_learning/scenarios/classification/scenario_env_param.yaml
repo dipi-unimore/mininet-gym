@@ -1,0 +1,6 @@
+classification:
+  thresholds:
+    packets: 200
+    bytes: 1000000
+    var_packets: 100
+    var_bytes: 100

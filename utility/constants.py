@@ -2,6 +2,8 @@ CLASSIFICATION_FROM_DATASET = 'classification_from_dataset'
 CLASSIFICATION = 'classification'
 ATTACKS = 'attacks'
 ATTACKS_FROM_DATASET = 'attacks_from_dataset'
+ATTACKS_HO = 'attacks_ho'
+ATTACKS_HO_FROM_DATASET = 'attacks_ho_from_dataset'
 MARL_ATTACKS = 'marl_attacks'
 MARL_ATTACKS_FROM_DATASET = 'marl_attacks_from_dataset'   
 FROM_DATASET = 'from_dataset'
@@ -9,6 +11,8 @@ FROM_DATASET = 'from_dataset'
 GYM_TYPE = {
     CLASSIFICATION_FROM_DATASET: 0, 
     CLASSIFICATION: 1,
+    ATTACKS_HO: 2,
+    ATTACKS_HO_FROM_DATASET: 3,
     ATTACKS: 4,
     ATTACKS_FROM_DATASET: 5,
     MARL_ATTACKS: 6,
@@ -63,8 +67,11 @@ class SystemModes:
     PLOTTING = "plotting"
     EVALUATION = "evaluating"
     
-class HostStatus:   
+class HostStatus: 
+    NORMAL = "normal"  
     ATTACKING = "attacking"
+    INCOMING_BLOCKED_ATTACK = "incoming_blocked_attack"
+    OUT_ATTACK_BLOCKED = "out_attack_blocked"
     UNDER_ATTACK = "under_attack"
     WAR = "under_attack/attacking"
 
@@ -80,5 +87,4 @@ TRAFFIC_TYPE_ID_MAPPING = {
     TrafficTypes.UDP: 2,
     TrafficTypes.TCP: 3,
 }
-
 

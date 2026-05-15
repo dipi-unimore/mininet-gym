@@ -32,7 +32,7 @@ function initializeLineChartPackets() {
                 data: [],
                 borderColor: 'rgb(75, 192, 192)',
                 tension: 0.1,
-                yAxisID: 'yPackets', // Absolute values
+                yAxisID: 'yPackets',
                 fill: false
             },
             {
@@ -41,10 +41,29 @@ function initializeLineChartPackets() {
                 borderColor: 'rgb(54, 162, 235)',
                 tension: 0.1,
                 borderDash: [5, 5],
-                yAxisID: 'yPercent', // Percentage change
+                yAxisID: 'yPercent',
                 fill: false
+            },
+            {
+                label: 'TX Packets',
+                data: [],
+                borderColor: 'rgb(255, 99, 71)',
+                borderDash: [3, 3],
+                tension: 0.1,
+                yAxisID: 'yPackets',
+                fill: false,
+                pointRadius: 2
+            },
+            {
+                label: 'RX Packets',
+                data: [],
+                borderColor: 'rgb(30, 144, 255)',
+                borderDash: [3, 3],
+                tension: 0.1,
+                yAxisID: 'yPackets',
+                fill: false,
+                pointRadius: 2
             }
-
         ]
     };
 
@@ -142,7 +161,7 @@ function initializeLineChartBytes() {
                 data: [],
                 borderColor: 'rgb(255, 99, 132)',
                 tension: 0.1,
-                yAxisID: 'yBytes', // Share the same Y-axis for absolute values
+                yAxisID: 'yBytes',
                 fill: false
             },
             {
@@ -151,8 +170,28 @@ function initializeLineChartBytes() {
                 borderColor: 'rgb(255, 159, 64)',
                 tension: 0.1,
                 borderDash: [5, 5],
-                yAxisID: 'yPercent', // Percentage change
+                yAxisID: 'yPercent',
                 fill: false
+            },
+            {
+                label: 'TX Bytes',
+                data: [],
+                borderColor: 'rgb(220, 50, 50)',
+                borderDash: [3, 3],
+                tension: 0.1,
+                yAxisID: 'yBytes',
+                fill: false,
+                pointRadius: 2
+            },
+            {
+                label: 'RX Bytes',
+                data: [],
+                borderColor: 'rgb(65, 105, 225)',
+                borderDash: [3, 3],
+                tension: 0.1,
+                yAxisID: 'yBytes',
+                fill: false,
+                pointRadius: 2
             }
         ]
     };
@@ -275,15 +314,28 @@ function updateLineChartPackets(newData) {
     // 2. Add the new label and data
     newLabels.push(currentStep);
 
+    // Compute TX/RX totals from per-host data when available
+    let txPackets = null, rxPackets = null;
+    if (nd.hostStatusesStructured) {
+        txPackets = 0; rxPackets = 0;
+        Object.values(nd.hostStatusesStructured).forEach(h => {
+            txPackets += (h.transmittedPackets || 0);
+            rxPackets += (h.receivedPackets    || 0);
+        });
+    }
+
     // Iterate over all datasets to add data, apply point style, color, and radius
     datasets.forEach((dataset, index) => {
         let newDataValue;
 
-        // Assign the correct value to the dataset based on index
-        if (index === 0) { // Example: Packets count
+        if (index === 0) {
             newDataValue = nd.packets;
-        } else if (index === 1) { // Example: Packets Percentage Change
+        } else if (index === 1) {
             newDataValue = nd.packetsPercentageChange;
+        } else if (index === 2) {
+            newDataValue = txPackets;
+        } else if (index === 3) {
+            newDataValue = rxPackets;
         }
 
         // Add the value
@@ -356,8 +408,8 @@ function updateLineChartPackets(newData) {
         });
     }
 
-    // Update the chart
-    lineChartPackets.update();
+    // Update the chart without animation to prevent flickering
+    lineChartPackets.update('none');
 }
 
 /**
@@ -425,15 +477,28 @@ function updateLineChartBytes(newData) {
     // 2. Add the new label and data
     newLabels.push(currentStep);
 
+    // Compute TX/RX byte totals from per-host data when available
+    let txBytes = null, rxBytes = null;
+    if (nd.hostStatusesStructured) {
+        txBytes = 0; rxBytes = 0;
+        Object.values(nd.hostStatusesStructured).forEach(h => {
+            txBytes += (h.transmittedBytes || 0);
+            rxBytes += (h.receivedBytes    || 0);
+        });
+    }
+
     // Iterate over all datasets to add data, apply point style, color, and radius
     datasets.forEach((dataset, index) => {
         let newDataValue;
 
-        // Assign the correct value to the dataset based on index
-        if (index === 0) { // Example: Packets count
+        if (index === 0) {
             newDataValue = nd.bytes;
-        } else if (index === 1) { // Example: Packets Percentage Change
+        } else if (index === 1) {
             newDataValue = nd.bytesPercentageChange;
+        } else if (index === 2) {
+            newDataValue = txBytes;
+        } else if (index === 3) {
+            newDataValue = rxBytes;
         }
 
         // Add the value
@@ -505,7 +570,7 @@ function updateLineChartBytes(newData) {
         });
     }
 
-    lineChartBytes.update();
+    lineChartBytes.update('none');
 }
 
 // ===================================================================
@@ -760,7 +825,7 @@ function updateBarChartPackets(newData) {
     );
 
     // Update the chart to reflect the changes
-    barChartPackets.update();
+    barChartPackets.update('none');
     realTimeStatus = {
         isAttack: isAttack,
         victimHost: victimHost,
@@ -863,7 +928,7 @@ function updateBarChartBytes(newData) {
         agentStatuses[hostId].id === 1 ? eventBorderWidth : defaultBorderWidth
     );
 
-    barChartBytes.update();
+    barChartBytes.update('none');
 }
 
 function updateStatusSpan(realTimeStatus) {
@@ -921,6 +986,8 @@ function updateHostTasksTable(hostTasks) {
                 imgLock = `<img src='/static/images/gif/firewall.gif' class='inline-block w-10 h-10'>`;
                 dstHostClass = "opacity-30";
                 dstImgClass = "opacity-30";
+                // Dim the entire row to signal link blocked by drop rule
+                taskItem.addClass("opacity-50 bg-gray-100");
             } else if (taskType === "normal") {
                 imgSrcFile = "server-security";
                 if (trafficType === "tcp") {

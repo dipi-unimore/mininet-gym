@@ -6,6 +6,7 @@ from utility.constants import SystemStatus, SystemModes
 
 socketio = None # initialized in app_api.py
 flask_app = None 
+app_state = None # Application state dict (training thread, pause/stop events)
 
 def init_socketio(app):
     """
@@ -25,14 +26,43 @@ def get_socketio_instance():
     global socketio
     return socketio
 
+def set_app_state(state):
+    """Set the application state dict for use in handlers."""
+    global app_state
+    app_state = state
+
+def _get_training_status():
+    """Get current training status."""
+    if not app_state:
+        return SystemStatus.IDLE, 'IDLE', 'No active training'
+    
+    is_training = app_state.get('training_thread') is not None and app_state['training_thread'].is_alive()
+    pause_set = app_state.get('pause_event') and app_state['pause_event'].is_set()
+    stop_set = app_state.get('stop_event') and app_state['stop_event'].is_set()
+    
+    if is_training:
+        if pause_set:
+            return SystemStatus.PAUSED, 'PAUSED', 'Training is paused'
+        elif stop_set:
+            return SystemStatus.STOPPED, 'STOPPED', 'Training is stopping'
+        else:
+            return SystemStatus.RUNNING, 'RUNNING', 'Training is running'
+    else:
+        return SystemStatus.IDLE, 'IDLE', 'No active training'
+
 def register_handlers(socketio_instance):
     """Register handler SocketIO like connect, disconnect, message, ecc."""
     
     @socketio_instance.on('connect')
     def handle_connect():
-        print(f'Client connected {request.sid}') 
-        #socketio.emit('status', {'message': 'Connected to Monitoring Server', 'status': 'ready'})
-        send_status(status=SystemStatus.IDLE, mode='', message='Client Connected. ready to start training.')
+        print(f'Client connected {request.sid}')
+        # Get current training status and send it immediately
+        status, mode, message = _get_training_status()
+        send_status(status=status, mode=mode, message=f'Client Connected. {message}')
+        # Resend cfg on reconnect so the client can reinitialize charts for any gym type
+        if status not in (SystemStatus.IDLE, SystemStatus.DISCONNECTED) \
+                and hasattr(socketio_instance, 'cfg'):
+            send_live_data([{'level': 'config', 'config': socketio_instance.cfg}])
         
     @socketio_instance.on('disconnect')
     def handle_disconnect(param = None):

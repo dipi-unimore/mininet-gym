@@ -6,8 +6,8 @@ from reinforcement_learning.agents.qlearning_agent import QLearningAgent
 from reinforcement_learning.agents.sarsa_agent import SARSAAgent
 from reinforcement_learning.agents.custom_callback import CustomCallback
 from reinforcement_learning.agents.supervised_agent import SupervisedAgent
-from reinforcement_learning.marl.constants import COORDINATOR
-from reinforcement_learning.marl.network_env_marl_attack_detect import NetworkEnvMarlAttackDetect
+from reinforcement_learning.scenarios.marl.constants import COORDINATOR
+from reinforcement_learning.scenarios.marl.network_env_marl_attack_detect import NetworkEnvMarlAttackDetect
 from reinforcement_learning.network_env import NetworkEnv
 from utility.constants import *
 from utility.my_files import find_latest_file
@@ -58,7 +58,7 @@ class AgentManager:
         if len(self.agents_params)>0:
             self.create_agents()
         else:
-            raise ValueError(f"In config.yaml insert at least one agent and its params")
+            raise Exception(f"In config/default.yaml insert at least one agent and its params")
     
     def create_marl_agent(self, agent_param ):
         agent_param.instances = {}
@@ -93,11 +93,16 @@ class AgentManager:
         model = None
         #use lower case for algorithm names check
         if algorithm.lower() == ALGO_Q_LEARNING:
+            if  self.env.observation_space.shape[0]  > 64:
+                raise Exception(f"Custom agents with Q-Learning or SARSA algorithms are not supported in this env, the observation is too big for Q-Table (max 64, so max 8 hosts * 8 features, but it's better to avoid and use Deep algorithms).")
             return self.create_custom_agent(QLearningAgent, env, agent_param, name), {}, True
         elif algorithm.lower() == ALGO_SARSA:
+            if  self.env.observation_space.shape[0]  > 64:
+                raise Exception(f"Custom agents with Q-Learning or SARSA algorithms are not supported in this env, the observation is too big for Q-Table (max 64, so max 8 hosts * 8 features, but it's better to avoid and use Deep algorithms).")
             return self.create_custom_agent(SARSAAgent, env, agent_param, name), {}, True       
         elif algorithm.lower() == ALGO_SUPERVISED:
-            return SupervisedAgent(env.gym_type, self.data_traffic_file), {}, False        
+            split_ratio = getattr(agent_param, 'train_test_split_ratio', 0.20)
+            return SupervisedAgent(env.gym_type, self.data_traffic_file, train_test_split_ratio=split_ratio), {}, False        
         elif algorithm.lower() == ALGO_PPO:
             try:
                 if agent_param.load:
@@ -105,7 +110,7 @@ class AgentManager:
             except Exception as e: 
                 debug(f"No {algorithm} model file\n")
             if model is None:
-                model =  PPO('MlpPolicy', env, 
+                model =  PPO('MlpPolicy', env, device='cpu', 
                         policy_kwargs = dict(net_arch=agent_param.net_arch),                             
                         n_steps = agent_param.n_steps, 
                         learning_rate=agent_param.learning_rate, 
@@ -179,30 +184,88 @@ class AgentManager:
         
     def create_custom_agent(self, agent_class, env, agent_param, host_name):
         """
-        Create a custom RL agent (e.g., Q-Learning, SARSA) for a given host.
+        Create a custom RL agent (Q-Learning, SARSA) for a given host.
+
+        For the ATTACKS_HO scenario the environment is a PerHostScanWrapper
+        that decomposes each real step into num_hosts micro-steps.  Each
+        micro-step calls exploration_rate *= exploration_decay, so the decay
+        configured in the yaml (which the user thinks about in terms of real
+        steps) would be applied num_hosts times per real step — causing
+        exploration to collapse num_hosts times faster than expected.
+
+        We correct this automatically:
+            adjusted_decay = nominal_decay ^ (1 / num_hosts)
+        so that after one full round of num_hosts micro-steps the product is:
+            adjusted_decay ^ num_hosts = nominal_decay
+        exactly matching the user's intent.
+
+        The original nominal value is logged so the user can see what happened.
+
         Args:
-            agent_class: The class of the custom agent to instantiate.
-            env: The environment to bind to the agent.
-            agent_param: Parameters for the agent.
-            host_name: Name of the host (only for multi-agent scenarios).
+            agent_class: QLearningAgent or SARSAAgent class.
+            env:         The environment (may be a PerHostScanWrapper).
+            agent_param: Agent configuration params.
+            host_name:   Host name for multi-agent scenarios, None otherwise.
+
         Returns:
-            model: An instance of the custom agent.
+            model: Instantiated and optionally loaded agent.
         """
-        model =  agent_class(env, agent_param)
-        try:            
+        from reinforcement_learning.scenarios.attack_detect_host_observable.per_host_scan_wrapper import (
+            PerHostScanWrapper,
+        )
+        from utility.my_log import information
+        from colorama import Fore
+
+        # Adjust exploration_decay for per-host micro-step scenarios.
+        # We mutate a copy of the param so other agents are not affected.
+        if isinstance(env, PerHostScanWrapper) and env.num_hosts > 1:
+            nominal_decay = agent_param.exploration_decay
+            num_hosts     = env.num_hosts
+            adjusted_decay = nominal_decay ** (1.0 / num_hosts)
+            # Temporarily override for this agent's construction
+            agent_param.exploration_decay = adjusted_decay
+            information(
+                f"{Fore.CYAN}[AgentManager] {agent_param.name}: "
+                f"exploration_decay adjusted from {nominal_decay:.6f} "
+                f"to {adjusted_decay:.6f} "
+                f"(num_hosts={num_hosts}, "
+                f"effective per-round decay = {adjusted_decay**num_hosts:.6f})"
+                f"{Fore.WHITE}\n"
+            )
+
+        model = agent_class(env, agent_param)
+
+        # Restore the nominal value in agent_param so config dumps/saves
+        # still show the user-facing value, not the internal adjusted one.
+        if isinstance(env, PerHostScanWrapper) and env.num_hosts > 1:
+            agent_param.exploration_decay = nominal_decay
+
+        try:
             if agent_param.load:
-                path = agent_param.load_dir if agent_param.load_dir is not None else find_latest_file(self.training_directory,host_name,'json',self.net_config_filter)
+                path = (
+                    agent_param.load_dir
+                    if agent_param.load_dir is not None
+                    else find_latest_file(
+                        self.training_directory, host_name, 'json',
+                        self.net_config_filter
+                    )
+                )
                 if host_name is not None:
-                    filename =  f"{self.training_directory}/{path}/{agent_param.name}_{host_name}.json"                
-                else:    
-                    filename =  f"{self.training_directory}/{path}"             
+                    filename = (
+                        f"{self.training_directory}/{path}"
+                        f"/{agent_param.name}_{host_name}.json"
+                    )
+                else:
+                    filename = f"{self.training_directory}/{path}"
                 model.load(filename)
         except Exception as e:
-            debug(f"No {agent_param.name} model file\n") 
+            debug(f"No {agent_param.name} model file\n")
+
         if host_name is not None:
-            model.name = f"{agent_param.name}_{host_name}"              
-        return model 
-   
+            model.name = f"{agent_param.name}_{host_name}"
+
+        return model
+    
     def create_agents(self):
         for agent_param in self.agents_params:
             if self.gym_type.startswith("marl"):
@@ -237,8 +300,10 @@ class AgentManager:
         
         try:
             if agent_param.load_dir == 'None':
-                path = find_latest_file(training_directory, agent_param.name, 'zip', net_config_filter)
-                agent_param.load_dir = path[:-4]  # Strip .zip
+                #it's bettr to show an error if the model saved file has not beeen specified, instead of looking for the latest file and maybe loading a wrong model
+                raise Exception(f"Model file not specified for loading. Please set load_dir in config/default.yaml")
+                # path = find_latest_file(training_directory, agent_param.name, 'zip', net_config_filter)
+                # agent_param.load_dir = path[:-4]  # Strip .zip
             else:
                 path = f"{self.training_directory}/{agent_param.load_dir}"
                 if name is not None:

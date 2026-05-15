@@ -502,38 +502,43 @@ def plot_indicators(indicators, dir_name, title=''):
 
 def plot_metrics(metrics, dir_name, title='', host=''):
     plt.figure(figsize=(12, 6))
-    
+
+    def _pct(vals):
+        return [v * 100 for v in (vals or [])]
+
     # Accuracy
     plt.subplot(2, 2, 1)
-    plt.plot(metrics['accuracy'], label='Accuracy', color='blue')
+    plt.plot(_pct(metrics['accuracy']), label='Accuracy', color='blue')
     plt.xlabel('Episodes')
-    plt.ylabel('Accuracy')
+    plt.ylabel('Accuracy (%)')
+    plt.ylim(0, 105)
     plt.title(f'{title} Accuracy per Episode')
-    
+
     # Precision
     plt.subplot(2, 2, 2)
-    plt.plot(metrics['precision'], label='Precision', color='green')
+    plt.plot(_pct(metrics['precision']), label='Precision', color='green')
     plt.xlabel('Episodes')
-    plt.ylabel('Precision')
+    plt.ylabel('Precision (%)')
+    plt.ylim(0, 105)
     plt.title(f'{title} Precision per Episode')
-    
+
     # Recall
     plt.subplot(2, 2, 3)
-    plt.plot(metrics['recall'], label='Recall', color='red')
+    plt.plot(_pct(metrics['recall']), label='Recall', color='red')
     plt.xlabel('Episodes')
-    plt.ylabel('Recall')
+    plt.ylabel('Recall (%)')
+    plt.ylim(0, 105)
     plt.title(f'{title} Recall per Episode')
-    
+
     # F1-Score
     plt.subplot(2, 2, 4)
-    plt.plot(metrics['f1_score'], label='F1 Score', color='purple')
+    plt.plot(_pct(metrics['f1_score']), label='F1 Score', color='purple')
     plt.xlabel('Episodes')
-    plt.ylabel('F1-Score')
+    plt.ylabel('F1-Score (%)')
+    plt.ylim(0, 105)
     plt.title(f'{title} F1-Score per Episode')
-    
+
     plt.tight_layout()
-    #plt.show()
-    # Save figure
     plt.savefig(f"{dir_name}/metrics_{host}.png")
     plt.close()
     
@@ -566,22 +571,96 @@ def plot_combined_performance_over_time(
     precision_scores = metrics["precision"]
     fscore_scores = metrics["f1_score"]    
     
+    pct = lambda vals: [v * 100 for v in (vals or [])]
+
+    marker_step = max(1, len(episodes) // 10)
+    markevery = list(range(0, len(episodes), marker_step))
+
     plt.figure(figsize=(12, 7))
-    plt.plot(episodes, recall_scores, label='Recall', marker='x', linestyle='--')
-    plt.plot(episodes, accuracy_scores, label='Accuracy', marker='o', linestyle='-')
-    plt.plot(episodes, precision_scores, label='Precision', marker='s', linestyle='-.')
-    plt.plot(episodes, fscore_scores, label='F-Score', marker='d', linestyle=':')
+    plt.plot(episodes, pct(recall_scores),    label='Recall',    marker='x', linestyle='--',  markevery=markevery)
+    plt.plot(episodes, pct(accuracy_scores),  label='Accuracy',  marker='o', linestyle='-',   markevery=markevery)
+    plt.plot(episodes, pct(precision_scores), label='Precision', marker='s', linestyle='-.',  markevery=markevery)
+    plt.plot(episodes, pct(fscore_scores),    label='F-Score',   marker='d', linestyle=':',   markevery=markevery)
 
     plt.title(title)
     plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
+    plt.ylabel("Metric Value (%)")
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.legend()
-    plt.ylim(0, 1.05) # Metrics are usually between 0 and 1
+    plt.ylim(0, 105)
     plt.tight_layout()
     plt.savefig(f"{dir_name}/metrics_combined_{host}.png")
-    plt.close()   
+    plt.close()
     
+def plot_metrics_kfold(
+    metrics_folds,
+    dir_name,
+    title="K-Fold Cross-Validation Performance",
+    xlabel="Episodes",
+    host="",
+):
+    """
+    Plots mean ± 95% CI (shaded area) for each metric across K folds/runs.
+
+    Args:
+        metrics_folds: dict where each key is a metric name and value is a list of lists,
+                       one inner list per fold: {"accuracy": [[f1e1, f1e2, ...], [f2e1, ...]], ...}
+        dir_name: directory to save the plot
+        title: plot title
+        xlabel: x-axis label
+        host: optional suffix for filename
+    """
+    _cfg = [
+        ("accuracy",  "Accuracy",  "blue",   "o", "-"),
+        ("precision", "Precision", "green",  "s", "-."),
+        ("recall",    "Recall",    "red",    "x", "--"),
+        ("f1_score",  "F-Score",   "purple", "d", ":"),
+    ]
+    active = [(k, lbl, c, m, ls) for k, lbl, c, m, ls in _cfg
+              if k in metrics_folds and metrics_folds[k]]
+    if not active:
+        return
+
+    n_episodes = min(
+        min(len(fold) for fold in metrics_folds[k])
+        for k, *_ in active
+    )
+    episodes = np.arange(1, n_episodes + 1)
+    marker_step = max(1, n_episodes // 10)
+
+    plt.figure(figsize=(12, 7))
+    for key, label, color, marker, linestyle in active:
+        arr = np.array([fold[:n_episodes] for fold in metrics_folds[key]]) * 100
+        mean = arr.mean(axis=0)
+        std = arr.std(axis=0)
+        n_folds = len(arr)
+        ci95 = 1.96 * std / np.sqrt(n_folds) if n_folds > 1 else std
+
+        plt.plot(
+            episodes, mean,
+            label=f"{label} (μ ± 95% CI, n={n_folds})",
+            color=color, marker=marker, linestyle=linestyle,
+            markevery=list(range(0, n_episodes, marker_step)),
+        )
+        plt.fill_between(
+            episodes,
+            np.clip(mean - ci95, 0, 100),
+            np.clip(mean + ci95, 0, 100),
+            alpha=0.2, color=color,
+        )
+
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel("Metric Value (%)")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend()
+    plt.ylim(0, 105)
+    plt.tight_layout()
+    suffix = f"_{host}" if host else ""
+    plt.savefig(f"{dir_name}/metrics_kfold{suffix}.png")
+    plt.close()
+
+
 def plot_radar_chart(dir_name,
     scenario_data,
     metrics=['accuracy', 'recall', 'precision', 'f1_score'],
@@ -609,9 +688,8 @@ def plot_radar_chart(dir_name,
     fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
 
     for scenario_name, scores in scenario_data.items():
-        # Get scores in the order of 'metrics' list
-        values = [np.mean(scores[metric]) for metric in metrics]
-        values += values[:1] # Complete the circle
+        values = [np.mean(scores[metric]) * 100 for metric in metrics]
+        values += values[:1]
 
         ax.plot(angles, values, linewidth=1, linestyle='solid', label=scenario_name)
         ax.fill(angles, values, alpha=0.25)
@@ -620,12 +698,12 @@ def plot_radar_chart(dir_name,
     ax.set_theta_direction(-1)
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(metrics)
-    ax.set_ylim(0, 1.0) # Metrics are usually between 0 and 1
+    ax.set_ylim(0, 100)
     ax.set_title(title, va='bottom')
     ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
     plt.tight_layout()
-    plt.savefig(f"{dir_name}/radar_chart.png")   
-    plt.close() 
+    plt.savefig(f"{dir_name}/radar_chart.png")
+    plt.close()
     
 def plot_comparison_bar_charts(dir_name,
                                strategies_data,
@@ -677,44 +755,38 @@ def plot_comparison_bar_charts(dir_name,
                 # If it's already a scalar, use it directly
                 aggregated_score = raw_score
             
-            processed_strategies_data[strategy][metric_name] = aggregated_score
-            all_scalar_scores.append(aggregated_score)
+            processed_strategies_data[strategy][metric_name] = aggregated_score * 100
+            all_scalar_scores.append(aggregated_score * 100)
 
     if not all_scalar_scores:
         print("Error: No valid scores found to plot after aggregation. Cannot create chart.")
         return
 
     min_score = np.min(all_scalar_scores)
-    
-    # Calculate the lower limit: minimum score minus 10% of the minimum score
-    # Ensure it doesn't go below 0 if min_score is very small or zero
     y_lower_limit = max(0, min_score - (min_score * 0.10))
-    y_upper_limit = 1.05 # Common upper limit for these metrics
+    y_upper_limit = 105
 
-    # --- Plotting logic ---
     bar_width = 0.2
     index = np.arange(num_strategies)
 
     plt.figure(figsize=(12, 7))
 
     for i, metric_name in enumerate(metrics):
-        # Extract the already processed (scalar) scores for the current metric across all strategies
         scores = [processed_strategies_data[strategy][metric_name] for strategy in strategy_names]
-        
-        # Calculate offset for grouped bars
         offset = bar_width * i - (num_metrics - 1) * bar_width / 2
-        plt.bar(index + offset, scores, bar_width, label=metric_name)
+        bars = plt.bar(index + offset, scores, bar_width, label=metric_name)
+        for bar, val in zip(bars, scores):
+            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                     f'{val:.1f}%', ha='center', va='bottom', fontsize=7)
 
     plt.title(title)
     plt.xlabel("RL Strategy")
-    plt.ylabel("Metric Value")
-    plt.xticks(index + bar_width * (num_metrics - 1) / 2, strategy_names) # Adjust x-tick positions for better centering
-    plt.ylim(y_lower_limit, y_upper_limit) # Apply the dynamic y-axis limits
+    plt.ylabel("Metric Value (%)")
+    plt.xticks(index + bar_width * (num_metrics - 1) / 2, strategy_names)
+    plt.ylim(y_lower_limit, y_upper_limit)
     plt.legend()
     plt.grid(axis='y', linestyle='--', alpha=0.6)
     plt.tight_layout()
-
-    # Ensure the directory exists before saving
     plt.savefig(f"{dir_name}/metrics_comparison.png")
     plt.close()
     

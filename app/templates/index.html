@@ -16,37 +16,82 @@
 <body class="min-h-screen p-1 md:p-2">
     <!-- Header -->
     <header class="bg-gray-500 shadow-xl rounded-xl p-1 mb-2 sticky top-0 z-10">
-        <div class="flex flex-col md:flex-row justify-between items-center">
-            <h1 class="text-1xl font-extrabold text-red-700"><span class="text-white text-3xl">MininetGym</span> UI
+        <div class="grid grid-cols-[1fr_auto_1fr] items-center md:flex md:flex-row md:justify-between">
+            <h1 class="text-1xl font-extrabold text-red-700 justify-self-start"><span
+                    class="text-white text-3xl"><a href="{{ url_for('static', filename='video.html') }}" target="_blank">MininetGym</a></span> UI
                 Manager</h1>
-            <div class="my-3 md:my-0">
+            <div class="my-1 md:my-0 justify-self-center">
                 <div class="text-white text-xl font-bold">
-                    <img src="{{ url_for('static', filename='images/logo.png') }}" alt="MininetGym Logo" width="90">
+                    <a href="{{ url_for('static', filename='screensaver.html') }}" target="_blank" class="flex items-center gap-2">
+                        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="MininetGym Logo" width="90">
+                    </a>
                 </div>
             </div>
 
-            <!-- Navigation Links -->
-            <nav class="flex space-x-4 mt-3 md:mt-0" id="main-nav">
-                <button id="nav-config" onclick="navigateTo('config')"
+            <button id="mobile-nav-toggle" type="button"
+                class="md:hidden justify-self-end px-3 py-2 rounded-lg bg-gray-200 text-white font-semibold shadow-md hover:bg-blue-700 transition duration-200"
+                aria-controls="mobile-nav-toast" aria-expanded="false">
+                <img src="{{ url_for('static', filename='images/icon/menu.png') }}" alt="Menu" title="Menu"
+                    class="inline-block w-6 h-6">
+            </button>
+
+            <!-- Navigation Links (desktop) -->
+            <nav class="hidden md:flex space-x-4 mt-3 md:mt-0 md:mr-3" id="main-nav">
+                <button id="nav-config" onclick="navigateTo('config')" title="Configuration Setup"
                     class="font-semibold text-white px-4 py-2 rounded-lg transition duration-200 bg-blue-600 hover:bg-blue-700 shadow-md">
                     Configuration Setup
                 </button>
-                <button id="nav-training" onclick="navigateTo('training')"
+                <button id="nav-training" onclick="navigateTo('training')" title="Training Dashboard"
                     class="font-semibold px-4 py-2 rounded-lg transition duration-200 text-gray-600 bg-gray-200 hover:bg-gray-300 shadow-md">
                     Training Dashboard
                 </button>
-                <button id="nav-results" onclick="navigateTo('results')"
+                <button id="nav-results" onclick="navigateTo('results')" title="Results Panel"
                     class="font-semibold px-4 py-2 rounded-lg transition duration-200 text-green-600 bg-gray-200 hover:bg-gray-300 shadow-md">
                     Results Panel
+                </button>
+                <button id="nav-manual" onclick="openManual()" title="User Manual"
+                    class="font-semibold px-4 py-2 rounded-lg transition duration-200 text-orange-700 bg-orange-200 hover:bg-orange-300 shadow-md border border-orange-200 inline-flex items-center gap-2">
+                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full border-2 border-orange-600 font-bold text-xs flex-shrink-0">?</span>
                 </button>
             </nav>
         </div>
     </header>
 
+    <div id="mobile-nav-toast"
+        class="hidden md:hidden fixed top-20 left-2 right-2 z-30 bg-white border border-gray-200 rounded-xl shadow-2xl p-2">
+        <div class="grid grid-cols-1 gap-2">
+            <button id="nav-config-mobile" data-page="config" type="button"
+                class="w-full text-left px-3 py-2 rounded-lg transition duration-200 bg-blue-600 text-white font-semibold">
+                Configuration Setup
+            </button>
+            <button id="nav-training-mobile" data-page="training" type="button"
+                class="w-full text-left px-3 py-2 rounded-lg transition duration-200 bg-gray-200 text-gray-600 font-semibold">
+                Training Dashboard
+            </button>
+            <button id="nav-results-mobile" data-page="results" type="button"
+                class="w-full text-left px-3 py-2 rounded-lg transition duration-200 bg-gray-200 text-gray-600 font-semibold">
+                Results Panel
+            </button>
+            <button type="button" onclick="openManual()"
+                class="w-full text-left px-3 py-2 rounded-lg transition duration-200 bg-orange-200 text-orange-700 font-semibold border border-orange-200 flex items-center gap-2">
+                <span class="inline-flex items-center justify-center w-5 h-5 rounded-full border-2 border-orange-600 font-bold text-xs flex-shrink-0">?</span>
+                User Manual
+            </button>
+        </div>
+    </div>
+
     <!-- Status Message Area -->
     <div id="status-message"
         class="hidden fixed bottom-2 left-2 p-2 rounded-lg shadow-2xl font-medium transition duration-500 ease-in-out z-20"
         role="alert"></div>
+    <div id="loading-overlay"
+        class="hidden fixed inset-0 z-[140] bg-black/40 backdrop-blur-[1px] flex items-center justify-center px-4">
+        <div
+            class="flex flex-col items-center gap-3 rounded-2xl bg-white/95 px-6 py-5 shadow-2xl border border-gray-200 max-w-sm text-center">
+            <div class="h-12 w-12 rounded-full border-4 border-gray-200 border-t-blue-600 animate-spin"></div>
+            <div class="text-sm font-semibold text-gray-800" id="loading-overlay-message">Loading...</div>
+        </div>
+    </div>
     <!-- MAIN VIEWS CONTAINER -->
     <main class="mt-1">
         <!-- ============================================== -->
@@ -91,49 +136,90 @@
             <div class="grid grid-cols-1 lg:grid-cols-1 gap-1">
 
                 <!-- General (Root) Parameters -->
-                <details open class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                <details close class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
                     <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4 cursor-pointer">
                         <img src="{{ url_for('static', filename='images/gif/settings.gif') }}" alt="Parameters (Root)"
                             title="Parameters (Root)" class="inline-block w-6 h-6 ml-2">General
                     </summary>
-                    <div id="general-config-list" class="space-y-4  grid grid-cols-1 md:grid-cols-6 gap-2">
+                    <div id="general-config-list" class="grid grid-cols-1 md:grid-cols-5 gap-2">
                         <!-- Dynamic inputs for root keys will be rendered here -->
                     </div>
                 </details>
 
                 <!-- Environment Parameters -->
-                <details class="lg:col-span-2 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                <details open class="lg:col-span-2 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
                     <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4  cursor-pointer">
                         <img src="{{ url_for('static', filename='images/gif/earth.gif') }}"
                             alt="Parameters (`env_params`)" title="Parameters (`env_params`)"
                             class="inline-block w-6 h-6 ml-2">Environment
                     </summary>
-                    <div id="env-params-config-list" class="space-y-4 grid grid-cols-1 md:grid-cols-5 gap-2">
+                    <div id="env-params-config-list" class="grid grid-cols-1 md:grid-cols-5 gap-2">
                         <!-- Dynamic inputs for env_params will be rendered here -->
                     </div>
+                    <div id="env-extra-selectors"></div>
                 </details>
 
             </div>
 
             <!-- Agents Configuration -->
-            <details class="bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
-                <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4 cursor-pointer">
-                    <img src="{{ url_for('static', filename='images/gif/manager.gif') }}" alt="Parameters (`agents`)"
-                        title="Parameters (`agents`)" class="inline-block w-6 h-6 ml-2"> Agents
-                </summary>
-                <div id="agents-list" class="space-y-4">
-                    <!-- Dynamic agent cards will be rendered here -->
-                </div>
-                <button id="add-agent-btn"
-                    class="mt-4 px-2 py-1 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 transition duration-150 flex items-center shadow-md">
-                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    Add New Agent
-                </button>
-            </details>
+            <div class="bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                <details>
+                    <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4 cursor-pointer">
+                        <div class="flex items-center flex-wrap gap-y-1">
+                            <img src="{{ url_for('static', filename='images/gif/manager.gif') }}"
+                                alt="Parameters (`agents`)" title="Parameters (`agents`)"
+                                class="inline-block w-6 h-6 ml-2">
+                            Agents <small class="whitespace-nowrap">(<span id="agents_enabled">0</span> enabled)</small>
+                            <div id="agents-management-buttons" class="flex flex-wrap gap-1 items-center ml-auto text-sm">
+                                <select id="add-agent-algo-select"
+                                    class="px-2 py-1 bg-white border border-blue-300 text-gray-700 rounded-lg text-sm shadow-md focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                    title="Algorithm for new agent">
+                                    <option value="DQN">DQN</option>
+                                    <option value="PPO">PPO</option>
+                                    <option value="A2C">A2C</option>
+                                    <option value="Q-Learning">Q-Learning</option>
+                                    <option value="SARSA">SARSA</option>
+                                    <option value="Supervised">Supervised</option>
+                                </select>
+                                <button id="add-agent-btn"
+                                    class="px-2 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition duration-150 flex items-center shadow-md"
+                                    title="Add New Agent">
+                                    <svg class="w-4 h-4 sm:mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        xmlns="http://www.w3.org/2000/svg">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    <span class="hidden sm:inline">Add Agent</span>
+                                </button>
+                                <button id="select-all-agents-btn"
+                                    class="px-2 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition duration-150 flex items-center shadow-md"
+                                    title="Select All Agents">
+                                    <svg class="w-4 h-4 sm:mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        xmlns="http://www.w3.org/2000/svg">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M5 13l4 4L19 7"></path>
+                                    </svg>
+                                    <span class="hidden sm:inline">Select All</span>
+                                </button>
+                                <button id="deselect-all-agents-btn"
+                                    class="px-2 py-1 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition duration-150 flex items-center shadow-md"
+                                    title="Deselect All Agents">
+                                    <svg class="w-4 h-4 sm:mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        xmlns="http://www.w3.org/2000/svg">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                    <span class="hidden sm:inline">Deselect All</span>
+                                </button>
+                            </div>
+                        </div>
+                    </summary>
+                    <div id="agents-list" class="space-y-4">
+                        <!-- Dynamic agent cards will be rendered here -->
+                    </div>
+                </details>
+
+            </div>
         </div>
 
         <!-- ============================================== -->
@@ -333,7 +419,7 @@
                 </div> -->
             </div>
             <div class="mt-2 bg-white p-4 rounded-xl shadow-xl border border-gray-800">
-                <h3 class="text-xl font-semibold text-gray-800 mb-4">Available Results</h3>
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">Available Results by Scenario</h3>
                 <div id="results-list" class="gap-1">
                     <!-- Dynamic results cards will be rendered here -->
                 </div>
@@ -363,8 +449,12 @@
     </div>
 
     <div id="image-zoom-overlay"
-        class="fixed inset-0 bg-black bg-opacity-90 z-[100] hidden flex items-center justify-center cursor-zoom-out">
-        <img id="zoomed-image" src="" class="max-w-[95%] max-h-[95%] shadow-2xl rounded-lg border-2 border-white/20">
+        class="fixed inset-0 bg-black bg-opacity-90 z-[100] hidden flex flex-col items-center justify-center cursor-zoom-out">
+        <img id="zoomed-image" src="" class="max-w-[95%] max-h-[75vh] shadow-2xl rounded-lg border-2 border-white/20 object-contain">
+        <div id="zoom-description-panel" class="hidden max-w-[90vw] mt-4 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl px-6 py-4 text-white text-sm cursor-default" style="max-height:20vh;overflow-y:auto;">
+            <div id="zoom-description-title" class="font-semibold text-indigo-300 mb-1 text-base"></div>
+            <div id="zoom-description-text" class="leading-relaxed whitespace-pre-line opacity-90"></div>
+        </div>
         <div
             class="absolute top-5 right-5 text-white text-xl font-bold bg-black/50 w-10 h-10 flex items-center justify-center rounded-full">
             ✕</div>
@@ -413,27 +503,54 @@
     <!-- Modal for Config List (Hidden, but ready for future use) -->
     <div id="config-list-modal"
         class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden flex items-center justify-center">
-        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-y-auto">
             <h3 class="text-xl font-bold mb-4">Load Configuration</h3>
-            <p>Select a YAML file to load configuration. </p>
+            <p class="mb-2">Saved configs from config folder (recursive):</p>
+            <div class="border rounded-lg max-h-80 overflow-y-auto">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-gray-100">
+                        <tr>
+                            <th class="text-left p-2">Modified</th>
+                            <th class="text-left p-2">Gym Type</th>
+                            <th class="text-left p-2">Net</th>
+                            <th class="text-left p-2">Episodes</th>
+                            <th class="text-left p-2">Agents</th>
+                            <th class="text-left p-2">Path</th>
+                        </tr>
+                    </thead>
+                    <tbody id="saved-configs-table-body"></tbody>
+                </table>
+            </div>
 
-            <input type="file" id="yamlFileInput" accept=".yaml" />
-            <button onclick="readYamlFile()" class="mt-4 px-4 py-2 bg-blue-300 rounded-lg hover:bg-cyan-400">Load
-                YAML</button>
+            <div class="mt-3 flex gap-2">
+                <button id="load-selected-config-btn"
+                    class="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600">Load Selected
+                    Config</button>
+                <button id="refresh-saved-configs-btn"
+                    class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Refresh</button>
+            </div>
+
+            <div class="mt-5 border-t pt-4">
+                <p>Select a YAML file from your PC:</p>
+                <input type="file" id="yamlFileInput" accept=".yaml,.yml" />
+                <button onclick="readYamlFile()" class="mt-2 px-4 py-2 bg-blue-300 rounded-lg hover:bg-cyan-400">Load
+                    YAML</button>
+            </div>
             <button id="close-modal-btn" class="mt-4 px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400">Close</button>
             <pre id="yamlOutput"></pre>
 
         </div>
     </div>
 
-    <div id="result-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden flex items-center justify-center">
+    <div id="last-result-modal"
+        class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden flex items-center justify-center">
         <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg">
             <h3 class="text-xl font-bold mb-4">Last Result</h3>
             <p>Download the last result zip file.</p>
 
             <button id="download-result-btn"
                 class="mt-4 px-4 py-2 bg-blue-300 rounded-lg hover:bg-cyan-400">Download</button>
-            <button id="close-result-modal-btn"
+            <button id="close-last-result-modal-btn"
                 class="mt-4 px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400">Close</button>
             <pre id="resultOutput"></pre>
 
@@ -459,6 +576,150 @@
     <script src="{{ url_for('static', filename='js/agent_statistics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/traffic_statistics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+    <!-- ══════════════════════════════════════════════ -->
+    <!-- User Manual Modal                              -->
+    <!-- ══════════════════════════════════════════════ -->
+    <div id="manual-modal"
+        class="fixed inset-0 bg-gray-900/80 backdrop-blur-sm z-[300] hidden items-center justify-center p-4"
+        data-src="{{ url_for('static', filename='manual.html') }}">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style="height:90vh">
+            <!-- Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full border-2 border-violet-600 text-violet-700 font-bold text-sm">?</span>
+                    <h2 class="text-xl font-bold text-gray-800">MininetGym — User Manual</h2>
+                </div>
+                <button onclick="closeManual()"
+                    class="text-gray-400 hover:text-gray-700 text-3xl font-light leading-none transition">&times;</button>
+            </div>
+            <!-- Body -->
+            <div class="flex flex-1 min-h-0 overflow-hidden">
+                <!-- TOC sidebar -->
+                <nav id="manual-toc"
+                    class="hidden md:block w-56 flex-shrink-0 bg-gray-50 border-r border-gray-200 overflow-y-auto px-4 py-5">
+                    <p class="text-xs font-bold uppercase text-gray-400 mb-3 tracking-wider">Contents</p>
+                </nav>
+                <!-- Content -->
+                <div id="manual-content" class="flex-1 overflow-y-auto px-8 py-6 manual-prose">
+                    <p class="text-gray-400 text-sm">Loading manual…</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox for manual images -->
+    <div id="man-lightbox"
+        style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.88);
+               cursor:zoom-out;align-items:center;justify-content:center;padding:24px;">
+        <button onclick="closeLightbox()"
+            style="position:absolute;top:16px;right:22px;color:#fff;font-size:2.2rem;
+                   font-weight:300;background:none;border:none;cursor:pointer;line-height:1;"
+            title="Close">&times;</button>
+        <img id="man-lightbox-img" src="" alt=""
+            style="max-width:100%;max-height:100%;object-fit:contain;
+                   border-radius:8px;box-shadow:0 8px 48px rgba(0,0,0,.7);
+                   pointer-events:none;">
+        <p id="man-lightbox-cap"
+            style="position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
+                   color:rgba(255,255,255,.7);font-size:.82rem;font-style:italic;
+                   white-space:nowrap;pointer-events:none;"></p>
+    </div>
+
+    <script>
+    (function () {
+        let manualLoaded = false;
+        const modal = document.getElementById('manual-modal');
+        const lightbox = document.getElementById('man-lightbox');
+        const lbImg   = document.getElementById('man-lightbox-img');
+        const lbCap   = document.getElementById('man-lightbox-cap');
+
+        window.openManual = function () {
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            if (!manualLoaded) loadManual();
+        };
+
+        window.closeManual = function () {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        };
+
+        window.closeLightbox = function () {
+            lightbox.style.display = 'none';
+            lbImg.src = '';
+        };
+
+        modal.addEventListener('click', function (e) {
+            if (e.target === modal) closeManual();
+        });
+
+        lightbox.addEventListener('click', function (e) {
+            if (e.target === lightbox) closeLightbox();
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                if (lightbox.style.display === 'flex') { closeLightbox(); return; }
+                closeManual();
+            }
+        });
+
+        // Event delegation: catch clicks on any img inside #manual-content
+        document.getElementById('manual-content').addEventListener('click', function (e) {
+            const img = e.target.closest('img');
+            if (!img) return;
+            const caption = img.closest('figure')
+                ? (img.closest('figure').querySelector('figcaption') || {}).textContent || ''
+                : img.alt;
+            lbImg.src = img.src;
+            lbImg.alt = img.alt;
+            lbCap.textContent = caption;
+            lightbox.style.display = 'flex';
+        });
+
+        function loadManual() {
+            const src = modal.dataset.src;
+            fetch(src)
+                .then(function (r) {
+                    if (!r.ok) throw new Error('not found');
+                    return r.text();
+                })
+                .then(function (html) {
+                    document.getElementById('manual-content').innerHTML = html;
+                    buildTOC();
+                    manualLoaded = true;
+                })
+                .catch(function () {
+                    document.getElementById('manual-content').innerHTML =
+                        '<p style="color:#dc2626">Could not load manual.html from static folder.</p>';
+                });
+        }
+
+        function buildTOC() {
+            const toc = document.getElementById('manual-toc');
+            const headings = document.querySelectorAll('#manual-content h2, #manual-content h3');
+            headings.forEach(function (h, i) {
+                const id = 'man-' + i;
+                h.id = id;
+                const isH3 = h.tagName === 'H3';
+                const a = document.createElement('a');
+                a.href = '#' + id;
+                a.textContent = h.textContent;
+                a.className = 'block py-1 text-sm transition-colors ' +
+                    (isH3
+                        ? 'pl-4 text-gray-500 hover:text-violet-600'
+                        : 'font-semibold text-gray-700 hover:text-violet-700 mt-2');
+                a.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    const target = document.getElementById(id);
+                    document.getElementById('manual-content').scrollTop = target.offsetTop - 12;
+                });
+                toc.appendChild(a);
+            });
+        }
+    })();
+    </script>
 </body>
 
 </html>

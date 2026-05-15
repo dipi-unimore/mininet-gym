@@ -1,0 +1,4 @@
+algorithm: "Supervised"
+enabled: true
+train_test_split_ratio: 0.20  # Test set percentage (80% train, 20% test)
+skip_learn: false

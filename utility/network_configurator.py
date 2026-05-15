@@ -25,11 +25,11 @@ def start_cli(net):
 def create_host(name=None):
     return Host(name=name)
 
-#def create_network(num_hosts=2, num_switches=1, num_iot=0, controller_ip='127.0.0.1', controller_port=6633):
+#def create_network(num_hosts=2, num_switches=1, num_iots=0, controller_ip='127.0.0.1', controller_port=6633):
 def create_network(params = { 
             'num_hosts':10,
             'num_switches':1,
-            'num_iot':1,
+            'num_iots':1,
             'controller': {
                 'ip':'192.168.1.226',
                 'port':6633,
@@ -55,8 +55,8 @@ def create_network(params = {
     information(f'*** Adding {params.num_hosts} hosts\n')
     hosts = [net.addHost(f'h{i+1}', ip=f'10.0.0.{i+1}/24') for i in range(params.num_hosts)]  # Same subnet for all hosts
 
-    information(f'*** Adding IoT {params.num_iot} devices\n')
-    iot_devices = [net.addHost(f'iot{i+1}', ip=f'10.0.0.{params.num_hosts + i + 1}/24') for i in range(params.num_iot)]  # Same subnet
+    information(f'*** Adding IoT {params.num_iots} devices\n')
+    iot_devices = [net.addHost(f'iot{i+1}', ip=f'10.0.0.{params.num_hosts + i + 1}/24') for i in range(params.num_iots)]  # Same subnet
 
     information(f'*** Creating links on {params.num_switches} switches \n')
     links = {}
@@ -110,13 +110,13 @@ def create_network(params = {
 def get_host_agents_by_network_config(config_network: str = '1_5_5') -> List[str]:
     """Get host agent names based on the network configuration string."""
     try:
-        num_switches, num_hosts, num_iot = map(int, config_network.split('_'))
+        num_switches, num_hosts, num_iots = map(int, config_network.split('_'))
     except ValueError:
-        error(f"Invalid network configuration format: {config_network}. Expected format 'num_switches_num_hosts_num_iot'.")
+        error(f"Invalid network configuration format: {config_network}. Expected format 'num_switches_num_hosts_num_iots'.")
         return []
     
     host_agents = [f'h{i+1}' for i in range(num_hosts)]
-    host_agents.extend([f'iot{i+1}' for i in range(num_iot)])
+    host_agents.extend([f'iot{i+1}' for i in range(num_iots)])
     
     return host_agents
 
@@ -124,7 +124,13 @@ def stop(net: Mininet):
     regain_root()
     if net is not None and hasattr(net, 'stop'):
         information('*** Stopping Mininet network\n')
-        net.stop()
+        try:
+            net.stop()
+        except AssertionError as exc:
+            # Mininet can throw here if a shell is already torn down by a concurrent stop.
+            debug(f"Mininet already stopping/stopped: {exc}")
+        except Exception as exc:
+            error(f"Error while stopping Mininet: {exc}")
 
 
 #Define functions to get network statistics from OpenDaylight controller        
@@ -472,8 +478,11 @@ def unblock_flow_delete(net: Mininet, host_name: str) -> bool:
             error(f"Error removing DROP rule: {output}")
             return False
         debug(f"DROP rule removed successfully {host_name}. Flow unblocked.")
-        net.blocked_hosts.remove(host)
-        
+        try:
+            net.blocked_hosts.remove(host)
+        except ValueError:
+            pass  # Host not in list (e.g. state restored from a previous session)
+
         return True
     except Exception as e:
         print(f"Error removing DROP rule: {e}")
@@ -522,7 +531,7 @@ if __name__ == '__main__':
     net_params = { 
             'num_hosts':10,
             'num_switches':1,
-            'num_iot':1,
+            'num_iots':1,
             'controller': {
                 'ip':'192.168.1.226',
                 'port':6633,

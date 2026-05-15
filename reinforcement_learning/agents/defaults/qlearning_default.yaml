@@ -1,0 +1,11 @@
+algorithm: "Q-Learning"
+enabled: true
+skip_learn: false
+show_action: false
+load: false
+load_dir: ""
+save: true
+learning_rate: 0.1
+discount_factor: 0.6
+exploration_rate: 1.0
+exploration_decay: 0.995

@@ -12,6 +12,10 @@ function isClassificationEnv() {
     return currentConfig.env_params.gym_type.startsWith(CLASSIFICATION);
 }
 
+function isSingleAgentHostObservableEnv(){
+    return currentConfig.env_params.gym_type.startsWith(SINGLE_AGENT_HOST_OBSERVABLE);
+}
+
 
 // Other utilities
 function formatBytes(num_bytes) {

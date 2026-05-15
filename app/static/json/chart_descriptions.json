@@ -1,0 +1,122 @@
+{
+  "metrics_kfold": {
+    "title": "K-Fold Cross-Validation Performance",
+    "description": "The Central Line represents the Mean (μ) of performance across all agents.\nThe Shaded Area represents the 95% Confidence Interval (1.96 × σ/√n), where σ is the standard deviation across folds.\nA narrow shaded area indicates a stable and robust model; a wide area indicates the model is sensitive to training data or hyperparameters."
+  },
+  "metrics_comparison": {
+    "title": "Metrics Comparison between Agents",
+    "description": "Bar chart comparing performance metrics (accuracy, precision, recall, F1) across all trained agents.\nAllows rapid identification of which agent achieved the best results for each metric."
+  },
+  "metrics_combined": {
+    "title": "Performance over Time",
+    "description": "Evolution of metrics (accuracy, precision, recall, F1) throughout the training steps.\nAllows monitoring of learning speed and model stability over time."
+  },
+  "metrics_and_scores": {
+    "title": "Metrics and Scores Overview",
+    "description": "Combined view of classification metrics alongside score distributions.\nProvides a unified snapshot of both detection quality and reward signal during training."
+  },
+  "metrics": {
+    "title": "Classification Metrics",
+    "description": "Bar chart showing accuracy, precision, recall, and F1-score for the agent at the end of training.\nValues above 90% indicate reliable detection performance."
+  },
+  "net_metrics": {
+    "title": "Network-Level Metrics",
+    "description": "Aggregated performance metrics measured at the network level across all hosts or agents.\nReflects the global detection quality of the system rather than a single agent."
+  },
+  "radar_chart": {
+    "title": "Performance Radar Chart",
+    "description": "Radar visualization (spider chart) showing the overall performance profile of each agent across all metrics.\nA regular and wide shape indicates a balanced agent with high performance across all dimensions."
+  },
+  "rewards": {
+    "title": "Reward Trends during Training",
+    "description": "Cumulative reward curve per episode during the training phase.\nAn increasing and stable trend indicates the agent is effectively learning the optimal policy."
+  },
+  "accuracy": {
+    "title": "Accuracy over Episodes",
+    "description": "Per-episode accuracy trend during training, showing how the agent's classification correctness evolves.\nA rising and stabilizing curve confirms that the agent is generalizing well."
+  },
+  "matrix": {
+    "title": "Confusion Matrix",
+    "description": "Matrix showing the distribution of model predictions versus actual classes.\nThe main diagonal represents correct classifications; off-diagonal elements represent classification errors."
+  },
+  "statuses": {
+    "title": "Attack/Traffic Status Distribution",
+    "description": "Overall distribution of traffic or attack statuses observed during the experiment.\nShows the proportion of normal vs. attack traffic and how it was classified by the agent."
+  },
+  "episode_statuses": {
+    "title": "Episode Status Counts over Time",
+    "description": "Per-episode breakdown of traffic/attack status counts throughout training.\nAllows tracking of how the agent's response to different status types evolves across episodes."
+  },
+  "episode_traffic_types": {
+    "title": "Traffic Types per Episode",
+    "description": "Distribution of traffic types encountered in each episode during training.\nHelps understand the variability and balance of the training environment."
+  },
+  "train_types": {
+    "title": "Training Traffic Type Distribution",
+    "description": "Aggregated distribution of traffic types seen during the full training run.\nA balanced distribution across types ensures the agent learns a generalized policy."
+  },
+  "indicators": {
+    "title": "Network KPI Indicators",
+    "description": "Key Performance Indicators measured at the network level (e.g., packet loss, latency, throughput).\nUseful for assessing the operational impact of the trained policy on the network."
+  },
+  "test_episodes": {
+    "title": "Test Episode Results",
+    "description": "Performance outcomes across individual test episodes after training.\nShows how consistently the agent performs in unseen evaluation scenarios."
+  },
+  "test_quadratic_errors": {
+    "title": "Test Quadratic Errors",
+    "description": "Mean squared error measured during the test phase, reflecting the deviation between predicted and actual values.\nLower and stable values indicate good generalization of the learned policy."
+  },
+  "test_attack_mitigation": {
+    "title": "Attack Mitigation during Test",
+    "description": "Visualization of how effectively the agent mitigates attack traffic during the evaluation phase.\nShows the timeline of attack events and the corresponding agent responses."
+  },
+  "qtable_coverage": {
+    "title": "Q-Table Coverage",
+    "description": "Q-Table coverage map showing which states were visited and how frequently during training.\nBroad and uniform coverage indicates effective exploration of the state space."
+  },
+  "discrete_feature_bin_coverage": {
+    "title": "Discrete Feature Bin Coverage",
+    "description": "Coverage map of discrete feature bins visited during training.\nIdentifies under-explored regions in the feature space that may affect generalization."
+  },
+  "policy_exploration": {
+    "title": "Policy Exploration Map",
+    "description": "Visualization of the state-action space explored by the agent's policy.\nAreas with low coverage may indicate unexplored conditions where the policy could be brittle."
+  },
+  "success_scatter": {
+    "title": "Success Rate Scatter Plot",
+    "description": "Scatter plot of handover or mitigation success rates across multiple episodes or conditions.\nClustering near the top indicates consistent high performance; spread points suggest variability."
+  },
+  "success_stacked_bars": {
+    "title": "Success Rate Stacked Bars",
+    "description": "Stacked bar chart breaking down success, partial success, and failure rates per scenario or episode bucket.\nProvides a proportional view of outcome quality across different conditions."
+  },
+  "success_gauge_trend": {
+    "title": "Success Rate Gauge Trend",
+    "description": "Trend line of the overall success rate over time, overlaid on a gauge scale.\nShows whether the system's success rate is improving, stable, or degrading as training progresses."
+  },
+  "success_heatmap": {
+    "title": "Success Rate Heatmap",
+    "description": "2D heatmap of success rates across two dimensions (e.g., episode × agent or scenario × configuration).\nHighlights which combinations of conditions lead to the best or worst outcomes."
+  },
+  "scores": {
+    "title": "Training Scores",
+    "description": "Score distribution or trend during training, representing the cumulative reward or evaluation metric.\nAn upward trend confirms the agent is improving its policy over time."
+  },
+  "scores_horizontal": {
+    "title": "Scores Horizontal Comparison",
+    "description": "Horizontal bar chart comparing final scores across different agents or configurations.\nEasier to read than vertical bars when agent or configuration names are long."
+  },
+  "scores_grouped_by_algo": {
+    "title": "Scores Grouped by Algorithm",
+    "description": "Grouped bar chart showing scores for each algorithm variant side by side.\nAllows direct comparison of different learning algorithms under the same experimental conditions."
+  },
+  "scores_total": {
+    "title": "Total Scores Summary",
+    "description": "Aggregated total scores for the entire training run, summarized per agent or configuration.\nProvides a single-number summary of overall training performance."
+  },
+  "ho_attack": {
+    "title": "Handover and Attack Statistics",
+    "description": "Statistics related to handovers and attacks detected during the simulation.\nShows the temporal distribution of handover events and the system's response to attacks."
+  }
+}

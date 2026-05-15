@@ -5,6 +5,13 @@
 function initializeLineChartAccuracy(agent, hostsDataset = [], canvasEl) {
     //if (lineChartAccuracy) lineChartAccuracy.destroy();
     canvasEl.parent().css("height", "400px");
+    if (hostsDataset.length === 0) {
+        console.error("initializeLineChartAccuracy: hostsDataset is empty, chart will start without predefined host datasets.");
+        return;
+    }
+    if (hostsDataset[0].label === 'agent') {
+        hostsDataset[0].label = agent; // Set the label to agent name for single-agent mode
+    }
 
     return new Chart(canvasEl, {
         type: 'line',
@@ -35,7 +42,7 @@ function initializeLineChartAccuracy(agent, hostsDataset = [], canvasEl) {
             plugins: {
                 title: {
                     display: true,
-                    text: agent + ' Accuracy by Host per Episode',
+                    text: agent + ' Accuracy per Episode',
                     font: {
                         size: 16
                     }
@@ -64,7 +71,13 @@ function initializeLineChartAccuracy(agent, hostsDataset = [], canvasEl) {
 
 function initializeLineChartReward(agent, hostsDataset = [], canvasEl) {
     canvasEl.parent().css("height", "400px");
-
+    if (hostsDataset.length === 0) {
+        console.error("initializeLineChartReward: hostsDataset is empty, chart will start without predefined host datasets.");
+        return;
+    }
+    if (hostsDataset[0].label === 'agent') {
+        hostsDataset[0].label = agent; // Set the label to agent name for single-agent mode
+    }
     return new Chart(canvasEl, {
         type: 'line',
         data: {
@@ -95,7 +108,7 @@ function initializeLineChartReward(agent, hostsDataset = [], canvasEl) {
             plugins: {
                 title: {
                     display: true,
-                    text: agent + ' Reward by host per Episode',
+                    text: agent + ' Reward per Episode',
                     font: {
                         size: 16
                     }
@@ -123,11 +136,130 @@ function initializeLineChartReward(agent, hostsDataset = [], canvasEl) {
 }
 
 
+function buildRestoredChartDataset(agentName, metricName, rawSeries) {
+    const colorPrefix = metricName === 'accuracy' ? 'acc' : 'rew';
+    if (isMultiAgentMode) { 
+        colorPrefix += agentName;
+    } 
+    const color = getAgentColor(colorPrefix);
+    return [{
+        label: agentName,
+        data: rawSeries,
+        borderColor: color,
+        backgroundColor: addTransparency(color, 0.2),
+        borderWidth: 2,
+        pointRadius: 4,
+        pointBackgroundColor: color,
+        tension: 0.1,
+        fill: false,
+    }];
+}
+
+function ensureChartRedraw(chart, expectedLen) {
+    if (!chart) return;
+    try {
+        chart.resize();
+        chart.update();
+    } catch (e) {
+        // ignore
+    }
+
+    // Quick retry if dataset length doesn't match expectation
+    try {
+        const actualLen = (chart.data && chart.data.datasets && chart.data.datasets[0] && chart.data.datasets[0].data)
+            ? chart.data.datasets[0].data.length
+            : 0;
+        if (expectedLen && actualLen !== expectedLen) {
+            setTimeout(() => {
+                try { chart.resize(); chart.update(); } catch (e) { }
+                console.log('ensureChartRedraw: retry performed', { expectedLen, actualLenAfterRetry: (chart.data && chart.data.datasets && chart.data.datasets[0] && chart.data.datasets[0].data) ? chart.data.datasets[0].data.length : 0 });
+            }, 200);
+        }
+    } catch (e) {
+        // ignore
+    }
+}
+
+
+function restoreAgentsChartsFromRawData(rawChartData) {
+    const payload = rawChartData || chartDataRaw;
+    if (!payload || !currentConfig || !currentConfig.cfg) {
+        return false;
+    }
+
+    const configuredAgents = currentConfig.cfg.agents || [];
+    let didUpdate = false;
+
+    configuredAgents.forEach(agent => {
+        const isSupervised = String(agent).toLowerCase().includes('supervised');
+
+        const accuracyRaw = payload.accuracy ? payload.accuracy[agent] : undefined;
+        const rewardRaw = (!isSupervised && payload.reward) ? payload.reward[agent] : undefined;
+        const accuracyChart = agentsChartAccuracy[agent];
+        const rewardChart = isSupervised ? null : agentsChartReward[agent];
+
+        // Logging context for this agent
+        console.groupCollapsed(`restoreAgentsChartsFromRawData: agent='${agent}'`);
+        if (!accuracyChart) {
+            if (currentConfig.cfg && currentConfig.cfg.agents && currentConfig.cfg.hosts) {
+                initializeAgentsCharts(currentConfig.cfg.isMultiAgent, currentConfig.cfg.agents, currentConfig.cfg.hosts); // Initialize all charts with config data        
+            }
+            console.log(' -> accuracyChart: not found, attempted re-initialization');
+        }
+        if (accuracyChart && accuracyRaw !== null && accuracyRaw !== undefined) {
+            // open the details
+            $(`[data-agent="${agent}"]`).find('.agent-charts-section').find('details').prop('open', true);
+
+            const accuracySeries = extractNumericSeries(accuracyRaw, true);
+            if (accuracySeries && accuracySeries.length > 0) {
+                console.log(' -> accuracy: restoring', accuracySeries.length, 'points');
+                accuracyChart.data.labels = accuracySeries.map((_, index) => index + 1); // Episodes start at 1
+                accuracyChart.data.datasets = buildRestoredChartDataset(agent, 'accuracy', accuracySeries);
+                accuracyChart.update();
+                ensureChartRedraw(accuracyChart, accuracySeries.length);
+                didUpdate = true;
+            }
+            else {
+                console.log(' -> accuracy: skipped (empty series)');
+            }
+        }
+        else if (accuracyChart) {
+            console.log(' -> accuracy: skipped (null/undefined from payload)');
+        }
+        else if (accuracyRaw) {
+            console.log(' -> accuracy: skipped (null/undefined from chart instance)');
+        }
+
+        if (rewardChart && rewardRaw !== null && rewardRaw !== undefined) {
+            const rewardSeries = extractNumericSeries(rewardRaw, false); // Try to extract reward series, allowing for more flexible formats
+            if (rewardSeries && rewardSeries.length > 0) {
+                console.log(' -> reward: restoring', rewardSeries.length, 'points');
+                rewardChart.data.labels = rewardSeries.map((_, index) => index + 1); // Episodes start at 1
+                rewardChart.data.datasets = buildRestoredChartDataset(agent, 'reward', rewardSeries);
+                rewardChart.update();
+                ensureChartRedraw(rewardChart, rewardSeries.length);
+                didUpdate = true;
+            }
+            else {
+                console.log(' -> reward: skipped (empty series)');
+            }
+        }
+        else if (rewardChart) {
+            console.log(' -> reward: skipped (null/undefined from payload)');
+        }
+        else if (rewardRaw) {
+            console.log(' -> reward: skipped (null/undefined from chart instance)');
+        }
+
+        console.groupEnd();
+    });
+
+    return didUpdate;
+}
+
+
 function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts) {
     isMultiAgentMode = isMultiAgent;
-    if (agents && agents.length > 0 && hosts && hosts.length > 0) {
-        return;
-    }
     if (!configuredAgents || configuredAgents.length === 0) {
         console.warn("No agents configured for chart initialization.");
         return;
@@ -136,6 +268,44 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
         console.warn("No hosts configured for chart initialization.");
         return;
     }
+
+    const configuredRenderableAgents = configuredAgents;
+    const existingAgentSections = $("#charts-metrics-section div.agent-section[data-agent]").length;
+    const existingCharts = Object.keys(agentsChartAccuracy).length > 0 || Object.keys(agentsChartReward).length > 0;
+    const alreadyBuilt = existingAgentSections === configuredRenderableAgents.length
+        && existingCharts
+        && agents.length === configuredAgents.length
+        && hosts.length === configuredHosts.length;
+    if (alreadyBuilt) {
+        if (typeof applyPendingChartRestore === 'function') {
+            applyPendingChartRestore();
+        }
+        if (typeof restoreTrainingResultsButtonStates === 'function') {
+            restoreTrainingResultsButtonStates();
+        }
+        if (typeof restoreEvaluationResultsButtonStates === 'function') {
+            restoreEvaluationResultsButtonStates();
+        }
+        return;
+    }
+
+    for (const agent in agentsChartAccuracy) {
+        if (agentsChartAccuracy[agent]) {
+            agentsChartAccuracy[agent].destroy();
+            delete agentsChartAccuracy[agent];
+        }
+    }
+    for (const agent in agentsChartReward) {
+        if (agentsChartReward[agent]) {
+            agentsChartReward[agent].destroy();
+            delete agentsChartReward[agent];
+        }
+    }
+    agentsChartAccuracy = {};
+    agentsChartReward = {};
+
+    $("#charts-metrics-section div.agent-section[data-agent]").remove();
+
     chartMetricsSection.removeClass('hidden');
     agents = configuredAgents; // Store agents globally for later use
     hosts = configuredHosts;
@@ -157,8 +327,8 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
         }
     }
     for (let i = 0; i < agents.length; i++) {
-        if (agents[i].toLowerCase().includes("supervised"))
-            continue;
+        const isSupervised = agents[i].toLowerCase().includes("supervised");
+
         // Clone the agent section template
         let agentSection = $("div.agent-section").first().clone();
 
@@ -166,19 +336,28 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
         agentSection.removeClass("hidden");
         agentSection.attr("data-agent", agents[i]);
 
-        agentSection.find(".agent-title").text("Agent: " + agents[i]);
+        agentSection.find(".agent-title").html(getAgentSummaryHeaderHtml(agents[i]));
         $("#charts-metrics-section").append(agentSection);
 
         // Prepare datasets for this agent
         let datasetForAccuracyAgent = structuredClone(datasetForAccuracy);
-        let datasetForRewardAgent = structuredClone(datasetForReward);
 
         // Get the canvas elements within this agent section
         let accuracyCanvas = agentSection.find("canvas.lineChartAccuracy").first();
-        let rewardCanvas = agentSection.find("canvas.lineChartReward").first();
 
-        // Initialize charts for this agent
+        // Initialize accuracy chart for all agents
         agentsChartAccuracy[agents[i]] = initializeLineChartAccuracy(agents[i], datasetForAccuracyAgent, accuracyCanvas);
+
+        if (isSupervised) {
+            // Hide reward chart and host data section for supervised agents
+            agentSection.find(".reward-chart-title").closest("details").addClass("hidden");
+            agentSection.find(".agent-data-section").addClass("hidden");
+            continue;
+        }
+
+        // Reward chart only for non-supervised agents
+        let datasetForRewardAgent = structuredClone(datasetForReward);
+        let rewardCanvas = agentSection.find("canvas.lineChartReward").first();
         agentsChartReward[agents[i]] = initializeLineChartReward(agents[i], datasetForRewardAgent, rewardCanvas);
 
         let agentDataSection = agentSection.find(".agent-data-section").first();
@@ -187,11 +366,19 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
         let ulElement = $("<ul></ul>");
         agentDataSection.append(ulElement);
 
-        // this is when we use multi agents. 
+        // this is when we use multi agents.
         if (isMultiAgentMode) {
             let coordinatorAgentKey = `${agents[i]}_${COORDINATOR}`;
             let ilElement = getLiElement(coordinatorAgentKey, COORDINATOR, false);
             ulElement.append(ilElement);
+            for (let j = 0; j < hosts.length; j++) {
+                let host = hosts[j];
+                let hostAgentKey = `${agents[i]}_${host}`;
+                let ilElement = getLiElement(hostAgentKey, host, true);
+                ulElement.append(ilElement);
+            }
+        }
+        else if (isSingleAgentHostObservableEnv()) {
             for (let j = 0; j < hosts.length; j++) {
                 let host = hosts[j];
                 let hostAgentKey = `${agents[i]}_${host}`;
@@ -205,7 +392,439 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
             ulElement.append(ilElement);
         }
     }
+
+    if (typeof applyPendingChartRestore === 'function') {
+        applyPendingChartRestore();
+    }
+    if (typeof restoreTrainingResultsButtonStates === 'function') {
+        restoreTrainingResultsButtonStates();
+    }
+    if (typeof restoreEvaluationResultsButtonStates === 'function') {
+        restoreEvaluationResultsButtonStates();
+    }
 }
+
+function escapeAgentSummaryHtml(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getAgentSummaryHeaderHtml(agentName) {
+    const escapedAgentName = escapeAgentSummaryHtml(agentName);
+    return `
+        <div class="flex items-center justify-between gap-3">
+            <span>Agent: ${escapedAgentName}</span>
+            <span class="flex items-center gap-2">
+                <button
+                    type="button"
+                    class="agent-training-popup-btn inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-200 text-slate-500 text-xs font-semibold cursor-not-allowed"
+                    data-agent="${escapedAgentName}"
+                    data-ready="false"
+                    disabled
+                    title="Training summary available when the agent finishes plotting">
+                    <img src="/static/images/gif/training.gif" alt="Training result" class="w-4 h-4 rounded">
+                    Training result
+                </button>
+                <button
+                    type="button"
+                    class="agent-evaluation-popup-btn inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-200 text-slate-500 text-xs font-semibold cursor-not-allowed"
+                    data-agent="${escapedAgentName}"
+                    data-ready="false"
+                    disabled
+                    title="Evaluation summary available when the agent finishes testing">
+                    <img src="/static/images/gif/test.gif" alt="Evaluation result" class="w-4 h-4 rounded">
+                    Evaluation result
+                </button>
+            </span>
+        </div>
+    `;
+}
+
+function formatTrainingMetricValue(metricKey, value) {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+        return 'N/A';
+    }
+    if (['accuracy', 'precision', 'recall', 'f1_score', 'qtable_coverage_pct', 'exploration_rate'].includes(metricKey)) {
+        return `${(numericValue * 100).toFixed(2)}%`;
+    }
+    if (metricKey === 'policy_entropy' || metricKey === 'q_values_std' || metricKey === 'q_values_mean' || metricKey === 'q_values_max') {
+        return numericValue.toFixed(4);
+    }
+    if (metricKey === 'cumulative_reward') {
+        return numericValue.toFixed(2);
+    }
+    return numericValue.toFixed(2);
+}
+
+function sortTrainingCharts(chartFiles) {
+    const priority = [
+        'metrics_combined',
+        'metrics',
+        'rewards',
+        'matrix',
+        'qtable_coverage',
+        'policy_exploration',
+        'bin_coverage',
+    ];
+    return [...(Array.isArray(chartFiles) ? chartFiles : [])].sort((left, right) => {
+        const leftName = String(left || '').toLowerCase();
+        const rightName = String(right || '').toLowerCase();
+        const leftIndex = priority.findIndex(token => leftName.includes(token));
+        const rightIndex = priority.findIndex(token => rightName.includes(token));
+        const normalizedLeft = leftIndex === -1 ? priority.length : leftIndex;
+        const normalizedRight = rightIndex === -1 ? priority.length : rightIndex;
+        if (normalizedLeft !== normalizedRight) {
+            return normalizedLeft - normalizedRight;
+        }
+        return leftName.localeCompare(rightName);
+    });
+}
+
+function renderMetricCards(summary) {
+    const latestMetrics = summary && typeof summary.latest_metrics === 'object' && summary.latest_metrics !== null
+        ? summary.latest_metrics
+        : {};
+    const cards = [
+        ['Episodes', summary.episodes_completed ?? 0],
+        ['Last Steps', summary.steps_last_episode ?? 0],
+        ['Elapsed', Number.isFinite(Number(summary.train_execution_time)) ? `${Number(summary.train_execution_time).toFixed(1)}s` : 'N/A'],
+        ['Charts', summary.chart_count ?? 0],
+        ['Accuracy', formatTrainingMetricValue('accuracy', latestMetrics.accuracy)],
+        ['Precision', formatTrainingMetricValue('precision', latestMetrics.precision)],
+        ['Recall', formatTrainingMetricValue('recall', latestMetrics.recall)],
+        ['F1', formatTrainingMetricValue('f1_score', latestMetrics.f1_score)],
+    ];
+
+    return cards.map(([label, value]) => `
+        <div class="bg-white border border-slate-200 rounded-xl p-3">
+            <div class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">${escapeAgentSummaryHtml(label)}</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeAgentSummaryHtml(value)}</div>
+        </div>
+    `).join('');
+}
+
+function renderExtraMetrics(summary) {
+    const latestMetrics = summary && typeof summary.latest_metrics === 'object' && summary.latest_metrics !== null
+        ? summary.latest_metrics
+        : {};
+    const metricLabels = {
+        cumulative_reward: 'Cumulative Reward',
+        qtable_coverage_pct: 'Q-table Coverage',
+        exploration_rate: 'Exploration Rate',
+        policy_entropy: 'Policy Entropy',
+        q_values_std: 'Q-values Std',
+        q_values_mean: 'Q-values Mean',
+        q_values_max: 'Q-values Max',
+    };
+
+    const extraRows = Object.keys(metricLabels)
+        .filter(metricKey => latestMetrics[metricKey] !== undefined && latestMetrics[metricKey] !== null)
+        .map(metricKey => `
+            <div class="flex items-center justify-between text-sm border-b border-slate-100 py-1.5">
+                <span class="text-slate-600 font-medium">${escapeAgentSummaryHtml(metricLabels[metricKey])}</span>
+                <span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(formatTrainingMetricValue(metricKey, latestMetrics[metricKey]))}</span>
+            </div>
+        `)
+        .join('');
+
+    if (!extraRows) {
+        return '';
+    }
+
+    return `
+        <div class="bg-white border border-slate-200 rounded-xl p-4">
+            <div class="text-xs font-bold uppercase text-slate-700 mb-2">Extra Training Signals</div>
+            <div>${extraRows}</div>
+        </div>
+    `;
+}
+
+function renderPerHostMetrics(summary) {
+    const perHostMetrics = Array.isArray(summary.per_host_metrics) ? summary.per_host_metrics : [];
+    if (!perHostMetrics.length) {
+        return '';
+    }
+
+    const rows = perHostMetrics.map(item => {
+        const hostMetrics = item && typeof item.latest_metrics === 'object' ? item.latest_metrics : {};
+        return `
+            <tr class="border-b border-slate-100">
+                <td class="p-2 font-semibold text-slate-700">${escapeAgentSummaryHtml(item.host || '-')}</td>
+                <td class="p-2 text-right">${escapeAgentSummaryHtml(formatTrainingMetricValue('accuracy', hostMetrics.accuracy))}</td>
+                <td class="p-2 text-right">${escapeAgentSummaryHtml(formatTrainingMetricValue('precision', hostMetrics.precision))}</td>
+                <td class="p-2 text-right">${escapeAgentSummaryHtml(formatTrainingMetricValue('recall', hostMetrics.recall))}</td>
+                <td class="p-2 text-right">${escapeAgentSummaryHtml(formatTrainingMetricValue('f1_score', hostMetrics.f1_score))}</td>
+            </tr>
+        `;
+    }).join('');
+
+    return `
+        <div class="bg-white border border-slate-200 rounded-xl p-4">
+            <div class="text-xs font-bold uppercase text-slate-700 mb-2">Per-host Training Snapshot</div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-200 text-slate-500 uppercase text-[11px]">
+                            <th class="p-2 text-left">Host</th>
+                            <th class="p-2 text-right">Accuracy</th>
+                            <th class="p-2 text-right">Precision</th>
+                            <th class="p-2 text-right">Recall</th>
+                            <th class="p-2 text-right">F1</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function renderTrainingCharts(summary) {
+    const relativeDir = String(summary.relative_dir || '');
+    const chartFiles = sortTrainingCharts(summary.chart_files || []);
+
+    if (!relativeDir || !chartFiles.length) {
+        return `
+            <div class="bg-white border border-slate-200 rounded-xl p-4 text-sm text-slate-500">
+                No training charts available for this agent yet.
+            </div>
+        `;
+    }
+
+    return `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            ${chartFiles.map(chartFile => `
+                <div class="bg-white border border-slate-200 rounded-xl p-2">
+                    <div class="text-[11px] font-semibold uppercase text-slate-500 mb-2">${escapeAgentSummaryHtml(chartFile)}</div>
+                    <img
+                        src="/static-training/${encodeURI(relativeDir)}/${encodeURIComponent(chartFile)}"
+                        alt="${escapeAgentSummaryHtml(chartFile)}"
+                        title="${escapeAgentSummaryHtml(chartFile)}"
+                        class="clickable-img w-full h-56 object-contain rounded-lg border border-slate-100 bg-slate-50 cursor-zoom-in"
+                        data-description="${escapeAgentSummaryHtml(summary.agent_name || 'Agent')} - ${escapeAgentSummaryHtml(chartFile)}"
+                    >
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderEvaluationMetricCards(summary) {
+    const latestMetrics = summary && typeof summary.latest_metrics === 'object' && summary.latest_metrics !== null
+        ? summary.latest_metrics
+        : {};
+    const score = Number(summary.score);
+    const testEpisodes = Number(summary.test_episodes || 0);
+    const scorePct = testEpisodes > 0 && Number.isFinite(score)
+        ? `${((score / testEpisodes) * 100).toFixed(2)}%`
+        : 'N/A';
+    const cards = [
+        ['Test Episodes', summary.test_episodes ?? 0],
+        ['Score', Number.isFinite(score) ? score : 'N/A'],
+        ['Score %', scorePct],
+        ['Charts', summary.chart_count ?? 0],
+        ['Accuracy', formatTrainingMetricValue('accuracy', latestMetrics.accuracy)],
+        ['Precision', formatTrainingMetricValue('precision', latestMetrics.precision)],
+        ['Recall', formatTrainingMetricValue('recall', latestMetrics.recall)],
+        ['F1', formatTrainingMetricValue('f1_score', latestMetrics.f1_score)],
+    ];
+
+    return cards.map(([label, value]) => `
+        <div class="bg-white border border-amber-200 rounded-xl p-3">
+            <div class="text-[11px] uppercase tracking-wide text-amber-700 font-semibold">${escapeAgentSummaryHtml(label)}</div>
+            <div class="text-sm font-bold text-slate-800 mt-1">${escapeAgentSummaryHtml(value)}</div>
+        </div>
+    `).join('');
+}
+
+function renderEvaluationMitigation(summary) {
+    const mitigationSummary = summary && typeof summary.mitigation_summary === 'object' && summary.mitigation_summary !== null
+        ? summary.mitigation_summary
+        : null;
+    if (!mitigationSummary) {
+        return '';
+    }
+
+    const ratioPct = Number(mitigationSummary.mitigated_under_attack_ratio || 0) * 100;
+    return `
+        <div class="bg-white border border-amber-200 rounded-xl p-4">
+            <div class="text-xs font-bold uppercase text-amber-700 mb-2">Attack Mitigation</div>
+            <div class="space-y-1 text-sm">
+                <div class="flex items-center justify-between"><span class="text-slate-600">Episodes with data</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.episodes_with_mitigation_data || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-600">Under attack total</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.total_under_attack_count || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-600">Mitigated total</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.total_mitigated_under_attack_count || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-600">Mitigation ratio</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(`${ratioPct.toFixed(2)}%`)}</span></div>
+            </div>
+        </div>
+    `;
+}
+
+function renderEvaluationCharts(summary) {
+    const relativeDir = String(summary.relative_dir || '');
+    const chartFiles = sortTrainingCharts(summary.chart_files || []);
+
+    if (!relativeDir || !chartFiles.length) {
+        return `
+            <div class="bg-white border border-amber-200 rounded-xl p-4 text-sm text-slate-500">
+                No evaluation charts available for this agent yet.
+            </div>
+        `;
+    }
+
+    return `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            ${chartFiles.map(chartFile => `
+                <div class="bg-white border border-amber-200 rounded-xl p-2">
+                    <div class="text-[11px] font-semibold uppercase text-amber-700 mb-2">${escapeAgentSummaryHtml(chartFile)}</div>
+                    <img
+                        src="/static-training/${encodeURI(relativeDir)}/${encodeURIComponent(chartFile)}"
+                        alt="${escapeAgentSummaryHtml(chartFile)}"
+                        title="${escapeAgentSummaryHtml(chartFile)}"
+                        class="clickable-img w-full h-56 object-contain rounded-lg border border-amber-100 bg-amber-50 cursor-zoom-in"
+                        data-description="${escapeAgentSummaryHtml(summary.agent_name || 'Agent')} - ${escapeAgentSummaryHtml(chartFile)}"
+                    >
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderAgentEvaluationSummaryPopup(summary) {
+    return `
+        <div class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                ${renderEvaluationMetricCards(summary)}
+            </div>
+            ${renderEvaluationMitigation(summary)}
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div class="text-xs font-bold uppercase text-amber-700 mb-3">Evaluation Charts</div>
+                ${renderEvaluationCharts(summary)}
+            </div>
+        </div>
+    `;
+}
+
+function renderAgentTrainingSummaryPopup(summary) {
+    return `
+        <div class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                ${renderMetricCards(summary)}
+            </div>
+            ${renderExtraMetrics(summary)}
+            ${renderPerHostMetrics(summary)}
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div class="text-xs font-bold uppercase text-slate-700 mb-3">Training Charts</div>
+                ${renderTrainingCharts(summary)}
+            </div>
+        </div>
+    `;
+}
+
+function updateAgentTrainingPopupButton(agentName) {
+    const button = $(`.agent-training-popup-btn[data-agent="${agentName}"]`).first();
+    if (!button.length) {
+        return;
+    }
+    button.prop('disabled', false)
+        .attr('data-ready', 'true')
+        .removeClass('bg-slate-200 text-slate-500 cursor-not-allowed')
+        .addClass('bg-blue-600 text-white hover:bg-blue-700 cursor-pointer')
+        .attr('title', 'Open training result summary');
+}
+
+function updateAgentEvaluationPopupButton(agentName) {
+    const button = $(`.agent-evaluation-popup-btn[data-agent="${agentName}"]`).first();
+    if (!button.length) {
+        return;
+    }
+    button.prop('disabled', false)
+        .attr('data-ready', 'true')
+        .removeClass('bg-slate-200 text-slate-500 cursor-not-allowed')
+        .addClass('bg-amber-500 text-white hover:bg-amber-600 cursor-pointer')
+        .attr('title', 'Open evaluation result summary');
+}
+
+function handleAgentTrainingSummary(agentName, summary) {
+    if (!window.lastAgentTrainingSummaries || typeof window.lastAgentTrainingSummaries !== 'object') {
+        window.lastAgentTrainingSummaries = {};
+    }
+    window.lastAgentTrainingSummaries[agentName] = summary;
+    updateAgentTrainingPopupButton(agentName);
+
+    // Save to sessionStorage for recovery on page reload
+    if (typeof saveTrainingSessionData === 'function') {
+        saveTrainingSessionData();
+    }
+
+    showStatus(`Training summary ready for ${agentName}.`, 'success');
+}
+
+window.handleAgentTrainingSummary = handleAgentTrainingSummary;
+
+function handleAgentEvaluationSummary(agentName, summary) {
+    if (!window.lastAgentEvaluationSummaries || typeof window.lastAgentEvaluationSummaries !== 'object') {
+        window.lastAgentEvaluationSummaries = {};
+    }
+    window.lastAgentEvaluationSummaries[agentName] = summary;
+    updateAgentEvaluationPopupButton(agentName);
+
+    // Save to sessionStorage for recovery on page reload
+    if (typeof saveTrainingSessionData === 'function') {
+        saveTrainingSessionData();
+    }
+
+    showStatus(`Evaluation summary ready for ${agentName}.`, 'success');
+}
+
+window.handleAgentEvaluationSummary = handleAgentEvaluationSummary;
+window.restoreAgentsChartsFromRawData = restoreAgentsChartsFromRawData;
+
+$(document).on('click', '.agent-training-popup-btn', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const agentName = $(this).data('agent');
+    const summary = window.lastAgentTrainingSummaries && agentName
+        ? window.lastAgentTrainingSummaries[agentName]
+        : null;
+
+    if (!summary) {
+        showStatus(`Training summary not ready yet for ${agentName || 'this agent'}.`, 'info');
+        return;
+    }
+
+    openInfoPopupHtml(
+        renderAgentTrainingSummaryPopup(summary),
+        `Training Result - ${agentName}`,
+        '/static/images/gif/training.gif'
+    );
+});
+
+$(document).on('click', '.agent-evaluation-popup-btn', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const agentName = $(this).data('agent');
+    const summary = window.lastAgentEvaluationSummaries && agentName
+        ? window.lastAgentEvaluationSummaries[agentName]
+        : null;
+
+    if (!summary) {
+        showStatus(`Evaluation summary not ready yet for ${agentName || 'this agent'}.`, 'info');
+        return;
+    }
+
+    openInfoPopupHtml(
+        renderAgentEvaluationSummaryPopup(summary),
+        `Evaluation Result - ${agentName}`,
+        '/static/images/gif/test.gif'
+    );
+});
 
 function getDataset(host, color) {
     return {
@@ -342,12 +961,17 @@ function updateGauceAccuracy(container, currentValue, maxValue) {
 
 function updateAgentStepDataTable(agent, stepData) {
     // Implementation for updating stats table for a specific agent
-    var agentKey = agent;
-    var listItem = $(`li[data-host-agent='${agentKey}']`);
     var host = "";
+    var agentKey = agent;
     if (isMultiAgentMode) {
         host = agentKey.split("_").pop();
     }
+    else if ((isSingleAgentHostObservableEnv() && stepData.host !== undefined)) {
+        host = stepData.host;
+        agentKey = `${agent}_${host}`;
+    }
+
+    var listItem = $(`li[data-host-agent='${agentKey}']`);
     if (listItem.length > 0) {
         var gaugeContainer = listItem.find(`#gauge-accuracy-${agentKey}`);
         if (gaugeContainer.length > 0 && stepData.correctPredictions !== undefined && stepData.step !== undefined && stepData.step > 0) {
@@ -359,35 +983,66 @@ function updateAgentStepDataTable(agent, stepData) {
         stepSpan.html(stepData.step);
         var statusSpan = listItem.find(".status").first();
         if (stepData.status.id !== undefined) {
-            html = getStatusActionIcon(stepData.status.id, host)
-            statusSpan.html(html);
-            // if (html.includes("secure.gif")) {
-
-            // }
-            // else if (html.includes("ping.gif") || html.includes("udp.gif") || html.includes("tcp.gif")) {
-
-            // }
-            // else 
-            if (html.includes("cyberterrorism.gif")) {
-                listItem.addClass("bg-orange-200");
-                listItem.removeClass("bg-red-200");
-                listItem.removeClass("bg-white");
+            statusId = stepData.status.id;
+            isHo = false;
+            //if env id attack with observable hosts, stepData.status.id is an array
+            if (Array.isArray(stepData.status.id)) {
+                isHo = true;
+                //if all 0 is normal
+                let allNormal = stepData.status.id.every(id => id === 0);
+                if (allNormal) {
+                    statusId = 0;
+                }
+                else {
+                    statusId = 1;
+                }
             }
-            else if (html.includes("ddos.gif")) {
-                listItem.addClass("bg-red-200");
-                listItem.removeClass("bg-orange-200");
-                listItem.removeClass("bg-white");
-            }
+
+            html = getStatusActionIcon(statusId, host);
+
+            if (!html)
+                console.warn("Html status is empty for status id " + statusId + " and host " + host);
             else {
-                listItem.addClass("bg-white");
-                listItem.removeClass("bg-orange-200");
-                listItem.removeClass("bg-red-200");
+                statusSpan.html(html);
+                // if (html.includes("secure.gif")) {
+
+                // }
+                // else if (html.includes("ping.gif") || html.includes("udp.gif") || html.includes("tcp.gif")) {
+
+                // }
+                // else 
+                if (html.includes("cyberterrorism.gif")) {
+                    listItem.addClass("bg-orange-200");
+                    listItem.removeClass("bg-red-200");
+                    listItem.removeClass("bg-white");
+                }
+                else if (html.includes("ddos.gif")) {
+                    listItem.addClass("bg-red-200");
+                    listItem.removeClass("bg-orange-200");
+                    listItem.removeClass("bg-white");
+                }
+                else {
+                    listItem.addClass("bg-white");
+                    listItem.removeClass("bg-orange-200");
+                    listItem.removeClass("bg-red-200");
+                }
+                if (html.includes("opacity-50")) {
+                    listItem.addClass("opacity-50");
+                }
+                else {
+                    listItem.removeClass("opacity-50");
+                }
+
             }
 
         }
         var actionChoosenSpan = listItem.find(".action_choosen").first();
         if (stepData.action.choosen !== undefined) {
-            actionChoosenSpan.html(getStatusActionIcon(stepData.action.choosen, host));
+            choosen = stepData.action.choosen;
+            if (isHo && stepData.action.choosen >= 0) {
+                choosen = 1;
+            }
+            actionChoosenSpan.html(getStatusActionIcon(choosen, host));
         }
         // actionChoosenSpan.html(stepData.action.choosen !== undefined ? stepData.action.choosen : "N/A");
         var rewardSpan = listItem.find(".reward").first();
@@ -415,7 +1070,7 @@ function updateAgentStepDataTable(agent, stepData) {
             var bytesSpan = listItem.find(".bytes").first();
             bytesSpan.html(formatBytes(stepData.receivedBytes) + " / " + formatBytes(stepData.transmittedBytes));
         }
-        else if (stepData.host === COORDINATOR || (!isMultiAgentMode)) {
+        else if (stepData.host === COORDINATOR || (!isMultiAgentMode && !isSingleAgentHostObservableEnv())) {
             var packetsSpan = listItem.find(".packets").first();
             packetsSpan.html(stepData.packets);
             var bytesSpan = listItem.find(".bytes").first();
@@ -498,8 +1153,14 @@ function getStatusActionIcon(id, host) {
         if (id == 1) {
             return "<img src='/static/images/gif/ddos.gif' alt='Incoming attack' title='Incoming attack' class='inline w-5 h-5'/>";
         }
+        if (id == 3) {
+            return "<img src='/static/images/gif/ddos.gif' alt='Incoming attack' title='Incoming attack' class='inline w-5 h-5 opacity-50'/>";
+        }
         if (id == 2) {
             return "<img src='/static/images/gif/cyberterrorism.gif' alt='Attacking' title='Attacking' class='inline w-5 h-5'/>";
+        }
+        if (id == 4) {
+            return "<img src='/static/images/gif/cyberterrorism.gif' alt='Attacking' title='Attacking' class='inline w-5 h-5 opacity-50'/>";
         }
     }
 }
@@ -528,7 +1189,7 @@ function updateLineChartAccuracy(lineChartAccuracy, newData, host) {
     //if (!newData || !newData.metrics || !newData.agent) return;
 
     if (host == "") {
-        host = "agent"; //newData.agent;
+        host = newData.agent; //"agent";
     }
     const metrics = newData.metrics;
     const episode = metrics.episode;
@@ -565,7 +1226,10 @@ function updateLineChartAccuracy(lineChartAccuracy, newData, host) {
     // 2. Manage Shared X-Axis (Labels = Episodes)
     const labels = lineChartAccuracy.data.labels;
     let episodeIndex = labels.indexOf(episode);
-
+    if (lineChartAccuracy.data.labels.length === 0) {
+        // First episode being added, open the details
+        $(`[data-agent="${host}"]`).find('.agent-charts-section').find('details').prop('open', true);
+    }
     // If episode is new to the chart, add it to the shared labels
     if (episodeIndex === -1) {
         labels.push(episode);
@@ -605,7 +1269,7 @@ function updateLineChartAccuracy(lineChartAccuracy, newData, host) {
 function updateLineChartReward(lineChartReward, newData, host) {
     //if (!newData || !newData.metrics || !newData.agent) return;
     if (host == "") {
-        host = "agent"; //newData.agent;
+        host = newData.agent; //"agent";
     }
     const metrics = newData.metrics;
     const episode = metrics.episode;
@@ -640,7 +1304,10 @@ function updateLineChartReward(lineChartReward, newData, host) {
     // 2. Manage Shared X-Axis (Labels = Episodes)
     const labels = lineChartReward.data.labels;
     let episodeIndex = labels.indexOf(episode);
-
+    // if (lineChartReward.data.labels.length === 0) {
+    //     // First episode being added, open the details
+    //     $(`[data-agent="${host}"]`).find('.agent-charts-section').find('details')[1].prop('open', true);
+    // }
     // If episode is new to the chart, add it to the shared labels
     if (episodeIndex === -1) {
         labels.push(episode);
@@ -674,6 +1341,4 @@ function updateLineChartReward(lineChartReward, newData, host) {
 
     lineChartReward.update();
 }
-
-
 

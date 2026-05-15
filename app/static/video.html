@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MininetGym — Demo Video · AAMAS 2026</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: #040b18;
+  font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  color: #e8eaf6;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px;
+}
+
+.top-bar {
+  display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+}
+.top-logo {
+  font-size: clamp(1.4rem, 2.5vw, 2.2rem); font-weight: 900; letter-spacing: -.02em;
+  background: linear-gradient(135deg, #fff 20%, #42A5F5 80%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.top-sep { color: rgba(144,202,249,.3); font-size: 1.4rem; }
+.top-sub {
+  font-size: clamp(.85rem, 1.4vw, 1.3rem); color: #90CAF9; font-weight: 300;
+}
+
+.player-wrap {
+  width: min(92vw, calc((100vh - 160px) * 16 / 9));
+  aspect-ratio: 16 / 9;
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 12px 60px rgba(0, 0, 0, .75);
+  border: 2px solid rgba(66,165,245,.28);
+  background: #000;
+  flex-shrink: 0;
+}
+.player-wrap iframe {
+  width: 100%; height: 100%; display: block; border: none;
+}
+
+.bottom-bar {
+  display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; flex-shrink: 0;
+}
+.tag {
+  display: inline-block; padding: 4px 14px; border-radius: 20px;
+  font-size: .78rem; font-weight: 600; letter-spacing: .05em; border: 1px solid;
+}
+.tb { border-color:#42A5F5; color:#42A5F5; background:rgba(66,165,245,.1); }
+.tt { border-color:#4DB6AC; color:#4DB6AC; background:rgba(77,182,172,.1); }
+.to { border-color:#FF8A65; color:#FF8A65; background:rgba(255,138,101,.1); }
+
+.back-link {
+  position: fixed; top: 14px; left: 18px;
+  color: rgba(144,202,249,.45); font-size: .75rem; text-decoration: none;
+  letter-spacing: .04em;
+  transition: color .2s;
+}
+.back-link:hover { color: #42A5F5; }
+
+#wm {
+  position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%);
+  font-size: clamp(.48rem,.68vw,.68rem); color: rgba(144,202,249,.25);
+  white-space: nowrap; letter-spacing: .04em;
+}
+</style>
+</head>
+<body>
+
+<a class="back-link" href="screensaver.html">← back to screensaver</a>
+
+<div class="top-bar">
+  <div class="top-logo">MininetGym</div>
+  <div class="top-sep">·</div>
+  <div class="top-sub">A Live Demonstration of RL-Based Cybersecurity Training</div>
+</div>
+
+<div class="player-wrap">
+  <iframe
+    src="https://www.youtube.com/embed/sSzUz6w-4H8?autoplay=1&rel=0&modestbranding=1&color=white"
+    title="MininetGym Demo Video — AAMAS 2026"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    allowfullscreen>
+  </iframe>
+</div>
+
+<div class="bottom-bar">
+  <span class="tag tb">SDN Emulation</span>
+  <span class="tag tt">Reinforcement Learning</span>
+  <span class="tag to">Cybersecurity</span>
+  <span class="tag tb">AAMAS 2026 · Paphos, Cyprus</span>
+</div>
+
+<div id="wm">MininetGym · github.com/dipi-unimore/mininet-gym · salvo.finistrella@unimore.it</div>
+
+</body>
+</html>

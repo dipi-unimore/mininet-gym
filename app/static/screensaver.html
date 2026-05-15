@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MininetGym – AAMAS 2026</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #040b18; }
+body { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; color: #e8eaf6; }
+
+#bgc { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
+
+#pbar {
+  position: fixed; bottom: 0; left: 0; height: 4px; width: 0%;
+  background: linear-gradient(90deg, #00897B, #42A5F5, #E64A19);
+  background-size: 300% 100%; animation: gradShift 4s linear infinite;
+  z-index: 200; transition: width 0.12s linear;
+}
+@keyframes gradShift { 0%{background-position:0%} 100%{background-position:300%} }
+
+.slide {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  padding: 3vh 6vw; gap: 0;
+  opacity: 0; transition: opacity 0.9s ease;
+  z-index: 10; pointer-events: none;
+}
+.slide.active { opacity: 1; }
+
+:root {
+  --bl: #1565C0; --bll: #42A5F5;
+  --tl: #00897B; --tll: #4DB6AC;
+  --or: #E64A19; --orl: #FF8A65;
+}
+.accent      { color: var(--bll); }
+.accent-teal { color: var(--tll); }
+.accent-org  { color: var(--orl); }
+
+.divider {
+  width: 70px; height: 4px; flex-shrink: 0;
+  background: linear-gradient(90deg, var(--bll), var(--tll));
+  border-radius: 2px; margin: 10px 0 16px;
+}
+.tag {
+  display: inline-block; padding: 4px 14px; border-radius: 20px;
+  font-size: .82rem; font-weight: 600; letter-spacing: .05em; border: 1px solid;
+}
+.tb { border-color:var(--bll); color:var(--bll); background:rgba(66,165,245,.1); }
+.tt { border-color:var(--tll); color:var(--tll); background:rgba(77,182,172,.1); }
+.to { border-color:var(--orl); color:var(--orl); background:rgba(255,138,101,.1); }
+.slide-title {
+  font-size: clamp(1.7rem, 2.6vw, 3rem); font-weight: 700;
+  text-align: center; flex-shrink: 0;
+}
+
+/* ── S1: Title ── */
+#s1 { gap: 12px; text-align: center; }
+.main-title {
+  font-size: clamp(3.5rem, 7vw, 8rem); font-weight: 900;
+  letter-spacing: -.02em; line-height: 1;
+  background: linear-gradient(135deg, #fff 20%, #42A5F5 80%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.subtitle  { font-size: clamp(1.1rem,2.1vw,2.2rem); color: #90CAF9; font-weight:300; max-width:950px; }
+.authors   { font-size: clamp(.9rem,1.4vw,1.5rem); color: #B0BEC5; }
+.affil     { font-size: clamp(.78rem,1.05vw,1.1rem); color: #78909C; }
+.conf-badge {
+  padding: 10px 32px; border: 2px solid var(--bll); border-radius: 30px;
+  font-size: clamp(.95rem,1.7vw,1.8rem); font-weight: 700; color: var(--bll);
+  text-transform: uppercase; letter-spacing: .1em;
+  box-shadow: 0 0 24px rgba(66,165,245,.2); margin-top: 14px;
+}
+.tags-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+/* ── S2: Architecture ── */
+.arch-wrap { display:flex; flex-direction:column; align-items:center; gap:3px; width:100%; max-width:840px; }
+.al {
+  width:100%; padding:11px 22px; border-radius:10px; text-align:center;
+  font-weight:600; font-size:clamp(.85rem,1.2vw,1.2rem);
+  opacity:0; transform:translateY(7px); transition:opacity .4s ease, transform .4s ease;
+}
+.al.vis { opacity:1; transform:none; }
+.al-sub { font-size:.7em; font-weight:400; color:#90CAF9; display:block; }
+.al.la { background:rgba(21,101,192,.45); border:1px solid rgba(66,165,245,.5); }
+.al.lb { background:rgba(0,105,92,.4); border:1px solid rgba(77,182,172,.5); }
+.al.lc,.al.lf { display:flex; gap:8px; background:transparent; border:none; padding:0; }
+.al.lc > div { flex:1; padding:11px; border-radius:10px; background:rgba(230,74,25,.15); border:1px solid rgba(255,138,101,.4); font-size:clamp(.8rem,1.05vw,1.05rem); }
+.al.ld { background:rgba(21,101,192,.3); border:1px solid rgba(66,165,245,.35); }
+.al.le { background:rgba(0,105,92,.3); border:1px solid rgba(77,182,172,.35); }
+.al.lf > div { flex:1; padding:11px; border-radius:10px; background:rgba(183,28,28,.2); border:1px solid rgba(239,83,80,.4); font-size:clamp(.78rem,1vw,1rem); }
+.aarr { font-size:1.4rem; color:var(--bll); opacity:0; transition:opacity .3s; }
+.aarr.vis { opacity:1; }
+
+/* ── S3: Scenarios ── */
+.scen-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; width:100%; max-width:1100px; }
+.sc {
+  background:rgba(13,71,161,.15); border:1px solid rgba(66,165,245,.2);
+  border-radius:13px; padding:16px 18px;
+  opacity:0; transform:translateY(12px); transition:opacity .4s ease, transform .4s ease;
+}
+.sc.vis { opacity:1; transform:none; }
+.sc-num { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.12em; color:var(--bll); margin-bottom:3px; }
+.sc-title { font-size:clamp(.92rem,1.3vw,1.3rem); font-weight:700; color:#E3F2FD; margin-bottom:5px; }
+.sc-body { font-size:clamp(.75rem,.94vw,.94rem); color:#90CAF9; line-height:1.5; }
+.badge { display:inline-block; margin-top:7px; padding:3px 10px; border-radius:12px; font-size:.7rem; font-weight:700; }
+.b-block { background:rgba(230,74,25,.2); color:var(--orl); }
+.b-alert { background:rgba(0,137,123,.2); color:var(--tll); }
+.b-marl  { background:rgba(21,101,192,.3); color:#90CAF9; }
+
+/* ── S4: Demo Steps ── */
+.demo-row { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; width:100%; max-width:1250px; }
+.ds {
+  background:rgba(0,105,92,.12); border:1px solid rgba(77,182,172,.25);
+  border-radius:13px; overflow:hidden;
+  opacity:0; transform:translateY(12px); transition:opacity .4s ease, transform .4s ease;
+}
+.ds.vis { opacity:1; transform:none; }
+.ds-head { padding:18px 14px 12px; text-align:center; }
+.ds-num {
+  width:44px; height:44px; border-radius:50%;
+  background:linear-gradient(135deg,#00897B,#1565C0);
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.3rem; font-weight:800; margin:0 auto 9px;
+  box-shadow:0 0 14px rgba(0,137,123,.4);
+}
+.ds-title { font-size:clamp(.9rem,1.2vw,1.2rem); font-weight:700; color:#E3F2FD; margin-bottom:5px; }
+.ds-body  { font-size:clamp(.73rem,.88vw,.88rem); color:#90CAF9; line-height:1.45; }
+.ds-img {
+  width:100%; overflow:hidden; max-height:120px;
+  background:rgba(255,255,255,.03); border-top:1px solid rgba(77,182,172,.2);
+  display:flex; align-items:center; justify-content:center;
+}
+.ds-img img { width:100%; height:120px; object-fit:cover; object-position:top; display:block; }
+.ds-img .ph { font-size:.65rem; color:#455A64; padding:8px; text-align:center; }
+
+/* ── S5 & S6: Screenshot slides ── */
+.ss-slide-inner { display:flex; gap:18px; align-items:flex-start; width:100%; max-width:1350px; flex:1; min-height:0; }
+.ss-laptop {
+  flex:1; min-width:0;
+  border-radius:10px; overflow:hidden;
+  box-shadow:0 8px 40px rgba(0,0,0,.6);
+  border:1px solid rgba(66,165,245,.25);
+  background:#111;
+}
+.ss-laptop-bar {
+  height:20px; background:#1e1e2e;
+  display:flex; align-items:center; padding:0 8px; gap:5px; flex-shrink:0;
+}
+.dot { width:8px; height:8px; border-radius:50%; }
+.dot.r{background:#ff5f57;} .dot.y{background:#ffbd2e;} .dot.g{background:#28c940;}
+.ss-url { font-size:.58rem; color:#555; margin-left:6px; }
+.ss-laptop img { width:100%; display:block; min-height:40px; }
+.ss-phone {
+  width:clamp(130px,13vw,180px); flex-shrink:0;
+  background:#0d0d1a; border:3px solid #2a2a3a;
+  border-radius:28px; padding:7px;
+  box-shadow:0 8px 40px rgba(0,0,0,.7);
+}
+.ss-phone-notch {
+  width:50%; height:8px; background:#1a1a2a;
+  border-radius:4px; margin:0 auto 5px;
+}
+.ss-phone img { width:100%; border-radius:18px; display:block; }
+.ss-no-img {
+  min-height:200px; display:flex; align-items:center; justify-content:center;
+  font-size:.75rem; color:#37474F; text-align:center; padding:12px;
+}
+.ss-caption {
+  display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; flex-shrink:0; justify-content:center;
+}
+
+/* ── S7: Agents & Metrics ── */
+.am-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; width:100%; max-width:980px; }
+.amc { background:rgba(13,71,161,.12); border:1px solid rgba(66,165,245,.2); border-radius:13px; padding:20px 22px; }
+.amc-title { font-size:clamp(.95rem,1.35vw,1.35rem); font-weight:700; color:var(--bll); margin-bottom:10px; }
+.agent-list { list-style:none; font-size:clamp(.8rem,1vw,1rem); line-height:2; color:#B0BEC5; }
+.agent-list li::before { content:'▶ '; color:var(--bll); }
+.mi { display:flex; align-items:baseline; gap:8px; margin-bottom:8px; }
+.mi-name { font-size:clamp(.8rem,1vw,1rem); color:#90CAF9; white-space:nowrap; }
+.mi-dot  { flex:1; border-bottom:1px dotted rgba(66,165,245,.2); min-width:10px; }
+.mi-val  { font-size:clamp(.82rem,1.05vw,1.05rem); font-weight:700; color:var(--tll); white-space:nowrap; }
+
+/* ── S_VID: Demo Video ── */
+.vid-wrap {
+  display:flex; gap:30px; align-items:center;
+  width:100%; max-width:1100px;
+}
+.vid-thumb-wrap {
+  position:relative; flex:1; cursor:pointer;
+  border-radius:12px; overflow:hidden;
+  border:2px solid rgba(66,165,245,.35);
+  box-shadow:0 8px 40px rgba(0,0,0,.6);
+  text-decoration:none; display:block;
+}
+.vid-thumb { width:100%; display:block; min-height:180px; background:#0d1b2a; }
+.vid-play-btn {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:72px; height:72px; border-radius:50%;
+  background:rgba(230,74,25,.88); display:flex; align-items:center; justify-content:center;
+  font-size:1.9rem; color:#fff; box-shadow:0 0 30px rgba(230,74,25,.5);
+  transition:transform .2s; pointer-events:none;
+}
+.vid-thumb-wrap:hover .vid-play-btn { transform:translate(-50%,-50%) scale(1.1); }
+.vid-side {
+  display:flex; flex-direction:column; align-items:center; gap:12px;
+  min-width:210px;
+}
+#vid-qr canvas, #vid-qr img { border-radius:10px; border:5px solid #fff; display:block; }
+.vid-qr-placeholder {
+  width:190px; height:190px; border-radius:10px; border:5px solid #fff;
+  background:#fff; display:flex; align-items:center; justify-content:center;
+  font-size:.65rem; color:#333; text-align:center; padding:8px;
+}
+.vid-scan-lbl { font-size:clamp(.9rem,1.4vw,1.4rem); color:#90CAF9; font-weight:600; }
+.vid-url-lbl { font-size:clamp(.72rem,.95vw,.95rem); color:#546E7A; letter-spacing:.02em; }
+.vid-watch-btn {
+  display:inline-block; padding:10px 26px; border-radius:25px;
+  background:linear-gradient(135deg,#E64A19,#c62828);
+  color:#fff; font-weight:700; font-size:clamp(.85rem,1.1vw,1.1rem);
+  text-decoration:none; margin-top:4px;
+  box-shadow:0 4px 20px rgba(230,74,25,.35);
+  transition:transform .15s, box-shadow .15s;
+}
+.vid-watch-btn:hover { transform:scale(1.04); box-shadow:0 6px 28px rgba(230,74,25,.5); }
+#svid { pointer-events:all; }
+
+/* ── S8: Contact ── */
+#s8 { text-align:center; gap:16px; }
+.fin-title {
+  font-size:clamp(3rem,5vw,6rem); font-weight:900;
+  background:linear-gradient(135deg,#fff 20%,#42A5F5 100%);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.fin-sub { font-size:clamp(.95rem,1.7vw,1.8rem); color:#90CAF9; }
+.contact-row { display:flex; gap:20px; flex-wrap:wrap; justify-content:center; }
+.ci { background:rgba(13,71,161,.2); border:1px solid rgba(66,165,245,.25); border-radius:12px; padding:14px 26px; }
+.ci-lbl { font-size:.67em; text-transform:uppercase; letter-spacing:.1em; color:#546E7A; margin-bottom:3px; }
+.ci-val { color:var(--bll); font-weight:600; font-size:clamp(.85rem,1.15vw,1.15rem); }
+
+#wm {
+  position:fixed; bottom:11px; left:50%; transform:translateX(-50%);
+  font-size:clamp(.52rem,.75vw,.75rem); color:rgba(144,202,249,.3);
+  z-index:150; white-space:nowrap; letter-spacing:.04em;
+}
+</style>
+</head>
+<body>
+
+<canvas id="bgc"></canvas>
+<div id="pbar"></div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S1: Title                              -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="s1">
+  <div class="main-title">MininetGym</div>
+  <div class="subtitle">A Live Demonstration of RL-Based Cybersecurity Training</div>
+  <div class="divider"></div>
+  <div class="authors">Salvo Finistrella &nbsp;·&nbsp; Stefano Mariani &nbsp;·&nbsp; Franco Zambonelli</div>
+  <div class="affil">DISMI — University of Modena and Reggio Emilia</div>
+  <div class="conf-badge">AAMAS 2026 &nbsp;·&nbsp; Paphos, Cyprus</div>
+  <div class="tags-row" style="margin-top:14px">
+    <span class="tag tb">SDN Emulation</span>
+    <span class="tag tt">Reinforcement Learning</span>
+    <span class="tag to">Cybersecurity</span>
+    <span class="tag tb">Multi-Agent</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S2: Architecture                       -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="s2">
+  <div class="slide-title">System <span class="accent">Architecture</span></div>
+  <div class="divider"></div>
+  <div class="arch-wrap" id="aw">
+    <div class="al la" data-di="0">Web Dashboard <span class="al-sub">Flask · SocketIO · Chart.js · Bootstrap</span></div>
+    <div class="aarr" data-di="170">↓</div>
+    <div class="al lb" data-di="340">Agent Manager <span class="al-sub">Training · Evaluation · Metrics · PDF Export</span></div>
+    <div class="aarr" data-di="510">↓</div>
+    <div class="al lc" data-di="680">
+      <div>Tabular Agents<br><span class="al-sub">Q-Learning · SARSA</span></div>
+      <div>Deep RL (SB3)<br><span class="al-sub">DQN · PPO · A2C</span></div>
+    </div>
+    <div class="aarr" data-di="850">↓</div>
+    <div class="al ld" data-di="1020">Gymnasium Environments <span class="al-sub">Classification · Attack-Net · Attack-PerHost · MARL</span></div>
+    <div class="aarr" data-di="1190">↓</div>
+    <div class="al le" data-di="1360">Mininet SDN Network <span class="al-sub">OVS Switch · Hosts · IoT Devices · OpenFlow Monitor</span></div>
+    <div class="aarr" data-di="1530">↓</div>
+    <div class="al lf" data-di="1700">
+      <div>OpenDayLight<br><span class="al-sub">SDN Controller · Drop Rules</span></div>
+      <div>Attack Generator<br><span class="al-sub">UDP/TCP/ICMP Flood · Slowloris · SYN Flood</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S3: Scenarios                          -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="s3">
+  <div class="slide-title">RL <span class="accent">Cybersecurity</span> Scenarios</div>
+  <div class="divider"></div>
+  <div class="scen-grid">
+    <div class="sc" data-di="0">
+      <div class="sc-num">Scenario 1</div>
+      <div class="sc-title">Traffic Classification</div>
+      <div class="sc-body">Classify live traffic: <strong>None · Ping · UDP · TCP</strong><br>
+        Obs: ℝ<sup>4</sup> global aggregates · Actions: {0,1,2,3}<br>Reward: graded by distance from correct label</div>
+      <span class="badge b-alert">Alert only</span>
+    </div>
+    <div class="sc" data-di="150">
+      <div class="sc-num">Scenario 2</div>
+      <div class="sc-title">Network-Level Attack Detection</div>
+      <div class="sc-body">Binary: <strong>Normal vs. Attack</strong> at global network level<br>
+        Obs: ℝ<sup>4</sup> (pkts, Δpkts%, bytes, Δbytes%)<br>Actions: {Normal, Attack}</div>
+      <span class="badge b-alert">Alert only</span>
+    </div>
+    <div class="sc" data-di="300">
+      <div class="sc-num">Scenario 3 · Primary</div>
+      <div class="sc-title">Per-Host Attack Detection</div>
+      <div class="sc-body">Per-host: <strong>Normal / Victim / Attacker</strong><br>
+        Obs: ℝ<sup>8</sup> per host (TX+RX pkt/byte+Δ)<br><em>PerHostScanWrapper</em> — constant obs size</div>
+      <span class="badge b-block">SDN Link Blocking</span>
+    </div>
+    <div class="sc" data-di="450">
+      <div class="sc-num">Scenario 4</div>
+      <div class="sc-title">Multi-Agent Hierarchical (MARL)</div>
+      <div class="sc-body"><strong>Coordinator</strong> + Host agents with message-bus comms<br>
+        Coordinator: ℝ<sup>5</sup> · Host: ℝ<sup>9</sup> · Parallel threads</div>
+      <span class="badge b-marl">Distributed MARL</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S4: Demo Steps (with config thumbs)    -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="s4">
+  <div class="slide-title">Live Demo <span class="accent-teal">Walkthrough</span></div>
+  <div class="divider"></div>
+  <div class="demo-row">
+    <div class="ds" data-di="0">
+      <div class="ds-head">
+        <div class="ds-num">1</div>
+        <div class="ds-title">Introduction</div>
+        <div class="ds-body">Open the URL on any device — laptop or mobile. Single-page app: Configuration · Training · Results.</div>
+      </div>
+      <div class="ds-img">
+        <img src="screenshots/config_desktop.png" alt=""
+             onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <div class="ph" style="display:none">[ Landing Page ]</div>
+      </div>
+    </div>
+    <div class="ds" data-di="200">
+      <div class="ds-head">
+        <div class="ds-num">2</div>
+        <div class="ds-title">Configuration</div>
+        <div class="ds-body">Set topology (hosts & IoT), choose scenario, add agents (PPO, DQN, Q-Learning), tune hyperparameters.</div>
+      </div>
+      <div class="ds-img">
+        <img src="screenshots/config_desktop.png" alt=""
+             onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <div class="ph" style="display:none">[ Config Panel ]</div>
+      </div>
+    </div>
+    <div class="ds" data-di="400">
+      <div class="ds-head">
+        <div class="ds-num">3</div>
+        <div class="ds-title">Experiment</div>
+        <div class="ds-body">Live reward &amp; accuracy charts via WebSocket. Host-status shows attacks &amp; SDN blocking. Also on mobile.</div>
+      </div>
+      <div class="ds-img">
+        <img src="screenshots/training_desktop.png" alt=""
+             onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <div class="ph" style="display:none">[ Training Dashboard ]</div>
+      </div>
+    </div>
+    <div class="ds" data-di="600">
+      <div class="ds-head">
+        <div class="ds-num">4</div>
+        <div class="ds-title">Result Evaluation</div>
+        <div class="ds-body">Per-agent accuracy tables, confusion matrices, mitigation gauge. PDF export in one click.</div>
+      </div>
+      <div class="ds-img">
+        <img src="screenshots/results_analysis.png" alt=""
+             onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <div class="ph" style="display:none">[ Results Panel ]</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S_VID: Demo Video                      -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="svid">
+  <div class="slide-title">Watch the <span class="accent-org">Live Demo</span> Video</div>
+  <div class="divider"></div>
+  <div class="vid-wrap">
+    <!-- Thumbnail → opens /screensaver_video -->
+    <a class="vid-thumb-wrap" href="video.html" target="_blank">
+      <img class="vid-thumb"
+           src="https://img.youtube.com/vi/sSzUz6w-4H8/maxresdefault.jpg"
+           alt="MininetGym Demo Video"
+           onerror="this.style.minHeight='260px'">
+      <div class="vid-play-btn">▶</div>
+    </a>
+    <!-- QR code + link -->
+    <div class="vid-side">
+      <div id="vid-qr">
+        <div class="vid-qr-placeholder">QR loading…</div>
+      </div>
+      <div class="vid-scan-lbl">Scan to watch on your device</div>
+      <div class="vid-url-lbl">youtu.be/sSzUz6w-4H8</div>
+      <a class="vid-watch-btn" href="video.html" target="_blank">▶ Watch here</a>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S5: Training in Action                 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="s5">
+  <div class="slide-title">Step 3 — <span class="accent-teal">Experiment in Action</span></div>
+  <div class="divider"></div>
+  <div class="ss-slide-inner">
+    <!-- Desktop -->
+    <div class="ss-laptop">
+      <div class="ss-laptop-bar">
+        <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+        <span class="ss-url">MininetGym Training Dashboard</span>
+      </div>
+      <img src="screenshots/training_desktop.png" alt="Training Dashboard"
+           onerror="this.outerHTML='<div class=\'ss-no-img\'>[ Screenshot: Training Dashboard<br>screenshots/training_desktop.png ]</div>'">
+    </div>
+    <!-- Phone -->
+    <div class="ss-phone">
+      <div class="ss-phone-notch"></div>
+      <img src="screenshots/training_mobile.png" alt="Training Mobile"
+           onerror="this.outerHTML='<div class=\'ss-no-img\'>[ Mobile View<br>screenshots/training_mobile.png ]</div>'">
+    </div>
+  </div>
+  <div class="ss-caption">
+    <span class="tag tt">Real-time WebSocket updates</span>
+    <span class="tag to">Host task monitor — attacks visible</span>
+    <span class="tag tb">SDN drop rule triggered</span>
+    <span class="tag tt">Responsive mobile UI</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S6: Results Panel                      -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="s6">
+  <div class="slide-title">Step 4 — <span class="accent">Result</span> Evaluation</div>
+  <div class="divider"></div>
+  <div class="ss-slide-inner">
+    <!-- Desktop results -->
+    <div class="ss-laptop">
+      <div class="ss-laptop-bar">
+        <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+        <span class="ss-url">MininetGym Results Panel</span>
+      </div>
+      <img src="screenshots/results_analysis.png" alt="Results Analysis"
+           onerror="this.outerHTML='<div class=\'ss-no-img\'>[ Screenshot: Results Analysis<br>screenshots/results_analysis.png ]</div>'">
+    </div>
+    <!-- Phone results -->
+    <div class="ss-phone">
+      <div class="ss-phone-notch"></div>
+      <img src="screenshots/results_mobile.png" alt="Results Mobile"
+           onerror="this.outerHTML='<div class=\'ss-no-img\'>[ Mobile Results<br>screenshots/results_mobile.png ]</div>'">
+    </div>
+  </div>
+  <div class="ss-caption">
+    <span class="tag tb">Metrics comparison chart</span>
+    <span class="tag tt">Radar chart — agent profiles</span>
+    <span class="tag to">Mean accuracy up to 84.47%</span>
+    <span class="tag tb">PDF export available</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S7: Agents & Metrics                   -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="s7">
+  <div class="slide-title">Supported <span class="accent">Agents</span> &amp; Key <span class="accent-teal">Metrics</span></div>
+  <div class="divider"></div>
+  <div class="am-grid">
+    <div class="amc">
+      <div class="amc-title">Supported RL Agents</div>
+      <ul class="agent-list">
+        <li>Q-Learning <small style="color:#546E7A">(log-bin discretization)</small></li>
+        <li>SARSA <small style="color:#546E7A">(on-policy)</small></li>
+        <li>DQN — Deep Q-Network</li>
+        <li>PPO — Proximal Policy Optimization</li>
+        <li>A2C — Advantage Actor-Critic</li>
+        <li>Supervised Agent <small style="color:#546E7A">(baseline)</small></li>
+      </ul>
+    </div>
+    <div class="amc">
+      <div class="amc-title">Key Evaluation Metrics</div>
+      <div class="mi">
+        <span class="mi-name">Accuracy · Precision · Recall · F1</span>
+      </div>
+      <div class="mi">
+        <span class="mi-name">Mitigation Ratio</span>
+        <span class="mi-dot"></span>
+        <span class="mi-val" style="color:var(--orl)">SDN blocks / attacks</span>
+      </div>
+      <div class="mi">
+        <span class="mi-name">False Negative Rate</span>
+        <span class="mi-dot"></span>
+        <span class="mi-val" style="color:#EF9A9A">penalty ×2</span>
+      </div>
+      <div class="mi">
+        <span class="mi-name">Attack Latency</span>
+        <span class="mi-dot"></span>
+        <span class="mi-val">steps to block</span>
+      </div>
+      <div class="mi">
+        <span class="mi-name">Best mean accuracy</span>
+        <span class="mi-dot"></span>
+        <span class="mi-val" style="color:#A5D6A7">84.47%</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- S8: Contact                            -->
+<!-- ═══════════════════════════════════════ -->
+<div class="slide" id="s8">
+  <div class="fin-title">MininetGym</div>
+  <div class="fin-sub">Open-source · Browser-accessible · Reproducible</div>
+  <div class="divider" style="margin:14px auto"></div>
+  <div class="contact-row">
+    <div class="ci">
+      <div class="ci-lbl">GitHub</div>
+      <div class="ci-val">github.com/dipi-unimore/mininet-gym</div>
+    </div>
+    <div class="ci">
+      <div class="ci-lbl">Contact</div>
+      <div class="ci-val">salvo.finistrella@unimore.it</div>
+    </div>
+    <div class="ci">
+      <div class="ci-lbl">Personal website</div>
+      <div class="ci-val"><a href="https://finix77.github.io" target="_blank">finix77.github.io</a> </div>
+    </div>
+  </div>
+  <div class="conf-badge" style="margin-top:20px">AAMAS 2026 &nbsp;·&nbsp; Paphos, Cyprus</div>
+</div>
+
+<div id="wm">MininetGym · AAMAS 2026 · Paphos, Cyprus · github.com/dipi-unimore/mininet-gym</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+<script>
+// ═══════════════════════════════════════════
+// Background network animation
+// ═══════════════════════════════════════════
+const cv = document.getElementById('bgc');
+const ct = cv.getContext('2d');
+let W, H, frame = 0;
+const nodes = [];
+let pkts = [];
+let atk = { on:false, ai:-1, vi:-1, blocked:false };
+
+function resize() {
+  W = cv.width = window.innerWidth;
+  H = cv.height = window.innerHeight;
+  buildTopo();
+}
+window.addEventListener('resize', resize);
+
+function buildTopo() {
+  nodes.length = 0;
+  const cx = W*.5, cy = H*.5, R = Math.min(W,H)*.27;
+  nodes.push({ x:cx, y:cy, t:'sw', lbl:'SW', r:20, blocked:false });
+  for (let i=0; i<5; i++) {
+    const a = (i/5)*Math.PI*2 - Math.PI/2;
+    nodes.push({ x:cx+Math.cos(a)*R, y:cy+Math.sin(a)*R, t:'h', lbl:`H${i+1}`, r:13, blocked:false });
+  }
+  for (let i=0; i<5; i++) {
+    const a = ((i+.5)/5)*Math.PI*2 - Math.PI/2;
+    nodes.push({ x:cx+Math.cos(a)*R*1.65, y:cy+Math.sin(a)*R*1.65, t:'iot', lbl:`IoT${i+1}`, r:9, blocked:false });
+  }
+}
+
+function drawBg() {
+  const g = ct.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*.75);
+  g.addColorStop(0,'#0c1a2e'); g.addColorStop(1,'#040b18');
+  ct.fillStyle=g; ct.fillRect(0,0,W,H);
+  ct.save(); ct.strokeStyle='rgba(66,165,245,.032)'; ct.lineWidth=1;
+  const gs=55;
+  for(let x=0;x<W;x+=gs){ct.beginPath();ct.moveTo(x,0);ct.lineTo(x,H);ct.stroke();}
+  for(let y=0;y<H;y+=gs){ct.beginPath();ct.moveTo(0,y);ct.lineTo(W,y);ct.stroke();}
+  ct.restore();
+}
+
+function drawEdges() {
+  const sw=nodes[0];
+  for(let i=1;i<nodes.length;i++){
+    const n=nodes[i]; ct.save(); ct.beginPath();
+    ct.moveTo(sw.x,sw.y); ct.lineTo(n.x,n.y);
+    ct.strokeStyle='rgba(66,165,245,.07)'; ct.lineWidth=1; ct.stroke(); ct.restore();
+  }
+}
+
+function drawNodes() {
+  nodes.forEach((n,i)=>{
+    const isA=atk.on&&i===atk.ai+1, isV=atk.on&&i===atk.vi+1;
+    ct.save(); ct.beginPath(); ct.arc(n.x,n.y,n.r,0,Math.PI*2);
+    if(n.t==='sw'){
+      ct.fillStyle='rgba(21,101,192,.5)'; ct.strokeStyle='#42A5F5';
+    } else if(n.t==='h'){
+      ct.fillStyle=isA?'rgba(230,74,25,.5)':isV?'rgba(183,28,28,.35)':'rgba(0,105,92,.5)';
+      ct.strokeStyle=isA?'#FF8A65':isV?'#EF9A9A':'#4DB6AC';
+    } else {
+      ct.fillStyle='rgba(55,71,79,.5)'; ct.strokeStyle='#607D8B';
+    }
+    if(n.blocked) ct.strokeStyle='#EF5350';
+    ct.lineWidth=n.blocked?2.5:1.5; ct.fill(); ct.stroke();
+    ct.fillStyle='#CFD8DC';
+    ct.font=`${n.r<11?8:10}px Segoe UI,sans-serif`;
+    ct.textAlign='center'; ct.textBaseline='middle';
+    ct.fillText(n.lbl,n.x,n.y);
+    if(n.blocked){
+      ct.strokeStyle='#EF5350'; ct.lineWidth=2;
+      const d=n.r*.55;
+      ct.beginPath();
+      ct.moveTo(n.x-d,n.y-d); ct.lineTo(n.x+d,n.y+d);
+      ct.moveTo(n.x+d,n.y-d); ct.lineTo(n.x-d,n.y+d);
+      ct.stroke();
+    }
+    ct.restore();
+  });
+}
+
+function spawnPkt(fi,ti,isA){
+  if(!nodes[fi]||!nodes[ti]) return;
+  const f=nodes[fi],t=nodes[ti];
+  pkts.push({x:f.x,y:f.y,sx:f.x,sy:f.y,tx:t.x,ty:t.y,p:0,spd:.018+Math.random()*.012,atk:isA,a:1});
+}
+
+function updatePkts(){
+  pkts=pkts.filter(p=>p.a>0);
+  pkts.forEach(p=>{
+    p.p+=p.spd; if(p.p>=1){p.p=1;p.a-=.06;}
+    p.x=p.sx+(p.tx-p.sx)*p.p; p.y=p.sy+(p.ty-p.sy)*p.p;
+  });
+}
+
+function drawPkts(){
+  pkts.forEach(p=>{
+    ct.save(); ct.globalAlpha=p.a; ct.beginPath(); ct.arc(p.x,p.y,p.atk?4:3,0,Math.PI*2);
+    ct.fillStyle=p.atk?'#FF5252':'#4DB6AC';
+    ct.shadowColor=p.atk?'#FF5252':'#4DB6AC'; ct.shadowBlur=10;
+    ct.fill(); ct.restore();
+  });
+}
+
+function manageAtk(){
+  const ph=frame%320;
+  if(ph===0&&frame>0){
+    atk.ai=Math.floor(Math.random()*5);
+    let vi=Math.floor(Math.random()*5);
+    while(vi===atk.ai) vi=Math.floor(Math.random()*5);
+    atk.vi=vi; atk.on=true; atk.blocked=false;
+    nodes.forEach(n=>n.blocked=false);
+  }
+  if(atk.on&&!atk.blocked&&ph===90){ atk.blocked=true; nodes[atk.ai+1].blocked=true; }
+  if(atk.on&&ph>=280){ atk.on=false; nodes.forEach(n=>n.blocked=false); }
+}
+
+function spawnTraffic(){
+  if(frame%18===0){
+    const hi=1+Math.floor(Math.random()*10);
+    spawnPkt(hi,0,false); spawnPkt(0,hi,false);
+  }
+  if(atk.on&&!atk.blocked&&frame%7===0){
+    spawnPkt(atk.ai+1,0,true); spawnPkt(0,atk.vi+1,true);
+  }
+}
+
+function tick(){
+  frame++; manageAtk(); spawnTraffic(); updatePkts();
+  drawBg(); drawEdges(); drawPkts(); drawNodes();
+  requestAnimationFrame(tick);
+}
+
+resize(); tick();
+
+// ═══════════════════════════════════════════
+// Slide manager
+// ═══════════════════════════════════════════
+const SLIDES = ['s1','s2','s3','s4','svid','s5','s6','s7','s8'];
+const DURS   = [9000,10500,10000,9000,11000,12000,12000,9000,8000];
+let cur = 0, slideStart = performance.now(), inTrans = false;
+
+function showSlide(idx){
+  document.querySelectorAll('.al,.aarr').forEach(e=>e.classList.remove('vis'));
+  document.querySelectorAll('.sc,.ds').forEach(e=>e.classList.remove('vis'));
+  SLIDES.forEach((id,i)=>document.getElementById(id).classList.toggle('active',i===idx));
+  const sid=SLIDES[idx];
+  if(sid==='s2') animateArch();
+  if(sid==='s3') animateStagger('.sc');
+  if(sid==='s4') animateStagger('.ds');
+  if(sid==='svid') initQR();
+}
+
+let qrReady = false;
+function initQR(){
+  if(qrReady) return;
+  const el = document.getElementById('vid-qr');
+  if(!window.QRCode){ return; }
+  el.innerHTML = '';
+  new QRCode(el, {
+    text: 'https://youtu.be/sSzUz6w-4H8',
+    width: 190, height: 190,
+    colorDark: '#000000', colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+  qrReady = true;
+}
+
+function animateArch(){
+  document.querySelectorAll('#aw .al,#aw .aarr').forEach(el=>{
+    setTimeout(()=>el.classList.add('vis'), parseInt(el.dataset.di||0));
+  });
+}
+function animateStagger(sel){
+  document.querySelectorAll(sel).forEach(el=>{
+    setTimeout(()=>el.classList.add('vis'), parseInt(el.dataset.di||0)+80);
+  });
+}
+
+function loop(now){
+  const elapsed=now-slideStart, dur=DURS[cur];
+  document.getElementById('pbar').style.width=Math.min(elapsed/dur*100,100)+'%';
+  if(elapsed>=dur&&!inTrans){
+    inTrans=true;
+    const el=document.getElementById(SLIDES[cur]);
+    el.style.opacity='0';
+    setTimeout(()=>{
+      el.style.opacity='';
+      cur=(cur+1)%SLIDES.length;
+      showSlide(cur);
+      slideStart=performance.now();
+      inTrans=false;
+    },900);
+  }
+  requestAnimationFrame(loop);
+}
+
+showSlide(0);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

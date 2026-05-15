@@ -8,25 +8,25 @@
 [![LinkedIn][linkedin-shield]][linkedin-url]
 
 <br />
-<div align="left">
-  <a href="https://github.com/dipi-unimore/mininet-gym-icaart-2026">
-    <img src="images/logo.png" alt="Logo" width="80" height="80">
+<div align="center">
+  <a href="https://github.com/dipi-unimore/mininet-gym">
+    <img src="app/static/images/logo.png" alt="Logo" width="80" height="80">
   </a>
 
-  <h2 align="center">MininetGym</h3>
+  <h3 align="center">MininetGym</h3>
 
-  <p>
+  <p align="center">
+    Reinforcement learning Mininet OpenDayLight
     This project aims to provide a basic framework for DDoS mitigation using reinforcement learning (Deep and not).
     The network is implemented using Mininet (based on Software-Defined networking).
-    The design of the solution is inspired by the work 
-  </p>
-  <h3 >Paper published on SoftwareX <br>
-    <strong ><em> <a href="https://www.sciencedirect.com/science/article/pii/S235271102500278X">"MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity"</a></em><br> <a href="https://finix77.github.io/index.html">Finistrella S.</a></strong> at al. </h3> 
-  <h3> <a href="https://www.youtube.com/embed/pSdEV-MSdA8?si=oAijyGQ0EBfcJEZc" title="Video for AAMAS 2026 demo"><img src="images/Linkvideo.png" title="Video for AAMAS 2026 demo" width="200"><br>Video for AAMAS 2026 demo</a></h3>
-  <p>
-    <a href="https://github.com/dipi-unimore/mininet-gym-icaart-2026/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
+    The design of the solution is inspired by the work "MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity" by Salvo Finistrella and others here.
+    <br />
+    <a href="https://www.sciencedirect.com/science/article/pii/S235271102500278X"><strong>Explore the docs »</strong></a>
+    <br />
+    <br />
+    <a href="https://github.com/dipi-unimore/mininet-gym/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     ·
-    <a href="https://github.com/dipi-unimore/mininet-gym-icaart-2026/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
+    <a href="https://github.com/dipi-unimore/mininet-gym/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
   </p>
 </div>
 
@@ -56,15 +56,14 @@
 </details>
 
 ## About The Project
-A Modular SDN-based Simulation Environment for Reinforcement Learning in Cybersecurity
-Real-time traffic generation and flow monitoring via Mininet and Custom Gym environments for traffic classification and DoS attack detection.
 
 ![Schema Screen Shot][schema-screenshot]
-**Framework Architecture:** The schema illustrates the framework architecture. A deep explanation can be found in the section on the cited **[mininet-gym-paper]**.
-
+Schema 
 ![Product Screen Shot][product-screenshot]
-**Web Interface for Flow Monitoring**: Real-time visualization of network traffic and DDoS attack metrics registered per second during a simulation.
+Web UI
 
+A Modular SDN-based Simulation Environment for Reinforcement Learning in Cybersecurity
+Real-time traffic generation and flow monitoring via Mininet and Custom Gym environments for traffic classification and DoS attack detection.
 
 ---
 
@@ -98,22 +97,23 @@ Ensure you have the following installed on your system:
 Follow these steps to get your development environment set up.
 
 1.  **Install Mininet, hping3, and System Dependencies**
+   The project requires the **`hping3`** tool for network attack simulation. Make sure it is installed along with Mininet.
 
-    The project requires the **`hping3`** tool for network attack simulation. Make sure it is installed along with Mininet.
-
-    ```bash
-    sudo apt update && sudo apt upgrade -y
-    sudo apt-get install mininet python3-venv git -y
-    # Installazione di hping3
-    sudo apt-get install -y hping3
-    ```
+    ```bash
+    sudo apt update && sudo apt upgrade -y
+    sudo apt-get install mininet python3-venv git -y
     
-    **Verifica e Pulizia:**
-    Verification and Cleanup: Run a simple Mininet test and clean the environment to ensure that `hping3` is recognized by the virtual hosts.
-    
-    sudo mn --test pingall
-    sudo mn -c           
-   
+    # Installazione di hping3
+    sudo apt-get install -y hping3
+    ```
+    
+    **Verifica e Pulizia:**
+    Verification and Cleanup: Run a simple Mininet test and clean the environment to ensure that `hping3` is recognized by the virtual hosts.
+
+    ```bash
+    sudo mn --test pingall
+    sudo mn -c
+    ```
     You can verify the `hping3` installation with: `hping3 --help` or `which hping3`.
 
 2.  **Clone the Repository**
@@ -194,15 +194,118 @@ Follow these steps to get your development environment set up.
 
 ## Usage
 
-*This section is not yet filled out.*
+Once the application is running (`sudo python3 main.py`), open a browser and navigate to:
+
+```
+http://<host>:5000
+```
+
+The web UI is organised into three panels accessible from the top navigation bar:
+
+| Panel | Purpose |
+|---|---|
+| **Configuration Setup** | Define topology, scenario, agents and all hyperparameters |
+| **Training Dashboard** | Monitor reward, accuracy and host-status in real time via WebSocket |
+| **Results Panel** | Inspect per-agent metrics, confusion matrices, radar charts; export PDF |
+
+### Configuring an Experiment
+
+All experiment parameters are stored in `config/default.yaml` and can be edited live from the **Configuration Setup** panel without restarting the application.
+
+Key configuration sections:
+
+- **`env_params.gym_type`** — selects the scenario (Classification, Attack-Net, Attack-PerHost, MARL).
+- **`env_params.episodes` / `max_steps`** — control experiment length.
+- **`env_params.attacks`** — tune attack probability, duration and SDN blocking behaviour.
+- **`env_params.net_params`** — set topology size (hosts, IoT nodes) and OpenDayLight controller address.
+- **`agents`** — add one or more agents (Q-Learning, SARSA, DQN, PPO, A2C, Supervised) with independent hyperparameters.
+
+> **Full parameter reference** — open the application, click the **? User Manual** button in the top navigation bar, and navigate to the *Full Configuration Reference* section for a complete description of every parameter, including attack thresholds, exploration schedules and algorithm-specific hyperparameters.
+
+### Additional Pages
+
+| URL | Description |
+|---|---|
+| `http://<host>:5000/screensaver.html` | Auto-advancing presentation slideshow (AAMAS 2026) |
+| `http://<host>:5000/video.html` | Embedded demo video player |
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Roadmap
 
-*This section is not yet filled out.*
+### Phase 1 — Foundation · *Sept 2024*
+- [x] Terminal-based application architecture
+- [x] Mininet topology emulation (OVS switch · hosts · IoT nodes)
+- [x] OpenDayLight REST API integration and flow-rule management
+- [x] **Traffic Classification** environment (Gym Env #1) — 4-class: None / Ping / UDP / TCP
+- [x] Tabular agents: Q-Learning, SARSA (log-bin state discretisation)
+
+### Phase 2 — Attack Detection Scenarios · *late 2024*
+- [x] **Attack-Net** environment — binary Normal / Attack detection at network level
+- [x] **Attack-PerHost** environment — per-host Normal / Victim / Attacker with SDN link blocking
+- [x] Deep RL agents via Stable-Baselines3: DQN, PPO, A2C
+- [x] Publication on SoftwareX Elsevier MininetGym: A modular SDN-based simulation environment for reinforcement learning in cybersecurity https://www.sciencedirect.com/science/article/pii/S235271102500278X
+
+### Phase 3 — First Publication · *Jan – Jul 2025*
+- [x] Systematic evaluation across Classification and Attack-PerHost environments
+- [x] Metrics pipeline: Accuracy, F1, Mitigation Ratio, False Negative Rate, Attack Latency
+- [x] **ICAART 2025** paper submission with first experimental results *(July 2025)*
+- [x] Publication for ICAART conference SciTePress  Experiences in Exploiting Reinforcement Learning for Network Traffic Classification and Attack Detection https://scholar.google.com/scholar?oi=bibs&cluster=16065980299158333333&btnI=1&hl=it
+
+### Phase 4 — Web Dashboard · *2025 (parallel)*
+- [x] Flask + Socket.IO real-time web UI
+- [x] Live training charts via WebSocket (reward, accuracy, ε-decay)
+- [x] Host-status monitor with SDN block visualisation
+- [x] Mobile-responsive layout
+- [x] Experiment PDF export (charts + metrics + config)
+- [x] Save / load YAML configuration from browser
+- [x] Scenario management: generate, preview, load from file
+
+### Phase 5 — Enhanced Scenarios & MARL · *Sept 2025 – May 2026*
+- [x] **Supervised Agent** baseline with incremental learning
+- [x] **MARL** hierarchical environment — Coordinator + per-host agents, message-bus communication
+- [x] `PerHostScanWrapper` — constant observation size across variable host counts
+- [x] Dataset-replay variants (`*_from_dataset`) for reproducible evaluation
+- [x] Attack scheduling: `likely_train` / `likely_eval` split for realistic evaluation conditions
+- [x] Unblock logic: hold-round and normal-streak thresholds before releasing a blocked host
+- [x] In-browser User Manual with full parameter reference
+
+### Phase 6 — AAMAS 2026 · *Dec 2025 – May 2026*
+- [x] Demo video production and YouTube publication
+- [x] **AAMAS 2026** paper — live demonstration of RL-based cybersecurity training *(Paphos, Cyprus)*
+- [x] Screensaver presentation for conference booth
+- [x] QR-code video integration in screensaver
+
+---
+
+### Upcoming
+- [ ] MARL scenario adn communication techniques
+- [ ] Docker Compose one-command deployment (Mininet + ODL + MininetGym)
+- [ ] Additional attack types: Slowloris, DNS amplification
+- [ ] Curriculum learning: progressive difficulty ramp across episodes
+- [ ] Multi-switch topologies and inter-domain MARL
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Contributing
 
-*This section is not yet filled out.*
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create.
+Any contributions you make are **greatly appreciated**.
+
+If you have a suggestion that would make this better, please fork the repo and create a pull request,
+or simply open an issue with the tag `enhancement`.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+### Contributors
+
+[![Contributors](https://contrib.rocks/image?repo=dipi-unimore/mininet-gym)](https://github.com/dipi-unimore/mininet-gym/graphs/contributors)
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## License
 
@@ -212,7 +315,16 @@ Distributed under the MIT License – see the `LICENSE.txt` file for details.
 
 ## Contact
 
-*This section is not yet filled out.*
+**Salvo Finistrella** — PhD Researcher, DISMI · University of Modena and Reggio Emilia
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/salvo-finistrella-970034237)
+[![Website](https://img.shields.io/badge/Website-finix77.github.io-222?style=for-the-badge&logo=github&logoColor=white)](https://finix77.github.io)
+[![Email unimore](https://img.shields.io/badge/Email%20(academic)-salvo.finistrella%40unimore.it-0072B5?style=for-the-badge&logo=maildotru&logoColor=white)](mailto:salvo.finistrella@unimore.it)
+[![Email personal](https://img.shields.io/badge/Email%20(personal)-finix77%40hotmail.com-0078D4?style=for-the-badge&logo=microsoftoutlook&logoColor=white)](mailto:finix77@hotmail.com)
+
+Project repository: [github.com/dipi-unimore/mininet-gym](https://github.com/dipi-unimore/mininet-gym)
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Acknowledgments
 
@@ -231,8 +343,6 @@ Distributed under the MIT License – see the `LICENSE.txt` file for details.
 [license-url]: https://github.com/dipi-unimore/mininet-gym/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/salvo-finistrella-970034237
-[mininet-gym-paper]: https://www.sciencedirect.com/science/article/pii/S235271102500278X
-[link-youtube-video]: images/Linkvideo.png
-[product-screenshot]: images/screenshot.png
-[schema-screenshot]: images/architecture.png
+[product-screenshot]: app/static/images/screenshot.png
+[schema-screenshot]: app/static/images/architecture.png
 [ODL-Ubuntu22-installation]: https://docs.opendaylight.org/en/stable-fluorine/downloads.html

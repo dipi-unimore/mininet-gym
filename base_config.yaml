@@ -1,10 +1,11 @@
+#the default configuration file loaded is in config/default.yaml
 training_directory: _training
 enable_web_interface: True
-server_user: xxx
+server_user: mininet-gym
 log_level: info  #info, #debug
-random_seed: 777
+random_seed: 77
 env_params:
-  gym_type: classification #_from_dataset #How to read traffic: [classification_from_dataset, classification_with_syncronize, classification_without_syncronize, real_time, attacks, attacks_from_dataset, attacks_ho, attacks_ho_from_dataset, marl_attacks, marl_attacks_from_dataset].
+  gym_type: attacks_ho #_from_dataset #How to read traffic: [classification_from_dataset, classification_with_syncronize, classification_without_syncronize, real_time, attacks, attacks_from_dataset, attacks_ho, attacks_ho_from_dataset, marl_attacks, marl_attacks_from_dataset].
   #agent_execution_mode: "sequential"  # "parallel" (default, normal behavior) or "sequential" (an agent acts after the other, useful for debugging and to understand the environment behavior)
   #classification
   #csv_file: traffic.csv #necessary only if gym_type: classification_from_dataset and for agent supervised
@@ -20,9 +21,10 @@ env_params:
   wait_after_read: 1  
   #attack environment
   attacks:
-    likely: 0.45 #max 0.5; likelihood that one host attacks. necessary only with gym_type=attacks
+    likely: 0.35 #likelihood that one host attacks (0-max_attack_percentage). necessary only with gym_type=attacks
     likely_train: 0.9 #(For ATTACKS_HO only) likelihood of attack during training episodes. Range: 0.0-1.0 (default 0.9). High value = frequent attacks during training for agent learning
     likely_eval: 0.3 #(For ATTACKS_HO only) likelihood of attack during evaluation/test episodes. Range: 0.0-1.0 (default 0.3). Lower value = sparse attacks for realistic testing
+    max_attack_percentage: 0.9 #max probability cap for attack_likely (range 0.0-1.0, default 0.5). Set to 0.9 for 90% attack frequency
     # NOTE: For ATTACKS_HO (per-host scenario), these timings control attack distribution:
     # - short_attack_duration: steps that a SHORT_ATTACK lasts (default 5)
     # - long_attack_duration: steps that a LONG_ATTACK lasts (default 30)
@@ -30,14 +32,12 @@ env_params:
     # Reduce timeouts to increase attack frequency; adjust durations for more/less sustained attacks
     short_attack_duration: 5  # null = use default (5). Range: 2-10 for short spikes
     long_attack_duration: 25   # null = use default (30). Range: 10-60 for sustained attacks
-    no_attack_timeout: 3      # null = use default (15). Range: 5-30 to control attack density
+    no_attack_timeout: 5      # null = use default (15). Range: 5-30 to control attack density
     # Link unblock policy (ATTACKS_HO):
     # - unblock_min_hold_rounds: minimum full rounds to keep link blocked
     # - unblock_required_normal_streak: consecutive NORMAL decisions required while blocked
     unblock_min_hold_rounds: 2
     unblock_required_normal_streak: 2
-    #apply_drop_rules: if true, the environment applies drop rules to the traffic when the agent takes the "drop" action. This can be used to simulate the effect of blocking traffic in a real network. If false, the environment will not apply drop rules and will only provide feedback to the agent based on its actions.
-    apply_drop_rules: false
     thresholds:      
       packets: 22000 #200000 packets are an UDP an attack. This is multiply for number of hosts to obtain the high value of bins
       var_packets: 50 #percentage packet variation 
@@ -55,7 +55,7 @@ env_params:
     traffic_types: ["none", "ping",  "udp" , "tcp"] #labels normal traffic generator
     num_hosts: 5
     num_switches: 1
-    num_iot: 5
+    num_iots: 5
     controller:
       ip: 192.168.1.x #226 on ubuntu
       port: 6633
@@ -73,14 +73,14 @@ agents:
     enabled: true
     skip_learn: false
     show_action: false
-    load: false
-    load_dir: "attacks_from_dataset/20250709-105720_1_10_1/Q-learning_quick/Q-learning_quick"
+    load: False
+    load_dir: "marl_attacks/20251123-081513_1_5_5/Q-learning_quick/"
     save: true
     learning_rate: 0.2
     discount_factor: 0.3
     exploration_rate: 1.0
     exploration_decay: 0.995
-    episodes: 5
+    #episodes: None   #if null or None it takes from env_params
 
   - name: "Q-learning_slow"
     algorithm: "Q-learning"
@@ -94,7 +94,7 @@ agents:
     discount_factor: 0.9
     exploration_rate: 1.0
     exploration_decay: 0.9995
-    episodes: 300
+    #episodes: 300
 
   - name: "Q-learning_balanced"
     algorithm: "Q-learning"
@@ -108,11 +108,11 @@ agents:
     discount_factor: 0.5
     exploration_rate: 1.0
     exploration_decay: 0.999
-    episodes: 300
+    #episodes: 300
 
   # --- SARSA ---
   - name: "Sarsa_quick"
-    algorithm: "Sarsa"
+    algorithm: "SARSA"
     enabled: false
     skip_learn: true
     show_action: false
@@ -123,46 +123,47 @@ agents:
     discount_factor: 0.3
     exploration_rate: 1.0
     exploration_decay: 0.995
-    episodes: 300
+    #episodes: 300
 
   - name: "Sarsa_slow"
-    algorithm: "Sarsa"
-    enabled: false
-    skip_learn: true
+    algorithm: "SARSA"
+    enabled: true
+    skip_learn: false
     show_action: false
-    load: true
+    load: false
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/Sarsa_slow/Sarsa_slow"
     save: true
     learning_rate: 0.01
     discount_factor: 0.9
     exploration_rate: 1.0
     exploration_decay: 0.9995
-    episodes: 300
+    #episodes: 300
 
   - name: "Sarsa_balanced"
-    algorithm: "Sarsa"
+    algorithm: "SARSA"
     enabled: false
     skip_learn: true
     show_action: false
     load: true
-    load_dir: "attacks_from_dataset/20250709-105720_1_10_1/Sarsa_balanced/Sarsa_balanced"
+    load_dir:  
     save: true
     learning_rate: 0.05
     discount_factor: 0.5
     exploration_rate: 1.0
     exploration_decay: 0.999
-    episodes: 300
+    #episodes: 300
 
   # --- DQN ---
   - name: "DQN_quick"
     algorithm: "DQN"
-    enabled: false
+    enabled: true
     progress_bar: false
-    skip_learn: true
+    skip_learn: false
     show_action: false
-    load: true
-    load_dir: "attacks_from_dataset/20250709-105720_1_10_1/DQN_quick/DQN_quick"
+    load: false
+    load_dir:  
     save: true
+    state_input_mode : "normalized" # "raw" or "normalized" (normalized is the default and recommended for DQN and PPO)
     net_arch: [8, 8]
     learning_rate: 0.005
     gamma: 0.3
@@ -173,7 +174,7 @@ agents:
     batch_size: 16
     target_update_interval: 80
     learning_starts: 20
-    episodes: 300
+    #episodes: 300
 
   - name: "DQN_slow"
     algorithm: "DQN"
@@ -184,6 +185,7 @@ agents:
     load: true
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/DQN_slow/DQN_slow"
     save: true
+    state_input_mode : "normalized" # "raw" or "normalized" (normalized is the default and recommended for DQN and PPO)
     net_arch: [8, 8]
     learning_rate: 0.0003
     gamma: 0.95
@@ -194,7 +196,7 @@ agents:
     batch_size: 16
     target_update_interval: 80
     learning_starts: 20
-    episodes: 300
+    #episodes: 300
 
   - name: "DQN_balanced"
     algorithm: "DQN"
@@ -205,6 +207,7 @@ agents:
     load: true
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/DQN_balanced/DQN_balanced"
     save: true
+    state_input_mode : "normalized" # "raw" or "normalized" (normalized is the default and recommended for DQN and PPO)
     net_arch: [8, 8]
     learning_rate: 0.001
     gamma: 0.9
@@ -215,7 +218,7 @@ agents:
     batch_size: 16
     target_update_interval: 80
     learning_starts: 20
-    episodes: 300
+    #episodes: 300
 
   # --- PPO ---
   - name: "PPO_quick"
@@ -227,30 +230,32 @@ agents:
     load: true
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/PPO_quick/PPO_quick"
     save: true
+    state_input_mode : "normalized" # "raw" or "normalized" (normalized is the default and recommended for DQN and PPO)
     net_arch: [8, 8]
     learning_rate: 0.005
     gamma: 0.3
     ent_coef: 0.1
     n_steps: 20
     batch_size: 1
-    episodes: 300
+    #episodes: 300
 
   - name: "PPO_slow"
     algorithm: "PPO"
-    enabled: false
+    enabled: true
     progress_bar: false
-    skip_learn: true
+    skip_learn: false
     show_action: false
-    load: true
+    load: false
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/PPO_slow/PPO_slow"
     save: true
+    state_input_mode : "normalized"
     net_arch: [8, 8]
     learning_rate: 0.0003
     gamma: 0.95
     ent_coef: 0.01
     n_steps: 40
     batch_size: 1
-    episodes: 300
+    #episodes: 300
 
   - name: "PPO_balanced"
     algorithm: "PPO"
@@ -261,13 +266,14 @@ agents:
     load: true
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/PPO_balanced/PPO_balanced"
     save: true
+    state_input_mode : "normalized"
     net_arch: [8, 8]
     learning_rate: 0.001
     gamma: 0.9
     ent_coef: 0.05
     n_steps: 20
     batch_size: 1
-    episodes: 300
+    #episodes: 300
 
   # --- A2C ---
   - name: "A2C_quick"
@@ -279,12 +285,13 @@ agents:
     load: true
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/A2C_quick/A2C_quick"
     save: true
+    state_input_mode : "normalized"
     net_arch: [8, 8]
     learning_rate: 0.005
     gamma: 0.3
     ent_coef: 0.1
     n_steps: 20
-    episodes: 300
+    #episodes: 300
 
   - name: "A2C_slow"
     algorithm: "A2C"
@@ -295,12 +302,13 @@ agents:
     load: true
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/A2C_slow/A2C_slow"
     save: true
+    state_input_mode : "normalized"
     net_arch: [8, 8]
     learning_rate: 0.0003
     gamma: 0.95
     ent_coef: 0.01
     n_steps: 40
-    episodes: 300
+    #episodes: 300
 
   - name: "A2C_balanced"
     algorithm: "A2C"
@@ -311,9 +319,10 @@ agents:
     load: true
     load_dir: "attacks_from_dataset/20250709-105720_1_10_1/A2C_balanced/A2C_balanced"
     save: true
+    state_input_mode : "normalized"
     net_arch: [8, 8]
     learning_rate: 0.001
     gamma: 0.9
     ent_coef: 0.05
     n_steps: 20
-    episodes: 300
+    #episodes: 300

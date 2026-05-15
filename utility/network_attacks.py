@@ -644,7 +644,7 @@ def launch_distributed_dos(attackers: list, victim: Host, duration: int = 15, at
     for attacker in attackers:
         if attack_type == "udp":
             thread = threading.Thread(
-                target=launch_dos_attack_udp_flood,
+                target=launch_udp_flood,
                 args=(attacker, victim, duration),
                 daemon=True
             )
@@ -770,7 +770,7 @@ for s in sockets:
 def test_dos_attack(net, must_stop = True):
     """Test DoS attack functionality"""
     attacker, victim = net.hosts[0], net.hosts[1]
-    if launch_dos_attack_udp_flood(attacker, victim, duration=5):
+    if launch_udp_flood(attacker, victim, duration=5):
         information(Fore.GREEN + f"DoS attack test from {attacker.name} to {victim.name} completed successfully.\n" + Fore.WHITE)
     else:
         error(Fore.RED + f"DoS attack test from {attacker.name} to {victim.name} failed.\n" + Fore.WHITE)

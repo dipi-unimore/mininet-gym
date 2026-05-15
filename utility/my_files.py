@@ -5,84 +5,86 @@ from utility.my_log import set_log_level, information, error
 from utility.params import read_config_file
 
 def drop_privileges(username: str):
-    """Cambia l'utente effettivo del processo al dato username."""
+    """Change the effective user ID of the process to the specified username."""
     try:
         user_info = pwd.getpwnam(username)
-        os.setegid(user_info.pw_gid)  # Cambia il gruppo
-        os.seteuid(user_info.pw_uid)  # Cambia l'utente
+        os.setegid(user_info.pw_gid)  # Change the group
+        os.seteuid(user_info.pw_uid)  # Change the user
     except KeyError:
-        raise ValueError(f"L'utente {username} non esiste")
+        raise ValueError(f"User {username} does not exist")
     except PermissionError:
-        raise PermissionError("Devi eseguire lo script come root per cambiare utente")
+        raise PermissionError("You must run the script as root to change user")
 
 def regain_root():
-    """Ritorna a root (solo se lo script è stato avviato come root)."""
+    """Return the process to root privileges."""
     try:
-        os.seteuid(0)  # Ripristina i privilegi root
+        os.seteuid(0)  # Restore root privileges
     except:
         error("no root instance to recover")
 
-def copy_config_file_to_training_dir(training_dir: str) -> bool:
+def _build_experiment_config(config_dict: dict) -> dict:
+    """Return a filtered config with only experiment-relevant keys."""
+    experiment = {}
+    if 'random_seed' in config_dict:
+        experiment['random_seed'] = config_dict['random_seed']
+    if 'env_params' in config_dict:
+        experiment['env_params'] = config_dict['env_params']
+    if 'agents' in config_dict:
+        experiment['agents'] = [a for a in config_dict['agents'] if a.get('enabled', False)]
+    return experiment
+
+
+def copy_config_file_to_training_dir(training_dir: str, config_dict: dict = None) -> bool:
     """
-    Copies 'config.yaml' to a specified training subdirectory.
-    The source file is 'config.yaml'.
+    Saves the experiment config to a specified training subdirectory.
+    Only random_seed, env_params and enabled agents are persisted.
+    If config_dict is None, falls back to copying config/default.yaml.
 
     Args:
-        training_dir (str): The path to the destination directory,
-                                        relative to the script's execution directory.
-                                        e.g., 'configs/backup', 'my_new_folder'.
+        training_dir (str): The path to the destination directory.
+        config_dict (dict): The actual configuration dictionary used for training.
 
     Returns:
-        bool: True if the copy was successful, False otherwise.
+        bool: True if the save was successful, False otherwise.
     """
-    source_file_name = "config.yaml"
-    
-    # The execution directory is where the script is being run
-    execution_dir = os.getcwd() 
-    
-    # Construct the full path to the source config.yaml
-    source_path = os.path.join(execution_dir, source_file_name)
-    
-    # Construct the full path to the destination directory
-    # This will be <execution_dir>/<relative_destination_dir>
+    execution_dir = os.getcwd()
     destination_full_dir = os.path.join(execution_dir, training_dir)
-    
-    # Construct the full path for the destination file
-    destination_path = os.path.join(destination_full_dir, source_file_name)
+    destination_path = os.path.join(destination_full_dir, "config.yaml")
 
-    # --- Start of the copying logic ---
-
-    # 1. Check if the source config.yaml exists
-    if not os.path.exists(source_path):
-        print(f"Error: Source file '{source_file_name}' not found in the execution directory '{execution_dir}'.")
-        return False
-    if not os.path.isfile(source_path):
-        print(f"Error: '{source_path}' is not a file.")
-        return False
-
-    # 2. Ensure the destination directory exists, create if not
-    if not os.path.exists(destination_full_dir):
-        print(f"Destination directory '{destination_full_dir}' does not exist. Creating it...")
-        try:
-            os.makedirs(destination_full_dir)
-            print(f"Directory '{destination_full_dir}' created successfully.")
-        except OSError as e:
-            print(f"Error creating destination directory '{destination_full_dir}': {e}")
-            return False
-    
-    # 3. Perform the copy operation
     try:
-        shutil.copy2(source_path, destination_path)
-        print(f"Successfully copied '{source_file_name}' from '{execution_dir}' to '{destination_full_dir}'.")
-        return True
-    except shutil.SameFileError:
-        print(f"Error: Source and destination are the same file. No copy needed for '{source_path}'.")
-        return False
+        if config_dict is not None:
+            experiment_config = _build_experiment_config(config_dict)
+            with open(destination_path, 'w') as f:
+                yaml.dump(experiment_config, f, default_flow_style=False)
+            print(f"Successfully saved actual config to '{destination_path}'.")
+            return True
+        else:
+            source_file_name = "config/default.yaml"
+            source_path = os.path.join(execution_dir, source_file_name)
+
+            if not os.path.exists(source_path):
+                print(f"Error: Source file '{source_file_name}' not found.")
+                return False
+            if not os.path.isfile(source_path):
+                print(f"Error: '{source_path}' is not a file.")
+                return False
+
+            if not os.path.exists(destination_full_dir):
+                try:
+                    os.makedirs(destination_full_dir)
+                except OSError as e:
+                    print(f"Error creating destination directory: {e}")
+                    return False
+
+            shutil.copy2(source_path, destination_path)
+            print(f"Successfully copied default config to '{destination_path}'.")
+            return True
+
     except PermissionError:
-        print(f"Error: Permission denied. Unable to copy '{source_file_name}' to '{destination_full_dir}'.")
+        print(f"Error: Permission denied. Unable to save config to '{destination_path}'.")
         return False
     except Exception as e:
-        print(f"An unexpected error occurred while copying: {e}")
+        print(f"An error occurred while saving config: {e}")
         return False
 
 def save_data_to_file(data, dir_name, file_name="data"):
@@ -116,9 +118,43 @@ def read_csv_file(csv_file):
 def read_data_file(file_name:str = '../data' , extension:str = None):
     if extension is not None:
         file_name = f"{file_name}.{extension}"
+    file_name = resolve_data_file_path(file_name)
     with open(file_name, 'r') as file:
         data = orjson.loads(file.read()) # faster than this -> data = yaml.safe_load(file)
     return data #js.loads(js.dumps(config), object_hook=Params), config
+
+
+def resolve_data_file_path(file_name: str) -> str:
+    """
+    Resolve dataset paths that may have been saved as relative paths,
+    absolute paths, or malformed concatenations such as:
+    '_training//home/.../classification/...'.
+    """
+    if os.path.exists(file_name):
+        return file_name
+
+    normalized = os.path.normpath(file_name)
+    if os.path.exists(normalized):
+        return normalized
+
+    cwd = os.getcwd()
+
+    # If the current working directory appears inside the path, rebuild it as
+    # a path under the local _training directory.
+    cwd_marker = cwd + os.sep
+    if cwd_marker in file_name:
+        suffix = file_name.split(cwd_marker, 1)[1]
+        candidate = os.path.join(cwd, "_training", suffix)
+        if os.path.exists(candidate):
+            return candidate
+
+    # Common UI case: relative path without the _training prefix.
+    if not os.path.isabs(file_name):
+        candidate = os.path.join(cwd, "_training", file_name.lstrip(os.sep))
+        if os.path.exists(candidate):
+            return candidate
+
+    return file_name
 
 def read_all_data_from_execution(dir_execution: str):
     store = []
@@ -246,8 +282,8 @@ def find_latest_file(base_path: str, file_key: str, extension: str, net_config_f
 
 if __name__ == '__main__':
     set_log_level('info')
-    config,config_dict = read_config_file('config.yaml')
-    #config.net_config_filter = f"{config.env_params.net_params.num_switches}_{config.env_params.net_params.num_hosts}_{config.env_params.net_params.num_iot}"
+    config,config_dict = read_config_file('config/default.yaml')
+    #config.net_config_filter = f"{config.env_params.net_params.num_switches}_{config.env_params.net_params.num_hosts}_{config.env_params.net_params.num_iots}"
     #training_execution_directory = create_directory_training_execution(config)
     #set_log_file(f"{training_execution_directory}/log.txt")
     # file = find_latest_file(config.training_directory, 'Q-learning', 'json', '1_10_1')

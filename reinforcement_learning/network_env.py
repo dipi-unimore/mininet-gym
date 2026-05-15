@@ -68,7 +68,7 @@ class NetworkEnv(gym.Env, ABC):
         for i in range(params.num_hosts):
             host = create_host(name=f'h{i+1}')
             net.hosts.append(host)
-        for i in range(params.num_iot):
+        for i in range(params.num_iots):
             host = create_host(name=f'iot{i+1}')
             net.hosts.append(host)
         return net
@@ -79,6 +79,9 @@ class NetworkEnv(gym.Env, ABC):
         
     def stop(self):
         """Stop the environment and clean up resources."""
+        if getattr(self, '_stop_called', False):
+            return
+        self._stop_called = True
         try:
             if hasattr(self, 'stop_event'):
                 self.stop_event.set()   
@@ -93,7 +96,17 @@ class NetworkEnv(gym.Env, ABC):
    
      
     def get_current_state(self, is_discretized_state = False, is_real_state= False):
-        self.real_state = self.state = self.global_state.get_state()
+        # Compatibility: some InstantState variants expose `state`, others only `get_state()`.
+        current_state = None
+        if hasattr(self.global_state, 'state'):
+            current_state = self.global_state.state
+        elif hasattr(self.global_state, 'get_state') and callable(self.global_state.get_state):
+            current_state = self.global_state.get_state()
+
+        if current_state is None:
+            raise AttributeError("global_state has neither 'state' nor callable 'get_state()'")
+
+        self.real_state = self.state = np.array(current_state, dtype=np.float32)
         if is_real_state: #only for prediction
             return self.real_state
         if is_discretized_state:
@@ -491,8 +504,8 @@ class NetworkEnv(gym.Env, ABC):
         if gym_type in constants.GYM_TYPE:
             self.gym_type = constants.GYM_TYPE[gym_type]
         else:
-           error(f"Set correctly 'gym_type' on config.yaml") 
-           raise Exception("Set correctly 'gym_type' on config.yaml")
+           error(f"Set correctly 'gym_type' on config/default.yaml") 
+           raise Exception("Set correctly 'gym_type' on config/default.yaml")
        
         if self.gym_type == constants.GYM_TYPE[constants.CLASSIFICATION]: 
             time.sleep(2) #wait 2 seconds for controller starts properly, before to read first time
@@ -500,7 +513,35 @@ class NetworkEnv(gym.Env, ABC):
             #read initial traffic
             self.sync_time = 1 #self.synchronize_controller()
             self.read_time = self.sync_time * 0.6
-    
+
+    def clean_network_state(self):
+        """Clean residual state from previous agent training: kill traffic processes, remove drop rules."""
+        information("Cleaning network state between agents...")
+
+        # Kill any lingering iperf/traffic processes on all hosts
+        for host in self.net.hosts:
+            try:
+                host.cmd("pkill -9 iperf 2>/dev/null; pkill -9 ping 2>/dev/null; pkill -9 nmap 2>/dev/null")
+            except Exception as e:
+                debug(f"Could not kill processes on {host.name}: {e}")
+
+        # Remove any leftover OVS drop rules
+        try:
+            from utility.network_configurator import unblock_flow_delete
+            for host in self.net.hosts:
+                try:
+                    unblock_flow_delete(self.net, host.name)
+                except Exception:
+                    pass
+        except Exception as e:
+            debug(f"Could not remove drop rules: {e}")
+
+        # Reset link status (all links up)
+        if hasattr(self, 'status_links'):
+            self.status_links = [True] * len(self.net.hosts)
+
+        information("Network state cleaned.")
+
     def close(self):
         """Close the environment (optional)."""
         information("Environment closed.")
@@ -622,7 +663,7 @@ if __name__ == '__main__':
         'net_params' : { 
             'num_hosts':3,
             'num_switches':1,
-            'num_iot':0,
+            'num_iots':0,
             'controller': {
                 'ip':'192.168.1.226',
                 'port':6633,

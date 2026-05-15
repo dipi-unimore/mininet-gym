@@ -15,7 +15,7 @@ def set_log_file(log_path: str = "log.txt"):
         filemode='a',
         format='%(asctime)s,%(msecs)03d %(levelname)s %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        level=logging.DEBUG
+        level=logging.WARNING
     )
     logger = logging.getLogger('app')
 
@@ -64,6 +64,23 @@ def information(message, author=None):
 
 def debug(message):
     log_message("debug", message)
+
+def debug_essential(message):
+    """Log essential debug messages to both file and console."""
+    if not message.endswith("\n") and not message.endswith("\n"+Fore.WHITE):
+        message += "\n"
+
+    # Log to file at INFO level (so it passes WARNING threshold)
+    if logger is not None:
+        logger.info(remove_colors(message).replace("\n", " "))
+
+    message = add_timestamp_to_message(message)
+
+    # Send through web socket
+    notify_client(level="debug", agent_name=None, message=message)
+
+    # Show on screen
+    mininet_debug(message)
 
 def error(message):
     log_message("error", message)
@@ -182,7 +199,9 @@ def stop_buffer_flush():
 def notify_client(level=None, agent_name=None, message=None, 
                   config=None, traffic_data=None, final_data=None, host_tasks=None,
                   global_state=None, metrics=None, final_metrics=None, step_data=None,
-                  status=None, mode=None, force_immediate=False):
+                  status=None, mode=None, force_immediate=False,
+                  agent_training_summary=None, qtable_coverage=None,
+                  exploration_metric=None, agent_evaluation_summary=None):
     """
     Function to notify the web client about various events or data.
     Messages are buffered and sent every 2 seconds unless force_immediate=True.
@@ -191,7 +210,9 @@ def notify_client(level=None, agent_name=None, message=None,
         traffic_data is None and global_state is None \
             and metrics is None and status is None and step_data is None and \
             final_data is None and final_metrics is None and host_tasks is None and \
-                mode is None:
+                mode is None and agent_training_summary is None and \
+                qtable_coverage is None and exploration_metric is None and \
+                agent_evaluation_summary is None:
         return
     
     global _client_status_notifier_func
@@ -237,12 +258,23 @@ def notify_client(level=None, agent_name=None, message=None,
                 'globalState': global_state,
                 'metrics': metrics,
                 'finalMetrics': final_metrics,
-                'stepData': step_data                   
+                'stepData': step_data,
+                'agentTrainingSummary': agent_training_summary,
+                'agentEvaluationSummary': agent_evaluation_summary,
+                'qtableCoverage': qtable_coverage,
+                'explorationMetric': exploration_metric,
             }                
             
         
-        # Se richiesto invio immediato o per messaggi critici
-        if not _is_from_dataset or config is not None:
+        # In dataset mode, only send host_tasks immediately when at least one host
+        # is actively non-sleeping; all-sleeping updates are buffered to prevent
+        # rapid overwrites of the active display (dataset has ~48% NONE-traffic steps).
+        has_active_host = host_tasks is not None and any(
+            t.get('trafficType', 'none') != 'none'
+            for t in host_tasks.values()
+            if isinstance(t, dict)
+        )
+        if not _is_from_dataset or config is not None or has_active_host or force_immediate:
             try:
                 _client_data_notifier_func(messages=[message_data])
             except Exception as e:
