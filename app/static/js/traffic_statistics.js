@@ -1030,27 +1030,26 @@ function getTrendIcon(value) {
         return '<span class="text-gray-400 text-sm">NA</span>';
     }
 
-    // Inizializza il contenuto della freccia (icona Lucide + classe Tailwind per il colore)
+    // Initialize an empty string for the icon HTML
     let iconHtml = '';
 
     if (numericValue > 0) {
-        // Tendenza positiva: Freccia in SU, Colore ROSSO (come per un aumento negativo nel mercato)
-        // Se volessi il verde per l'aumento, cambierei 'text-red-500' in 'text-green-500' e viceversa
+        // Positive trend: Upward Arrow, RED color (like an increase in market terms, but here it signals a worsening)
+        // If you want to use green for positive and red for negative, simply swap the colors in the classes below.
         iconHtml = `
             <span class="trend-icon text-red-500">
                 <i data-lucide="arrow-up-right" class="w-6 h-6" style="display:inline"></i>
             </span>
         `;
     } else if (numericValue < 0) {
-        // Tendenza negativa: Freccia in GIÙ, Colore VERDE
+        // Negative trend: Downward Arrow, GREEN color (like a positive decrease in market terms)
         iconHtml = `
             <span class="trend-icon text-green-500">
                 <i data-lucide="arrow-down-right" class="w-6 h-6" style="display:inline"></i>
             </span>
         `;
     } else {
-        // Nessuna tendenza: Nessun simbolo (o un trattino/punto se preferito)
-        iconHtml = `<span class="text-gray-500 text-base">Nessun cambiamento</span>`;
+        iconHtml = `<span class="text-gray-500 text-base"></span>`;
     }
 
     return iconHtml;

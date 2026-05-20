@@ -35,13 +35,11 @@ class NetworkEnvClassification(NetworkEnv):
          # Network params
         self.threshold_packets = params.classification.thresholds.packets
         self.threshold_bytes = params.classification.thresholds.bytes
-        self.threshold_var_packets = params.classification.thresholds.var_packets
-        self.threshold_var_bytes = params.classification.thresholds.var_bytes    
-        
+        self.threshold_var_packets = params.classification.thresholds.var_packets if hasattr(params.classification.thresholds, 'var_packets') else 0
+        self.threshold_var_bytes = params.classification.thresholds.var_bytes if hasattr(params.classification.thresholds, 'var_bytes') else 0
+    
         # Define action and observation space, gym.spaces objects
-        #self.low = np.array([0,-self.threshold_var_packets,0,-self.threshold_var_bytes])        
-        #self.high = np.array([self.threshold_packets, self.threshold_var_packets, self.threshold_bytes, self.threshold_var_bytes])        #fixed for every network
-        self.low = np.array([0,0,0,0])        
+        self.low = np.array(np.zeros(4))        
         self.high = np.array([self.threshold_packets, self.threshold_packets, self.threshold_bytes, self.threshold_bytes]) 
         self.observation_space = spaces.Box(low=0, high=self.high, shape=(len(self.low),), dtype=np.float64)
         
@@ -101,8 +99,8 @@ class NetworkEnvClassification(NetworkEnv):
             
             self.generated_traffic_type_text, self.src_host, self.dst_host = generate_random_traffic(self.net)  
             self.generated_traffic_type = TRAFFIC_TYPE_ID_MAPPING[self.generated_traffic_type_text]
-            # wait for traffic complete generation
-            if self.generated_traffic_type != TrafficTypes.NONE:
+            # wait for traffic complete generation (int id comparison; NONE id = 0)
+            if self.generated_traffic_type != 0:
                 time.sleep((self.generated_traffic_type+0.5))
             if self.read_from_network(): 
                 self.evaluate_traffic() 
@@ -129,14 +127,14 @@ class NetworkEnvClassification(NetworkEnv):
                 error(Fore.RED+"Reading status error\n") 
 
     def evaluate_traffic(self):
-        self.global_state.state = np.array([
-                    self.global_state.received_packets, 
-                    self.global_state.transmitted_packets, 
-                    self.global_state.received_bytes, 
-                    self.global_state.transmitted_bytes,
-                ], dtype=np.float32) 
         statuses = self.update_hosts_status(self.generated_traffic_type_text, self.src_host, self.dst_host) #update the status: normal or attack?
         self.global_state.update_statuses(self.generated_traffic_type_text, TRAFFIC_TYPE_ID_MAPPING, statuses)
+        self.global_state.state = np.array([
+                    self.global_state.received_packets,
+                    self.global_state.transmitted_packets,
+                    self.global_state.received_bytes,
+                    self.global_state.transmitted_bytes,
+                ], dtype=np.float32)
         traffic_data = self.global_state.get_network_traffic_status()
         traffic_data.update({
             "receivedPackets": self.global_state.received_packets,
@@ -178,7 +176,10 @@ class NetworkEnvClassification(NetworkEnv):
         # Update state here
         if not done and not truncated:
             self.update_state()     
-        next_state = self.get_current_state(is_discretized_state=options["is_discretized_state"]) 
+        next_state = self.get_current_state(
+            is_discretized_state=options["is_discretized_state"],
+            is_real_state=options.get("is_real_state", False)
+        )
             
         return next_state, reward, done, truncated, {'action_correct': action_correct, 
                                                      'text_action_correct': text_action_correct, 

@@ -140,6 +140,9 @@ def train_agent(agent):
                 if train_agent.env.stop_event.is_set():
                     break
 
+                while train_agent.env.pause_event.is_set():
+                    time.sleep(0.5)
+
                 if is_supervised:
                     # Supervised learning: accumulate and train per episode
                     # Get episode statuses from environment

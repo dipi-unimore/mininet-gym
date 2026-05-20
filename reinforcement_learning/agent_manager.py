@@ -102,7 +102,10 @@ class AgentManager:
             return self.create_custom_agent(SARSAAgent, env, agent_param, name), {}, True       
         elif algorithm.lower() == ALGO_SUPERVISED:
             split_ratio = getattr(agent_param, 'train_test_split_ratio', 0.20)
-            return SupervisedAgent(env.gym_type, self.data_traffic_file, train_test_split_ratio=split_ratio), {}, False        
+            agent_name = agent_param.name if name is None else f"{agent_param.name}_{name}"
+            return SupervisedAgent(env.gym_type, self.data_traffic_file,
+                                   train_test_split_ratio=split_ratio,
+                                   name=agent_name), {}, False        
         elif algorithm.lower() == ALGO_PPO:
             try:
                 if agent_param.load:

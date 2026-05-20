@@ -33,18 +33,13 @@ def traffic_classification_main(config, am: AgentManager, env: NetworkEnv):
             statuses = read_data_file(config.env_params.data_traffic_file)
             episodes = int((len(statuses) - config.env_params.test_episodes) / (config.env_params.max_steps + 1))
             for agent in am.agents_params:
-                env.df=list(statuses)
+                env.df = list(statuses)
                 agent.episodes = episodes
-                if isinstance(agent.instance, SupervisedAgent):
-                    train_supervised_from_dataset(agent, statuses, agent.episodes, config)
-                    agents_metrics[agent.name] = agent.instance.metrics
-                    continue
                 if "skip_learn" not in agent.__dict__ or agent.skip_learn:
                     continue
-                #Step 1: training
                 train_agent(agent)
                 plot_and_save_data_agent(agent, config)
-                agents_metrics[agent.name]=agent.instance.metrics   
+                agents_metrics[agent.name] = agent.instance.metrics   
         
         #env.stop_update_event.set()   
         #Step 2: plotting and saving agent data
@@ -121,54 +116,22 @@ def train_agent(agent):
     start_time = time.time()
     try:
         information(f"Starting training\n", agent.name)
-        if agent.is_custom_agent:
-            #learn for all episodes each one of env.max_steps maximum
+        if isinstance(agent.instance, SupervisedAgent):
+            agent.instance.learn(agent.episodes, train_agent.env, train_agent.env.stop_event)
+        elif agent.is_custom_agent:
             agent.instance.learn(agent.episodes, train_agent.env.stop_event)
         else:
-            # Check if this is a SupervisedAgent
-            is_supervised = isinstance(agent.instance, SupervisedAgent)
-
             for episode in range(agent.episodes):
                 if train_agent.env.stop_event.is_set():
                     break
-
-                if is_supervised:
-                    # Supervised learning: accumulate and train per episode
-                    # Get episode statuses from environment
-                    episode_statuses = train_agent.env.statuses[-agent.max_steps:] if hasattr(train_agent.env, 'statuses') else []
-
-                    if episode_statuses:
-                        agent.instance.accumulate_statuses(episode_statuses)
-                        accuracy = agent.instance.train_on_accumulated_per_episode()
-                        information(f"Episode {episode+1} - Supervised Training Accuracy: {accuracy * 100:.2f}%\n", agent.name)
-                        # Notify metrics
-                        try:
-                            notify_client(
-                                level=SystemLevels.DATA,
-                                agent_name=agent.name,
-                                metrics={
-                                    'episode': episode + 1,
-                                    'accuracy': accuracy,
-                                    'precision': agent.instance.precision,
-                                    'recall': agent.instance.recall,
-                                    'f1_score': agent.instance.fscore,
-                                }
-                            )
-                        except Exception as e:
-                            debug(f"Error notifying metrics: {e}\n")
-                else:
-                    # Regular RL agent learning
-                    agent.custom_callback.before_episode(episode+1)
-                    agent.instance.learn(total_timesteps=agent.max_steps, callback=agent.custom_callback, progress_bar=agent.progress_bar)
-                    agent.custom_callback.after_episode()
-
-    except Exception as error:
-        # handle the exception
-        error(f"Agent {agent.name} learn:", error)
-        #error(Fore.RED+f"Agent {agent.name} learn:!\n{error}\n{traceback.format_exc()}\n"+Fore.WHITE)
+                agent.custom_callback.before_episode(episode + 1)
+                agent.instance.learn(total_timesteps=agent.max_steps, callback=agent.custom_callback, progress_bar=agent.progress_bar)
+                agent.custom_callback.after_episode()
+    except Exception as err:
+        error(Fore.RED + f"Agent {agent.name} learn: {err}\n{traceback.format_exc()}" + Fore.WHITE)
 
     agent.elapsed_time = time.time() - start_time
-    information(f"Training completed in {agent.elapsed_time}\n", agent.name)
+    information(f"Training completed in {agent.elapsed_time:.1f}s\n", agent.name)
     
     # Send aggregated training metrics to client for visualization (reward and accuracy per episode)
     try:
@@ -191,41 +154,6 @@ def train_agent(agent):
             debug(f"Sent training summary for {agent.name}: {len(episode_rewards)} episodes\n")
     except Exception as e:
         debug(Fore.RED + f"Error sending training summary for {agent.name}: {e}\n" + Fore.WHITE)
-
-def train_supervised_from_dataset(agent, statuses, episodes, config):
-    """Train SupervisedAgent standalone from dataset, one episode chunk at a time."""
-    start_time = time.time()
-    information(f"Starting supervised standalone training\n", agent.name)
-    chunk_size = max(1, len(statuses) // episodes)
-    for episode_idx in range(episodes):
-        start = episode_idx * chunk_size
-        end = start + chunk_size if episode_idx < episodes - 1 else len(statuses)
-        chunk = statuses[start:end]
-        if not chunk:
-            continue
-        agent.instance.accumulate_statuses(chunk)
-        accuracy = agent.instance.train_on_accumulated_per_episode()
-        information(f"Episode {episode_idx+1}/{episodes} - Accuracy: {accuracy*100:.2f}%\n", agent.name)
-        try:
-            notify_client(
-                level=SystemLevels.DATA,
-                agent_name=agent.name,
-                force_immediate=True,
-                metrics={
-                    'episode': episode_idx + 1,
-                    'accuracy': accuracy,
-                    'precision': agent.instance.precision,
-                    'recall': agent.instance.recall,
-                    'f1_score': agent.instance.fscore,
-                }
-            )
-        except Exception as e:
-            debug(f"Error notifying metrics: {e}\n")
-
-    agent.elapsed_time = time.time() - start_time
-    information(f"Training completed in {agent.elapsed_time:.2f}s\n", agent.name)
-    if config.env_params.print_training_chart:
-        plot_and_save_data_agent(agent, config)
 
 def plot_training_data(config, net_env, am, agents_metrics):
     if config.env_params.gym_type==CLASSIFICATION:

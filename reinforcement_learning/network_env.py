@@ -361,16 +361,18 @@ class NetworkEnv(gym.Env, ABC):
             transmitted_bytes_percentage_change = self.eval_percentage_change(transmitted_bytes, prev_transmitted_bytes, self.threshold_var_bytes)
                                        
             # 3. Assemble new state arrays
+            # Zero percentage changes when no traffic flowed this step — avoids
+            # showing -100% for hosts that simply had no activity this step.
             host_state = np.array([
-                max(0, received_packets),             # 0: received_packets (INC)
-                received_packets_percentage_change,   # 1: received_packets_percentage_change
-                max(0, received_bytes),               # 2: received_bytes (INC)
-                received_bytes_percentage_change,     # 3: received_bytes_percentage_change
-                max(0, transmitted_packets),          # 4: transmitted_packets (INC)
-                transmitted_packets_percentage_change,# 5: transmitted_packets_percentage_change
-                max(0, transmitted_bytes),            # 6: transmitted_bytes (INC)
-                transmitted_bytes_percentage_change,  # 7: transmitted_bytes_percentage_change
-             ], dtype=np.float32)
+                max(0, received_packets),
+                received_packets_percentage_change   if received_packets   > 0 else 0.0,
+                max(0, received_bytes),
+                received_bytes_percentage_change     if received_bytes     > 0 else 0.0,
+                max(0, transmitted_packets),
+                transmitted_packets_percentage_change if transmitted_packets > 0 else 0.0,
+                max(0, transmitted_bytes),
+                transmitted_bytes_percentage_change  if transmitted_bytes  > 0 else 0.0,
+            ], dtype=np.float32)
             
             host_state_total = np.array([
                 total_received_packets, 
@@ -391,37 +393,24 @@ class NetworkEnv(gym.Env, ABC):
     def eval_percentage_change(self, now, before, threshold_percentage_change=None, threshold_percentage_change_multiple = 10):
         """
         Evaluate the percentage change from 'before' to 'now'.
-        Args:
-            now (float): The current value.
-            before (float): The previous value.
-            threshold_percentage_change (float, optional): If provided, the percentage change
-                will be truncated to this threshold.
-        Returns:
-            float: The calculated percentage change.
+        Never returns ±inf: when before==0 and now>0, returns the clamped maximum.
         """
         if before == 0:
             if now == 0:
-                percentage_change = 0.0
-            elif now > 0:
-                # From zero to a positive number: infinite change. 
-                # We can choose to return a conventional maximum value or signal infinity.
-                # We use float('inf') to represent positive infinity
-                percentage_change = float('inf')
-            else: # now < 0
-                # From zero to a negative number: negative infinite change
-                percentage_change = float('-inf')
+                return 0.0
+            # new traffic from zero: return clamped max to avoid ±inf in state features
+            max_val = (threshold_percentage_change_multiple * threshold_percentage_change
+                       if threshold_percentage_change is not None else 100.0)
+            return float(max_val) if now > 0 else float(-max_val)
         else:
-            # Standard formula for percentage change
             percentage_change = ((now - before) / before) * 100
-        
-        # Optional application of the threshold (value truncation)
+
         if threshold_percentage_change is not None and abs(percentage_change) > threshold_percentage_change_multiple * threshold_percentage_change:
-            # Truncate the value to the maximum/minimum of the specified threshold
             if percentage_change > 0:
                 percentage_change = threshold_percentage_change_multiple * threshold_percentage_change
             else:
                 percentage_change = -threshold_percentage_change_multiple * threshold_percentage_change
-                
+
         return percentage_change
 
 
@@ -516,7 +505,7 @@ class NetworkEnv(gym.Env, ABC):
 
     def clean_network_state(self):
         """Clean residual state from previous agent training: kill traffic processes, remove drop rules."""
-        information("Cleaning network state between agents...")
+        debug("Cleaning network state ...")
 
         # Kill any lingering iperf/traffic processes on all hosts
         for host in self.net.hosts:
@@ -526,15 +515,16 @@ class NetworkEnv(gym.Env, ABC):
                 debug(f"Could not kill processes on {host.name}: {e}")
 
         # Remove any leftover OVS drop rules
-        try:
-            from utility.network_configurator import unblock_flow_delete
-            for host in self.net.hosts:
-                try:
-                    unblock_flow_delete(self.net, host.name)
-                except Exception:
-                    pass
-        except Exception as e:
-            debug(f"Could not remove drop rules: {e}")
+        if hasattr(self.net, 'blocked_hosts') and len(self.net.blocked_hosts)>0:
+            try:
+                from utility.network_configurator import unblock_flow_delete
+                for host in self.net.hosts:
+                    try:
+                        unblock_flow_delete(self.net, host.name)
+                    except Exception:
+                        pass
+            except Exception as e:
+                debug(f"Could not remove drop rules: {e}")
 
         # Reset link status (all links up)
         if hasattr(self, 'status_links'):

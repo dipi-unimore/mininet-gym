@@ -303,6 +303,14 @@ class CustomCallback(BaseCallback):
                 'packetsPercentageChange': float(status['packets_percentage_change']),
                 'bytesPercentageChange':   float(status['bytes_percentage_change']),
             })
+            gs = getattr(self.env, 'global_state', None)
+            if gs is not None and hasattr(gs, 'received_packets'):
+                step_data.update({
+                    'receivedPackets':    int(gs.received_packets),
+                    'receivedBytes':      int(gs.received_bytes),
+                    'transmittedPackets': int(gs.transmitted_packets),
+                    'transmittedBytes':   int(gs.transmitted_bytes),
+                })
         else:
             step_data.update({
                 'receivedPackets':
