@@ -134,6 +134,9 @@ function initializeWebSocket() {
             if (!message) {
                 continue; // Ignore empty messages
             }
+            if (typeof shouldHideDropRuleMessage === 'function' && shouldHideDropRuleMessage(message)) {
+                continue;
+            }
             const level = data.level ? data.level.toUpperCase() : 'INFO';
 
             // 1. Legge lo stato delle checkbox (Devono essere aggiunte nell'HTML)

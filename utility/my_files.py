@@ -96,6 +96,8 @@ def save_data_to_file(data, dir_name, file_name="data"):
             return int(obj)
         if isinstance(obj, (np.ndarray)):
             return list(obj)
+        if isinstance(obj, (bool, np.bool_)):
+            return bool(obj)
         raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
     
    

@@ -4,6 +4,7 @@ import os
 import shutil
 from collections import Counter
 
+from itsdangerous import exc
 import numpy as np
 import yaml
 from fpdf import FPDF
@@ -15,6 +16,7 @@ from utility.constants import ALGO_A2C, ALGO_DQN, ALGO_PPO, ALGO_Q_LEARNING, ALG
 from utility.my_files import read_data_file
 from utility.network_configurator import get_host_agents_by_network_config
 from utility.params import read_config_file
+from utility.my_log import information, debug, error
 from utility.scenario_generator import (
     DEFAULT_ATTACK_LIKELY_EVAL,
     DEFAULT_ATTACK_LIKELY_TRAIN,
@@ -770,13 +772,21 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                 else:
                     if not os.path.isfile(f"{path}/{agent_name}.{extension}") or not os.path.isfile(f"{path}/data.json"):
                         continue
-                    data = read_data_file(f"{path}/data.json")
-                    complete_path = path.replace(f"{training_directory}/", "") + f"/{agent_name}.{extension}"
-                    load_dir_list.append({
-                        "accuracy": float(np.mean(data.get("train_metrics", {}).get("accuracy", 0))) if data else 0,
-                        "datetime": path.split('/')[2].split('_')[0],
-                        "path": complete_path,
-                    })
+                    try:
+                        data = read_data_file(f"{path}/data.json")
+                        complete_path = path.replace(f"{training_directory}/", "") + f"/{agent_name}.{extension}"
+                        raw_accuracy = data.get("train_metrics", {}).get("accuracy", []) if data else []
+                        acc_val = float(np.mean(raw_accuracy)) if raw_accuracy else 0.0
+                        if np.isnan(acc_val) or np.isinf(acc_val):
+                            acc_val = 0.0
+                        load_dir_list.append({
+                            "accuracy": acc_val,
+                            "datetime": path.split('/')[2].split('_')[0],
+                            "path": complete_path,
+                        })
+                    except Exception as exc:
+                        error(f"Error reading data.json for {path}: {exc}")
+                        continue
 
     return load_dir_list
 
@@ -1551,6 +1561,7 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
             plot_comparison_bar_charts as _plot_comparison,
             plot_radar_chart as _plot_radar,
             plot_metrics_kfold as _plot_kfold,
+            plot_metrics_violin as _plot_violin,
         )
     else:
         from utility.my_statistics import (
@@ -1559,6 +1570,7 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
             plot_comparison_bar_charts as _plot_comparison,
             plot_radar_chart as _plot_radar,
             plot_metrics_kfold as _plot_kfold,
+            plot_metrics_violin as _plot_violin,
         )
 
     reprinted = []
@@ -1643,6 +1655,15 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
                     xlabel="Episodes",
                 )
                 reprinted.append("metrics_kfold")
+                try:
+                    _plot_violin(
+                        kfold_data,
+                        result_abs_path,
+                        title=f"Metric Distribution at Key Training Steps ({fold_label})",
+                    )
+                    reprinted.append("metrics_violin")
+                except Exception as ve:
+                    errors.append(f"Error generating violin chart: {ve}")
         except Exception as exc:
             errors.append(f"Error generating K-Fold chart: {exc}")
 

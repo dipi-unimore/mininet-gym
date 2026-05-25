@@ -274,6 +274,7 @@
                     </span>
                 </p>
             </div>
+            <div id="training-caption" class="flex flex-wrap gap-1 px-1"></div>
             <div class="mt-2 grid grid-cols-1 md:grid-cols-5 gap-2">
                 <!-- WebSocket Log and Filters (Updated Section) 2 columns -->
 
@@ -486,16 +487,14 @@
 
     <!-- Modal for Config  -->
     <div id="config-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden flex items-center justify-center">
-        <div class="bg-white p-6 rounded-xl shadow-2xl w-3/4 max-w-4xl">
-            <h3 class="text-xl font-bold mb-4">Configuration Summary</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div id="config-env" class="gap-6">
-                </div>
-                <div id="config-agents" class="gap-6">
-                </div>
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-3/4 max-w-4xl max-h-[90vh] flex flex-col">
+            <h3 class="text-xl font-bold mb-4 flex-shrink-0">Configuration Summary</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto flex-1 pr-1">
+                <div id="config-env"></div>
+                <div id="config-agents"></div>
             </div>
             <button id="close-config-modal-btn"
-                class="mt-4 px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400">Close</button>
+                class="mt-4 px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400 flex-shrink-0 self-start">Close</button>
         </div>
     </div>
 

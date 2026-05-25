@@ -206,7 +206,8 @@ function orderBy(gymType, col) {
     const sorted = [...gt.data].sort((a, b) => {
         let va, vb;
         switch (col) {
-            case 'datetime':        va = new Date(a.datetime || 0); vb = new Date(b.datetime || 0); break;
+            //case 'datetime':        va = new Date(a.datetime || 0); vb = new Date(b.datetime || 0); break;
+            case 'datetime':        va = String(a.datetime || ''); vb = String(b.datetime || ''); break;
             case 'networkconfig':   va = String(a.network_config || ''); vb = String(b.network_config || ''); break;
             case 'trainingepisodes':va = Number(a.training_episodes || 0); vb = Number(b.training_episodes || 0); break;
             case 'maxsteps':        va = Number(a.max_steps || 0); vb = Number(b.max_steps || 0); break;
@@ -400,8 +401,9 @@ let modalContentHtml = `
                         </div>
                     ` : ''}
                     ${otherTopImages.map(img => `
-                        <div class="border rounded-lg p-1 bg-gray-50">
+                        <div class="border rounded-lg p-1 bg-gray-50 flex flex-col gap-1">
                             <img src="${basePath}/${img}" class="clickable-img w-full h-32 object-contain cursor-zoom-in rounded" alt="${img}" title="${img}" data-description="General chart: ${img}">
+                            <div class="text-[10px] text-gray-500 text-center truncate px-1" title="${img}">${img}</div>
                         </div>
                     `).join('')}
                 </div>
@@ -439,11 +441,14 @@ let modalContentHtml = `
                         </div>
                         <div class="p-3 grid grid-cols-3 md:grid-cols-6 gap-2">
                             ${agent.charts.map(chart => `
-                                <img src="${basePath}/${agent.agent_name}/${chart}" 
-                                     class="clickable-img w-full h-auto border rounded hover:opacity-75 transition-opacity cursor-zoom-in" 
-                                     title="${chart}"
-                                     alt="${chart}"
-                                     data-description="${agent.agent_name} - ${chart}">
+                                <div class="flex flex-col gap-0.5">
+                                    <img src="${basePath}/${agent.agent_name}/${chart}"
+                                         class="clickable-img w-full h-auto border rounded hover:opacity-75 transition-opacity cursor-zoom-in"
+                                         title="${chart}"
+                                         alt="${chart}"
+                                         data-description="${agent.agent_name} - ${chart}">
+                                    <div class="text-[10px] text-gray-400 text-center truncate px-0.5" title="${chart}">${chart}</div>
+                                </div>
                             `).join('')}
                         </div>
                     </div>`;
@@ -457,8 +462,12 @@ let modalContentHtml = `
                         const testImgPath = testImg.includes('/')
                             ? `${basePath}/${testImg}`
                             : `${basePath}/TEST/${testImg}`;
+                        const testImgName = testImg.split('/').pop();
                         return `
-                        <img src="${testImgPath}" class="clickable-img w-full border rounded shadow-sm cursor-zoom-in" alt="${testImg}" title="${testImg}" data-description="Test chart: ${testImg}">
+                        <div class="flex flex-col gap-0.5">
+                            <img src="${testImgPath}" class="clickable-img w-full border rounded shadow-sm cursor-zoom-in" alt="${testImg}" title="${testImg}" data-description="Test chart: ${testImg}">
+                            <div class="text-[10px] text-gray-400 text-center truncate px-0.5" title="${testImg}">${testImgName}</div>
+                        </div>
                     `;
                     }).join('')}
                 </div>
@@ -632,6 +641,9 @@ function ensureZoomControls() {
             <div id="zoom-caption" class="pointer-events-auto text-white bg-black/60 px-4 py-2 rounded-lg text-sm max-w-[65vw] truncate text-center"></div>
             <button id="zoom-next-btn" class="pointer-events-auto text-white bg-black/60 hover:bg-black/80 px-3 py-2 rounded-lg text-sm font-bold" type="button">Next ▶</button>
         </div>
+        <div id="zoom-filename-bar" class="absolute inset-x-0 bottom-0 bg-black/70 px-4 py-2 text-center pointer-events-none">
+            <div id="zoom-filename" class="text-white text-xs font-mono break-all leading-tight"></div>
+        </div>
     `);
 }
 
@@ -642,8 +654,10 @@ function updateZoomView() {
     const imgEl = zoomImages[zoomIndex];
     const src = $(imgEl).attr('src');
     const caption = $(imgEl).data('description') || $(imgEl).attr('title') || $(imgEl).attr('alt') || (src ? src.split('/').pop() : 'Image');
+    const filename = src ? src.split('/').pop().replace(/\?.*$/, '') : '';
     $('#zoomed-image').attr('src', src || '');
     $('#zoom-caption').text(`${zoomIndex + 1}/${zoomImages.length} - ${caption}`);
+    $('#zoom-filename').text(filename);
 
     const $panel = $('#zoom-description-panel');
     const $title = $('#zoom-description-title');

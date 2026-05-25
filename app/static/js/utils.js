@@ -16,6 +16,33 @@ function isSingleAgentHostObservableEnv(){
     return currentConfig.env_params.gym_type.startsWith(SINGLE_AGENT_HOST_OBSERVABLE);
 }
 
+function isDropRulesEnabled() {
+    const envParams = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.env_params)
+        ? currentConfig.env_params
+        : {};
+    const attacks = (envParams && envParams.attacks) ? envParams.attacks : {};
+    return Boolean(attacks.apply_drop_rules);
+}
+
+function shouldHideDropRuleMessage(message) {
+    if (isDropRulesEnabled()) {
+        return false;
+    }
+
+    const text = String(message || '').toLowerCase();
+    return [
+        'drop rule',
+        'drop rules',
+        'blocking flow',
+        'unblocking flow',
+        'flow blocked',
+        'flow unblocked',
+        'adding drop rule',
+        'removing drop rule',
+        'remove drop rules',
+    ].some((token) => text.includes(token));
+}
+
 
 // Other utilities
 function formatBytes(num_bytes) {

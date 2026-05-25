@@ -159,6 +159,12 @@ def attack_detect_ho_main(config, am: AgentManager,
                 base_env.min_accuracy = config.env_params.accuracy_min  # restore
 
                 if config.env_params.print_training_chart:
+                    notify_client(
+                        level=SystemLevels.STATUS,
+                        status=SystemStatus.RUNNING,
+                        mode=SystemModes.PLOTTING,
+                        message=f"Plotting training data for {agent.name}...",
+                    )
                     data = plot_and_save_data_agent(agent, config)
                     if data is not None:
                         agents_metrics[agent.name] = agent.instance.metrics
@@ -299,7 +305,7 @@ def attack_detect_ho_main(config, am: AgentManager,
         notify_client(
             level=SystemLevels.STATUS,
             status=SystemStatus.FINISHED,
-            mode=SystemModes.TRAINING,
+            mode=SystemModes.PLOTTING,
             message="Finished. Ready to start again.",
         )
 

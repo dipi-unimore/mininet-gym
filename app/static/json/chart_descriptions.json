@@ -3,6 +3,10 @@
     "title": "K-Fold Cross-Validation Performance",
     "description": "The Central Line represents the Mean (μ) of performance across all agents.\nThe Shaded Area represents the 95% Confidence Interval (1.96 × σ/√n), where σ is the standard deviation across folds.\nA narrow shaded area indicates a stable and robust model; a wide area indicates the model is sensitive to training data or hyperparameters."
   },
+  "metrics_violin": {
+    "title": "Metric Distribution at Key Training Steps",
+    "description": "Violin + Box plots showing the distribution of each metric across multiple agents/runs at four training checkpoints (25%, 50%, 75%, 100%).\nThe violin shape reveals the full distribution density; the inner box shows median and IQR.\nA bimodal violin indicates that some agents learned well while others failed — a detail hidden by a simple mean."
+  },
   "metrics_comparison": {
     "title": "Metrics Comparison between Agents",
     "description": "Bar chart comparing performance metrics (accuracy, precision, recall, F1) across all trained agents.\nAllows rapid identification of which agent achieved the best results for each metric."

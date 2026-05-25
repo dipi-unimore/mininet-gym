@@ -46,14 +46,17 @@ class HostAgentEnv(gym.Env):
                              -self.threshold_var_packets,
                              0,
                              -self.threshold_var_bytes,
-                             0])   
-        self.high = np.array([self.threshold_packets*len(self.net.hosts),
+                             0])
+        # Each agent observes only its own host traffic, so high is per-host threshold
+        # (not multiplied by n_hosts, which was causing attack and normal states to
+        # collapse into the same Q-table bin, making the agent unable to learn)
+        self.high = np.array([self.threshold_packets,
                               self.threshold_var_packets,
-                              self.threshold_bytes*len(self.net.hosts),
+                              self.threshold_bytes,
                               self.threshold_var_bytes,
-                              self.threshold_packets*len(self.net.hosts),
+                              self.threshold_packets,
                               self.threshold_var_packets,
-                              self.threshold_bytes*len(self.net.hosts),
+                              self.threshold_bytes,
                               self.threshold_var_bytes,
                               len(self.net.hosts)])
         self.observation_space = spaces.Box(low=0, high=self.high, shape=(len(self.low),), dtype=np.float32)

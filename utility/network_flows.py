@@ -1,4 +1,5 @@
 import re
+import threading
 import time
 import traceback
 from typing import Any, Dict, List, Optional
@@ -9,6 +10,16 @@ from utility.my_log import information, debug, error
 
 # Global flag to track if monitoring flows have been installed
 _monitoring_flows_installed = {}
+
+# Per-switch lock: Mininet's Node.cmd() is not thread-safe.
+# Acquire before ANY switch.cmd() call to prevent concurrent access.
+_switch_cmd_locks: dict = {}
+
+
+def _get_switch_lock(switch_name: str) -> threading.Lock:
+    if switch_name not in _switch_cmd_locks:
+        _switch_cmd_locks[switch_name] = threading.Lock()
+    return _switch_cmd_locks[switch_name]
 
 # --- Utility for installing Monitoring Flows ---
 
@@ -70,13 +81,16 @@ def install_monitoring_flows(ovs_switch: Switch, net: Mininet, force: bool = Fal
                 f'priority={MONITORING_PRIORITY},dl_dst={host_mac},actions=NORMAL'
             )
 
+            _lock = _get_switch_lock(bridge_name)
             if host not in blocked_hosts:
-                result_out = ovs_switch.cmd(command_out)
+                with _lock:
+                    result_out = ovs_switch.cmd(command_out)
                 if result_out and ("error" in result_out.lower() or "failed" in result_out.lower()):
                     error(f"Failed to install OUT flow for {host.name}: {result_out.strip()}")
                     continue
-                    
-            result_in = ovs_switch.cmd(command_in)
+
+            with _lock:
+                result_in = ovs_switch.cmd(command_in)
             if result_in and ("error" in result_in.lower() or "failed" in result_in.lower()):
                 error(f"Failed to install IN flow for {host.name}: {result_in.strip()}")
                 continue
@@ -550,10 +564,10 @@ def get_data_flow(net: Mininet, bridge_name: str = "s1", max_retries: int = 3) -
         start_time = time.time()
         
         try:
-            command_ports = f'ovs-ofctl dump-ports {bridge_name}'
-            
             time.sleep(0.1)  # Small delay to avoid overwhelming OVS
-            flows_raw = ovs_switch.cmd(command_ports)
+            _lock = _get_switch_lock(bridge_name)
+            with _lock:
+                flows_raw = ovs_switch.cmd(f'ovs-ofctl dump-ports {bridge_name}')
             
             # Validate output
             if not flows_raw or flows_raw.strip() == "":

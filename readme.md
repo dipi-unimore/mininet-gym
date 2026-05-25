@@ -163,13 +163,18 @@ Follow these steps to get your development environment set up.
 
 
 
-6.  **Run a Sample**
-    Mininet requires root privileges to create virtual network devices. 
-    
+6.  **First Run and Configuration Bootstrap**
+    On the first start, the application checks for `config/default.yaml`. If the file does not exist, it creates the `config/` directory and copies `base_config.yaml` to `config/default.yaml`.
+
     ```bash
     sudo python3 main.py
     ```
-    This command will start a Mininet simulation, run your environment, and begin the training process.
+
+    If the configuration file was just created, the application exits after printing a message. Open `config/default.yaml`, set the parameters you need, and restart the application.
+
+    Pay special attention to `server_user`: this is the account the application switches to before creating training folders and later regaining root privileges for Mininet setup.
+
+    After the initial configuration is in place, run the same command again to start the Mininet simulation, run the environment, and begin the training process.
 
 7.  **OpenDayLight (ODL) Controller Setup (Optional)**
     For installing the OpenDayLight controller, follow the instructions provided in the [ODL-Ubuntu22-installation] guide. This project was developed with ODL Karaf version 0.8.4.

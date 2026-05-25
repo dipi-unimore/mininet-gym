@@ -14,10 +14,44 @@ from utility.evaluation_summary import build_agent_evaluation_summary
 from utility.training_summary import build_agent_training_summary
 from collections import defaultdict
 from colorama import Fore
-import time, threading, traceback
+import copy, time, threading, traceback
 import numpy as np
 
 from utility.utils import ndarray_to_list
+
+def _make_env_copy(base_env, statuses):
+    """
+    Create a per-agent env copy for parallel dataset-mode training.
+    Auto-discovers unpicklable top-level attributes (threading events, gym spaces,
+    Mininet objects), stashes them, deep copies the rest, then re-attaches the
+    stashed refs so all threads share the same stop/pause signals.
+    """
+    _SKIP_PROBE = frozenset(('df', 'statuses'))
+    stash = {}
+    for attr, val in list(vars(base_env).items()):
+        if attr in _SKIP_PROBE:
+            continue
+        try:
+            copy.deepcopy(val)
+        except Exception:
+            stash[attr] = val
+    for attr in stash:
+        setattr(base_env, attr, None)
+    try:
+        env_copy = copy.deepcopy(base_env)
+    finally:
+        for attr, val in stash.items():
+            setattr(base_env, attr, val)
+    for attr, val in stash.items():
+        setattr(env_copy, attr, val)
+    env_copy.df = list(statuses)
+    env_copy.statuses = []
+    env_copy.stop_event = base_env.stop_event
+    env_copy.pause_event = base_env.pause_event
+    if hasattr(base_env, 'stop_update_event'):
+        env_copy.stop_update_event = base_env.stop_update_event
+    return env_copy
+
 
 def attack_detect_main(config, am: AgentManager, env: NetworkEnvAttackDetect):
     
@@ -31,12 +65,20 @@ def attack_detect_main(config, am: AgentManager, env: NetworkEnvAttackDetect):
         else:
             statuses = read_data_file(config.env_params.data_traffic_file)
             episodes = int((len(statuses) - config.env_params.test_episodes) / (config.env_params.max_steps + 1))
+            notify_client(level=SystemLevels.STATUS, status=SystemStatus.RUNNING, mode=SystemModes.TRAINING, message="Started training...")
+            threads_data = []
             for agent in am.agents_params:
-                env.df = list(statuses)
                 agent.episodes = episodes
                 if "skip_learn" not in agent.__dict__ or agent.skip_learn:
                     continue
-                train_agent(agent)
+                env_copy = _make_env_copy(env, statuses)
+                t = threading.Thread(target=train_agent, args=(agent, env_copy), name=agent.name, daemon=True)
+                threads_data.append((t, agent, env_copy))
+                t.start()
+            for t, _, _ in threads_data:
+                t.join()
+            for _, agent, env_copy in threads_data:
+                env.statuses.extend(env_copy.statuses)
                 if config.env_params.print_training_chart:
                     plot_and_save_data_agent(agent, config)
                     agents_metrics[agent.name] = agent.instance.metrics
@@ -47,7 +89,9 @@ def attack_detect_main(config, am: AgentManager, env: NetworkEnvAttackDetect):
         
         if not env.stop_event.is_set():
             #starting test
-            data = start_testing_agents(am, config)   
+            if config.env_params.gym_type != ATTACKS:
+                env.df = list(statuses[-config.env_params.test_episodes:])
+            data = start_testing_agents(am, config)
             data = {
                 'score': data.score,
                 'groundTruth' : data.ground_truth,
@@ -106,22 +150,31 @@ def start_training_agent(am):
         t.join()
     debug("Train_agent_threads finished")
     
-def train_agent(agent):
+def train_agent(agent, env=None):
     """
     Function for training a single agent.
     Args:
         agent: Agent to be trained.
+        env: Environment to use. Defaults to train_agent.env (shared, for real-network mode).
     """
+    env = env or train_agent.env
     start_time = time.time()
     try:
         information(f"Starting training\n", agent.name)
         if isinstance(agent.instance, SupervisedAgent):
-            agent.instance.learn(agent.episodes, train_agent.env, train_agent.env.stop_event)
+            agent.instance.learn(agent.episodes, env, env.stop_event)
         elif agent.is_custom_agent:
-            agent.instance.learn(agent.episodes, train_agent.env.stop_event)
+            agent.instance.env = env
+            agent.instance.learn(agent.episodes, env.stop_event)
         else:
+            try:
+                agent.instance.set_env(env)
+            except Exception as e:
+                debug(Fore.YELLOW + f"Could not swap env for {agent.name}: {e}\n" + Fore.WHITE)
+            if hasattr(agent, 'custom_callback') and agent.custom_callback:
+                agent.custom_callback.env = env
             for episode in range(agent.episodes):
-                if train_agent.env.stop_event.is_set():
+                if env.stop_event.is_set():
                     break
                 agent.custom_callback.before_episode(episode + 1)
                 agent.instance.learn(total_timesteps=agent.max_steps, callback=agent.custom_callback, progress_bar=agent.progress_bar)
@@ -198,7 +251,7 @@ def plot_and_save_data_agent(agent, config):
             error(Fore.RED+f"Error plotting training indicators for {agent.name} !\n{e}\n{traceback.format_exc()}\n"+Fore.WHITE)
     if isinstance(agent.instance, SupervisedAgent) and hasattr(agent.instance, 'y_test') and agent.instance.y_test:
         try:
-            plot_test_confusion_matrix(directory_name, agent.instance.y_test, agent.instance.y_pred, agent.name)
+            plot_test_confusion_matrix(directory_name, agent.instance.y_test, agent.instance.y_pred, agent.name, labels=[0,1], display_labels=["normal","attack"])
         except Exception as e:
             error(Fore.RED+f"Error plotting confusion matrix for {agent.name} !\n{e}\n{traceback.format_exc()}\n"+Fore.WHITE)
     try :
@@ -257,8 +310,8 @@ def test_attack_detect_agents(am, directory_name, config):
         ps = [1 if item[0] == 0 else 0 for item in p[1] ]
         
         try:
-            plot_test_confusion_matrix(directory_name, gt, ps, s[0])  
-        except Exception as e: 
+            plot_test_confusion_matrix(directory_name, gt, ps, s[0], labels=[0,1], display_labels=["normal","attack"])
+        except Exception as e:
             error(Fore.RED+f"Error!\n{e}\n{traceback.format_exc()}\n"+Fore.WHITE)
 
     data = type('', (), {})()

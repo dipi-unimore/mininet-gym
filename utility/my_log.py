@@ -7,6 +7,30 @@ from utility.constants import SYSTEM, SystemLevels
 from utility.utils import convert_ansi_to_html
 
 logger = None
+_suppress_drop_rule_messages = False
+
+
+def set_drop_rule_message_visibility(enabled: bool):
+    global _suppress_drop_rule_messages
+    _suppress_drop_rule_messages = not bool(enabled)
+
+
+def _is_drop_rule_message(message, author=None):
+    text = f"{author or ''} {message or ''}".lower()
+    return any(
+        token in text
+        for token in (
+            "drop rule",
+            "drop rules",
+            "blocking flow",
+            "unblocking flow",
+            "flow blocked",
+            "flow unblocked",
+            "adding drop rule",
+            "removing drop rule",
+            "remove drop rules",
+        )
+    )
 
 def set_log_file(log_path: str = "log.txt"):
     global logger
@@ -34,6 +58,9 @@ def remove_colors(message):
     return ansi_escape.sub('', message)
 
 def log_message(level, message, author=None):
+    if _suppress_drop_rule_messages and _is_drop_rule_message(message, author):
+        return
+
     if not message.endswith("\n") and  not message.endswith("\n"+Fore.WHITE) :
         message += "\n"
         
@@ -67,6 +94,9 @@ def debug(message):
 
 def debug_essential(message):
     """Log essential debug messages to both file and console."""
+    if _suppress_drop_rule_messages and _is_drop_rule_message(message):
+        return
+
     if not message.endswith("\n") and not message.endswith("\n"+Fore.WHITE):
         message += "\n"
 

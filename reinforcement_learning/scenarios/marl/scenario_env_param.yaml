@@ -9,7 +9,7 @@ attacks:
   unblock_required_normal_streak: 2
   apply_drop_rules: false
   thresholds:
-    packets: 22000
+    packets: 120000
     var_packets: 50
-    bytes: 423000000
+    bytes: 4230000000
     var_bytes: 30

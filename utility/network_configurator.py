@@ -439,7 +439,9 @@ def block_flow_drop(net: Mininet, host_name: str) -> bool:
         command_drop = f"ovs-ofctl add-flow {switch_name} priority=65535,in_port={sw_port_num},ip,nw_src={host_ip},actions=drop"
         
         information(f"--- 🚫 Blocking Flow from {host_name} ({host_ip}) on {switch_name} port {sw_port_num} ---")
-        output = switch.cmd(command_drop)
+        from utility.network_flows import _get_switch_lock
+        with _get_switch_lock(switch_name):
+            output = switch.cmd(command_drop)
         if output != "":
             error(f"Error adding DROP rule {host_name}: {output}")
             return False
@@ -473,7 +475,9 @@ def unblock_flow_delete(net: Mininet, host_name: str) -> bool:
         command_delete = f"ovs-ofctl del-flows {switch_name} '{rule_match}'"
         
         information(f"--- 🔓 Unblocking Flow from {host_name} ({host_ip}) on {switch_name} ---")
-        output = switch.cmd(command_delete)
+        from utility.network_flows import _get_switch_lock
+        with _get_switch_lock(switch_name):
+            output = switch.cmd(command_delete)
         if output != "":
             error(f"Error removing DROP rule: {output}")
             return False

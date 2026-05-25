@@ -107,13 +107,13 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
             0, -self.threshold_var_bytes,
         ])
         single_host_high = np.array([
-            self.threshold_packets * self.num_hosts,
+            self.threshold_packets,
             self.threshold_var_packets,
-            self.threshold_bytes * self.num_hosts,
+            self.threshold_bytes,
             self.threshold_var_bytes,
-            self.threshold_packets * self.num_hosts,
+            self.threshold_packets,
             self.threshold_var_packets,
-            self.threshold_bytes * self.num_hosts,
+            self.threshold_bytes,
             self.threshold_var_bytes,
         ])
 
@@ -264,9 +264,9 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
                         }
                     self.evaluate_traffic()
                 else:
-                    error(Fore.RED + "Missing dataset row: no status read\n")
+                    debug("Missing dataset row: no status read\n")
             except Exception as e:
-                error(Fore.RED + "Reading status error\n")
+                debug(f"Reading status error: {e}\n")
 
     def _apply_scenario_step(self, step_plan: dict):
         """
@@ -370,7 +370,7 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
         if self.gym_type == GYM_TYPE[ATTACKS_HO] \
                 and hasattr(self, 'host_tasks') \
                 and self.host_tasks is not None:
-            for host_name, host_task in self.host_tasks.items():
+            for host_name, host_task in list(self.host_tasks.items()):
                 traffic_data["hostStatusesStructured"][host_name].update({
                     'trafficType': host_task['traffic_type'],
                     'taskType':    host_task['task_type'],
@@ -380,51 +380,101 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
             self.show_network_status()
 
     def show_network_status(self):
+        host_tasks = dict(self.host_tasks) if isinstance(self.host_tasks, dict) else {}
+        status     = self.global_state.status
+        ids        = status.get("id", [])
+        total_pkts = int(status.get("packets", 0))
+        pkt_var    = int(status.get("packets_percentage_change", 0))
+        total_bytes = int(status.get("bytes", 0))
+        byte_var   = int(status.get("bytes_percentage_change", 0))
+
+        # Overall label: worst status across all hosts
+        if any(s == 2 for s in ids):
+            overall_color = Fore.RED
+            overall_label = "attack"
+        elif any(s == 1 for s in ids):
+            overall_color = Fore.YELLOW
+            overall_label = "under_attack"
+        else:
+            overall_color = Fore.GREEN
+            overall_label = "normal"
+
+        # Per-host ID string, each colored
+        _id_colors = {0: Fore.GREEN, 1: Fore.YELLOW, 2: Fore.RED}
+        id_str = " ".join(
+            _id_colors.get(s, Fore.WHITE) + str(s) + Fore.WHITE for s in ids
+        )
+
+        information(
+            overall_color + f"{overall_label} "
+            + Fore.BLUE + f"Packet "
+            + Fore.WHITE + f"{total_pkts} {pkt_var}%"
+            + Fore.BLUE + " - "
+            + Fore.WHITE + f"{format_bytes(total_bytes)}B {byte_var}%"
+            + Fore.CYAN + f" - [{id_str}" + Fore.CYAN + "]\n"
+            + Fore.WHITE
+        )
+
+        # Per-host detail
+        level_fn = information if self.show_complete_network_status else debug
         for host in self.global_state.host_states.keys():
             host_state  = self.global_state.get_host_state(host)
             host_status = self.global_state.get_host_status(host)
-            if host_status is not None:
-                if host_status['status'] in (
-                        HostStatus.ATTACKING,
-                        HostStatus.OUT_ATTACK_BLOCKED,
-                        HostStatus.WAR,
-                ):
-                    information(
-                        Fore.WHITE + f"{host} "
-                        + Fore.RED
-                        + f"{host_status['status']} "
-                        + f"{self.host_tasks[host].get('attack_subtype', '').upper()}"
-                        + f"- RX Pkt {int(host_state[0])} {int(host_state[1])}% "
-                        + f"- {format_bytes(int(host_state[2]))}B {int(host_state[3])}% "
-                        + f"- TX Pkt {int(host_state[4])} {int(host_state[5])}% "
-                        + f"- {format_bytes(int(host_state[6]))}B {int(host_state[7])}%\n"
-                        + Fore.WHITE
-                    )
-                elif host_status['status'] in (HostStatus.UNDER_ATTACK,):
-                    information(
-                        Fore.WHITE + f"{host} "
-                        + Fore.YELLOW
-                        + f"{host_status['status']}-"
-                        + f"{self.host_tasks[host]['traffic_type'].upper()}"
-                        + f"- RX Pkt {int(host_state[0])} {int(host_state[1])}% "
-                        + f"- {format_bytes(int(host_state[2]))}B {int(host_state[3])}% "
-                        + f"- TX Pkt {int(host_state[4])} {int(host_state[5])}% "
-                        + f"- {format_bytes(int(host_state[6]))}B {int(host_state[7])}%\n"
-                        + Fore.WHITE
-                    )
-                else:
-                    information(
-                        Fore.WHITE + f"{host} "
-                        + Fore.GREEN
-                        + f"{host_status['status']}-"
-                        + f"{self.host_tasks[host]['traffic_type'].upper()} "
-                        + f"to {self.host_tasks[host]['destination']} "
-                        + f"- RX Pkt {int(host_state[0])} {int(host_state[1])}% "
-                        + f"- {format_bytes(int(host_state[2]))}B {int(host_state[3])}% "
-                        + f"- TX Pkt {int(host_state[4])} {int(host_state[5])}% "
-                        + f"- {format_bytes(int(host_state[6]))}B {int(host_state[7])}%\n"
-                        + Fore.WHITE
-                    )
+            if host_status is None or host_state is None:
+                continue
+
+            raw = np.array(host_state, dtype=np.float32)
+            s   = host_status['status']
+
+            if s in (HostStatus.ATTACKING, HostStatus.OUT_ATTACK_BLOCKED, HostStatus.WAR):
+                disc = self.get_discretized_state(raw)
+                norm = get_normalized_state(raw, self.low, self.high)
+                disc_str = " ".join(str(int(v)) for v in disc)
+                norm_str = " ".join(f"{float(v):.3f}" for v in norm)
+                information(
+                    Fore.WHITE + f"  {host} "
+                    + Fore.RED
+                    + f"{s} "
+                    + f"{host_tasks.get(host, {}).get('attack_subtype', '').upper()}"
+                    + f" - RX Pkt {int(raw[0])} {int(raw[1])}%"
+                    + f" - {format_bytes(int(raw[2]))}B {int(raw[3])}%"
+                    + f" - TX Pkt {int(raw[4])} {int(raw[5])}%"
+                    + f" - {format_bytes(int(raw[6]))}B {int(raw[7])}%"
+                    + Fore.CYAN  + f" - disc:[{disc_str}]"
+                    + Fore.MAGENTA + f" norm:[{norm_str}]\n"
+                    + Fore.WHITE
+                )
+            elif s == HostStatus.UNDER_ATTACK:
+                disc = self.get_discretized_state(raw)
+                norm = get_normalized_state(raw, self.low, self.high)
+                disc_str = " ".join(str(int(v)) for v in disc)
+                norm_str = " ".join(f"{float(v):.3f}" for v in norm)
+                information(
+                    Fore.WHITE + f"  {host} "
+                    + Fore.YELLOW
+                    + f"{s}-"
+                    + f"{host_tasks.get(host, {}).get('traffic_type', '').upper()}"
+                    + f" - RX Pkt {int(raw[0])} {int(raw[1])}%"
+                    + f" - {format_bytes(int(raw[2]))}B {int(raw[3])}%"
+                    + f" - TX Pkt {int(raw[4])} {int(raw[5])}%"
+                    + f" - {format_bytes(int(raw[6]))}B {int(raw[7])}%"
+                    + Fore.CYAN  + f" - disc:[{disc_str}]"
+                    + Fore.MAGENTA + f" norm:[{norm_str}]\n"
+                    + Fore.WHITE
+                )
+            else:
+                level_fn(
+                    Fore.WHITE + f"  {host} "
+                    + Fore.GREEN
+                    + f"{s}-"
+                    + f"{host_tasks.get(host, {}).get('traffic_type', '').upper()} "
+                    + f"to {host_tasks.get(host, {}).get('destination')} "
+                    + f" - RX Pkt {int(raw[0])} {int(raw[1])}%"
+                    + f" - {format_bytes(int(raw[2]))}B {int(raw[3])}%"
+                    + f" - TX Pkt {int(raw[4])} {int(raw[5])}%"
+                    + f" - {format_bytes(int(raw[6]))}B {int(raw[7])}%\n"
+                    + Fore.WHITE
+                )
 
     def initialize_storage(self):
         pass

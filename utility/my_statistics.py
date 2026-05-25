@@ -5,6 +5,14 @@ import matplotlib.pyplot as plt, matplotlib.patches as mpatches, numpy as np, se
 from sklearn import metrics
 
 
+def _rolling_smooth(arr, window=None):
+    s = pd.Series(np.array(arr, dtype=float))
+    w = window or max(5, len(s) // 10)
+    mean = s.rolling(w, min_periods=1, center=True).mean()
+    std = s.rolling(w, min_periods=1, center=True).std().fillna(0)
+    return mean.values, std.values
+
+
 #TODO copy new from colab
 def plot_bar_chart_scores(scores, dir_name, title=''):
     """
@@ -312,32 +320,42 @@ def plot_agent_action_accuracy(indicators, dir_name):
 #END new from colab
 
 def plot_agent_cumulative_rewards(indicators, dir_name, title=''):
-    """plot the agent cumulative reward for each episode
-        
-    Args:
-        indicators (_type_): _description_
-        dir_name (_type_): _description_
-        title (str, optional): _description_. Defaults to ''.
-    """
-    # Extracting indicators to plot
-    episodes = [item['episode'] for item in indicators]
+    episodes = np.array([item['episode'] for item in indicators])
     steps = [item['steps'] for item in indicators]
     correct_predictions = [item['correct_predictions'] for item in indicators]
     reward = [item['cumulative_reward'] for item in indicators]
 
-    x=10+3*int(len(episodes)/70)
-    y=10+int(len(episodes)/70)
-    plt.figure(figsize=(x, y))
-    plt.plot(episodes, reward, label='Rewards', color='purple')
-    plt.plot(episodes, steps, label='Steps', color='cyan')
-    plt.plot(episodes, correct_predictions, label='Correct predictions', color='green')
-    plt.title(f'{title} Cumulative Rewards')
-    plt.xlabel('Episodes')
-    plt.legend()
+    x = 10 + 3 * int(len(episodes) / 70)
+    y = 10 + int(len(episodes) / 70)
+    fig, ax1 = plt.subplots(figsize=(x, y))
+    ax2 = ax1.twinx()
 
-    # Save figure
+    for raw, color, label in [
+        (reward, 'purple', 'Rewards'),
+        (correct_predictions, 'green', 'Correct predictions'),
+    ]:
+        mean, std = _rolling_smooth(raw)
+        ax1.plot(episodes, raw, color=color, alpha=0.15, linewidth=0.8)
+        ax1.plot(episodes, mean, label=label, color=color, linewidth=2)
+        ax1.fill_between(episodes, mean - std, mean + std, alpha=0.2, color=color)
+
+    steps_mean, steps_std = _rolling_smooth(steps)
+    ax2.plot(episodes, steps, color='cyan', alpha=0.15, linewidth=0.8)
+    ax2.plot(episodes, steps_mean, label='Steps', color='cyan', linewidth=2, linestyle='--')
+    ax2.fill_between(episodes, steps_mean - steps_std, steps_mean + steps_std, alpha=0.1, color='cyan')
+    ax2.set_ylabel('Steps', color='cyan')
+    ax2.tick_params(axis='y', labelcolor='cyan')
+
+    ax1.set_title(f'{title} Cumulative Rewards')
+    ax1.set_xlabel('Episodes')
+    ax1.set_ylabel('Value')
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2)
+
+    plt.tight_layout()
     plt.savefig(f"{dir_name}/rewards.png")
-    plt.close()    
+    plt.close()
 
 def plot_agent_execution_confusion_matrix(indicators, dir_name, must_print = True, title=''):
     """print confusion matrix
@@ -347,7 +365,6 @@ def plot_agent_execution_confusion_matrix(indicators, dir_name, must_print = Tru
         dir_name (_type_): Directory name to save the plot.
         title (str, optional): Title of the plot. Defaults to ''.
     """
-    # Extracting indicators to plot
     all_steps_status =  []
     for item in indicators:
         for step_status in item['episode_statuses']:
@@ -355,20 +372,28 @@ def plot_agent_execution_confusion_matrix(indicators, dir_name, must_print = Tru
 
     predicted = [item['action_choosen'] for item in all_steps_status]
     if 'traffic_type' in all_steps_status[0]:
-        # If 'traffic_type' exists, use it as ground truth, eg classification
         ground_truth = [item['traffic_type'] for item in all_steps_status]
+        all_label_names = {0: "none", 1: "ping", 2: "udp", 3: "tcp"}
+        unique_labels = sorted(set(ground_truth) | set(predicted))
+        labels = unique_labels
+        display_labels = [all_label_names.get(l, str(l)) for l in unique_labels]
     else:
-        # eg attack the prediction is 0 or 1
         ground_truth = [item['action_choosen'] if item['action_correct'] else 1 - item['action_choosen'] for item in all_steps_status]
+        all_label_names = {0: "normal", 1: "attack"}
+        unique_labels = sorted(set(ground_truth) | set(predicted))
+        labels = unique_labels
+        display_labels = [all_label_names.get(l, str(l)) for l in unique_labels]
     try:
-        confusion_matrix = metrics.confusion_matrix(ground_truth, predicted)
+        cm = metrics.confusion_matrix(ground_truth, predicted, labels=labels)
         if must_print:
-            cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix)
-            cm_display.plot()
+            row_sums = cm.sum(axis=1, keepdims=True)
+            cm_pct = np.where(row_sums > 0, cm.astype(float) / row_sums * 100, 0.0)
+            cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix=cm_pct, display_labels=display_labels)
+            cm_display.plot(values_format='.1f')
             plt.savefig(f"{dir_name}/matrix.png")
             plt.close()
-        return confusion_matrix
-    except Exception as e: 
+        return cm
+    except Exception as e:
         error(Fore.RED+f"Error!\n{e}: {traceback.format_exc()}\n"+Fore.WHITE)
     
 def plot_agent_execution_statuses(indicators, dir_name, title=''):
@@ -668,24 +693,17 @@ def get_colors_for_predictions(items):
             colors.append('red')  # wrong
     return colors
  
-def plot_test_confusion_matrix(dir_name,ground_truth, predicted, agent):
+def plot_test_confusion_matrix(dir_name, ground_truth, predicted, agent, labels=None, display_labels=None):
     """
-    print confusion matrix
-    Args:
-        dir_name (_type_): _description_
-        ground_truth (_type_): _description_
-        predicted (_type_): _description_
-        agent (_type_): _description_
+    print confusion matrix as percentages (row-normalized)
     """
-    confusion_matrix = metrics.confusion_matrix(ground_truth, predicted)
-    if isinstance(ground_truth[0], int):
-        display_labels = None
-    else:
-        display_labels = [0, 1]
-    cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = display_labels)
-    cm_display.plot()
+    cm = metrics.confusion_matrix(ground_truth, predicted, labels=labels)
+    row_sums = cm.sum(axis=1, keepdims=True)
+    cm_pct = np.where(row_sums > 0, cm.astype(float) / row_sums * 100, 0.0)
+    cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix=cm_pct, display_labels=display_labels)
+    cm_display.plot(values_format='.1f')
     plt.savefig(f"{dir_name}/{agent}_matrix.png")
-    plt.close()  
+    plt.close()
 
 
 #TODO: remove this function, not usefull, because now we have plot_cumulative_reward and 
@@ -736,40 +754,25 @@ def plot_indicators(indicators, dir_name, title=''):
 def plot_metrics(metrics, dir_name, title=''):
     plt.figure(figsize=(12, 6))
 
-    def _pct(vals):
-        return [v * 100 for v in (vals or [])]
-
-    # Accuracy
-    plt.subplot(2, 2, 1)
-    plt.plot(_pct(metrics['accuracy']), label='Accuracy', color='blue')
-    plt.xlabel('Episodes')
-    plt.ylabel('Accuracy (%)')
-    plt.ylim(0, 105)
-    plt.title(f'{title} Accuracy per Episode')
-
-    # Precision
-    plt.subplot(2, 2, 2)
-    plt.plot(_pct(metrics['precision']), label='Precision', color='green')
-    plt.xlabel('Episodes')
-    plt.ylabel('Precision (%)')
-    plt.ylim(0, 105)
-    plt.title(f'{title} Precision per Episode')
-
-    # Recall
-    plt.subplot(2, 2, 3)
-    plt.plot(_pct(metrics['recall']), label='Recall', color='red')
-    plt.xlabel('Episodes')
-    plt.ylabel('Recall (%)')
-    plt.ylim(0, 105)
-    plt.title(f'{title} Recall per Episode')
-
-    # F1-Score
-    plt.subplot(2, 2, 4)
-    plt.plot(_pct(metrics['f1_score']), label='F1 Score', color='purple')
-    plt.xlabel('Episodes')
-    plt.ylabel('F1-Score (%)')
-    plt.ylim(0, 105)
-    plt.title(f'{title} F1-Score per Episode')
+    _cfg = [
+        (1, 'accuracy',  'Accuracy',  'blue'),
+        (2, 'precision', 'Precision', 'green'),
+        (3, 'recall',    'Recall',    'red'),
+        (4, 'f1_score',  'F1 Score',  'purple'),
+    ]
+    for pos, key, label, color in _cfg:
+        plt.subplot(2, 2, pos)
+        raw = np.array([v * 100 for v in (metrics.get(key) or [])])
+        ep = np.arange(1, len(raw) + 1)
+        mean, std = _rolling_smooth(raw)
+        plt.plot(ep, raw, color=color, alpha=0.15, linewidth=0.8)
+        plt.plot(ep, mean, label=label, color=color, linewidth=2)
+        plt.fill_between(ep, np.clip(mean - std, 0, 105), np.clip(mean + std, 0, 105),
+                         alpha=0.2, color=color)
+        plt.xlabel('Episodes')
+        plt.ylabel(f'{label} (%)')
+        plt.ylim(0, 105)
+        plt.title(f'{title} {label} per Episode')
 
     plt.tight_layout()
     plt.savefig(f"{dir_name}/metrics.png")
@@ -781,38 +784,29 @@ def plot_combined_performance_over_time(
     xlabel="Episodes",
     ylabel="Metric Value"
 ):
-    """
-    Plots accuracy, recall, precision, and f-score on a single line chart
-    over training episodes or time steps.
-
-    Args:
-        episodes (list or np.array): A list or array representing the x-axis (e.g., episode numbers).
-        accuracy_scores (list or np.array): List of accuracy scores corresponding to each episode.
-        recall_scores (list or np.array): List of recall scores.
-        precision_scores (list or np.array): List of precision scores.
-        fscore_scores (list or np.array): List of f-score scores.
-        title (str): Title of the plot.
-        xlabel (str): Label for the x-axis.
-        ylabel (str): Label for the y-axis.
-    """
-   # Extract data for plotting    
-   # TODO: verify that all metrics have the same length
     episodes = np.arange(1, len(metrics["accuracy"]) + 1)
-    recall_scores = metrics["recall"]
-    accuracy_scores = metrics["accuracy"]
-    precision_scores = metrics["precision"]
-    fscore_scores = metrics["f1_score"]    
-    
-    pct = lambda vals: [v * 100 for v in (vals or [])]
-
+    pct = lambda vals: np.array([v * 100 for v in (vals or [])])
     marker_step = max(1, len(episodes) // 10)
     markevery = list(range(0, len(episodes), marker_step))
 
+    _cfg = [
+        ("recall",    "Recall",    "red",    "x", "--"),
+        ("accuracy",  "Accuracy",  "blue",   "o", "-"),
+        ("precision", "Precision", "green",  "s", "-."),
+        ("f1_score",  "F-Score",   "purple", "d", ":"),
+    ]
+
     plt.figure(figsize=(12, 7))
-    plt.plot(episodes, pct(recall_scores),    label='Recall',    marker='x', linestyle='--',  markevery=markevery)
-    plt.plot(episodes, pct(accuracy_scores),  label='Accuracy',  marker='o', linestyle='-',   markevery=markevery)
-    plt.plot(episodes, pct(precision_scores), label='Precision', marker='s', linestyle='-.',  markevery=markevery)
-    plt.plot(episodes, pct(fscore_scores),    label='F-Score',   marker='d', linestyle=':',   markevery=markevery)
+    for key, label, color, marker, ls in _cfg:
+        raw = pct(metrics[key])
+        mean, std = _rolling_smooth(raw)
+        plt.plot(episodes, raw, color=color, alpha=0.15, linewidth=0.8)
+        plt.plot(episodes, mean, label=label, color=color,
+                 marker=marker, linestyle=ls, markevery=markevery, linewidth=2)
+        plt.fill_between(episodes,
+                         np.clip(mean - std, 0, 100),
+                         np.clip(mean + std, 0, 100),
+                         alpha=0.15, color=color)
 
     plt.title(title)
     plt.xlabel(xlabel)
@@ -890,6 +884,59 @@ def plot_metrics_kfold(
     plt.tight_layout()
     suffix = f"_{host}" if host else ""
     plt.savefig(f"{dir_name}/metrics_kfold{suffix}.png")
+    plt.close()
+
+
+def plot_metrics_violin(
+    metrics_folds,
+    dir_name,
+    title="Metric Distribution at Key Training Steps",
+    host="",
+):
+    """Violin + inner box plots showing per-metric distribution at 25/50/75/100% of training.
+
+    Requires at least 2 runs/folds. Saves metrics_violin[_host].png.
+    """
+    _cfg = [
+        ("accuracy",  "Accuracy",  "blue"),
+        ("precision", "Precision", "green"),
+        ("recall",    "Recall",    "red"),
+        ("f1_score",  "F-Score",   "purple"),
+    ]
+    active = [(k, lbl, c) for k, lbl, c in _cfg
+              if k in metrics_folds and len(metrics_folds[k]) >= 2]
+    if not active:
+        return
+
+    n_episodes = min(min(len(fold) for fold in metrics_folds[k]) for k, *_ in active)
+    checkpoints = [max(0, int(n_episodes * p) - 1) for p in (0.25, 0.50, 0.75, 1.0)]
+    cp_labels = ["25%", "50%", "75%", "100%"]
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(title, fontsize=14)
+
+    for ax, (key, label, color) in zip(axes.flat, active):
+        arr = np.array([fold[:n_episodes] for fold in metrics_folds[key]]) * 100
+        data = [arr[:, cp] for cp in checkpoints]
+        parts = ax.violinplot(data, positions=range(1, 5), showmedians=False, showextrema=False)
+        for pc in parts['bodies']:
+            pc.set_facecolor(color)
+            pc.set_alpha(0.5)
+        ax.boxplot(data, positions=range(1, 5), widths=0.12,
+                   medianprops=dict(color='black', linewidth=2),
+                   whiskerprops=dict(linestyle='--', alpha=0.7),
+                   flierprops=dict(marker='o', markersize=4, alpha=0.5))
+        ax.set_xticks(range(1, 5))
+        ax.set_xticklabels(cp_labels)
+        ax.set_xlabel("Training Progress")
+        ax.set_ylabel(f"{label} (%)")
+        ax.set_ylim(0, 105)
+        ax.set_title(f"{label} Distribution")
+        ax.grid(True, linestyle='--', alpha=0.4)
+
+    plt.tight_layout()
+    suffix = f"_{host}" if host else ""
+    plt.savefig(f"{dir_name}/metrics_violin{suffix}.png")
     plt.close()
 
 

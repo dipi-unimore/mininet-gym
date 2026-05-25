@@ -52,9 +52,9 @@
 </figure>
 
 <ul>
-  <li><strong>Hosts</strong> — number of regular hosts in the Mininet topology (default 5).</li>
-  <li><strong>IoT Devices</strong> — number of IoT nodes attached to the switch (default 5).</li>
-  <li><strong>Controller</strong> — OpenDayLight address; usually <code>127.0.0.1:8181</code>.</li>
+  <li><strong>Hosts</strong> — number of regular hosts in the Mininet topology (default 5). Each host can generate normal traffic and, depending on the scenario, act as an attacker or victim.</li>
+  <li><strong>IoT Devices</strong> — number of IoT nodes attached to the switch (default 5). IoT nodes generate lightweight traffic patterns distinct from regular hosts.</li>
+  <li><strong>Controller</strong> — OpenDayLight REST API address; typically <code>127.0.0.1:8181</code> for a local instance or the Docker host IP for a containerised deployment.</li>
 </ul>
 
 <h3>Screenshots — Configuration Panel</h3>
@@ -72,20 +72,30 @@
 </div>
 
 <h3>Gym Type (Scenario)</h3>
-<p>Select the RL environment the agents will train on. Four scenarios are available:</p>
+<p>
+  The <code>gym_type</code> field selects both the task and the data source. Every scenario
+  has a <strong>live</strong> variant (traffic is generated in real time inside Mininet) and
+  a <strong><code>_from_dataset</code></strong> variant (observations are replayed from a
+  pre-recorded <code>scenario.json</code> file, which is much faster and fully reproducible).
+</p>
 <table>
-  <thead><tr><th>Scenario</th><th>Task</th><th>Action</th></tr></thead>
+  <thead><tr><th>gym_type value</th><th>UI label</th><th>Task</th><th>Action space</th><th>Data source</th></tr></thead>
   <tbody>
-    <tr><td><strong>Classification</strong></td><td>Classify traffic: None / Ping / UDP / TCP</td><td>Alert only</td></tr>
-    <tr><td><strong>Attack-Net</strong></td><td>Binary detection: Normal vs. Attack (global)</td><td>Alert only</td></tr>
-    <tr><td><strong>Attack-PerHost</strong></td><td>Per-host: Normal / Victim / Attacker</td><td>SDN link block</td></tr>
-    <tr><td><strong>MARL</strong></td><td>Hierarchical multi-agent (Coordinator + Host agents)</td><td>Distributed SDN block</td></tr>
+    <tr><td><code>classification</code></td><td>Classification</td><td>Classify traffic: None / Ping / UDP / TCP</td><td>Alert only (4 classes)</td><td>Live Mininet</td></tr>
+    <tr><td><code>classification_from_dataset</code></td><td>Classification (dataset)</td><td>Same classification task</td><td>Alert only (4 classes)</td><td>Replay dataset</td></tr>
+    <tr><td><code>attacks</code></td><td>Attack-Net</td><td>Binary detection: Normal vs. Attack (global view)</td><td>Alert only (2 classes)</td><td>Live Mininet</td></tr>
+    <tr><td><code>attacks_from_dataset</code></td><td>Attack-Net (dataset)</td><td>Same binary detection</td><td>Alert only (2 classes)</td><td>Replay dataset</td></tr>
+    <tr><td><code>attacks_ho</code></td><td>Attack-PerHost</td><td>Per-host: Normal / Victim / Attacker</td><td>SDN link block per host</td><td>Live Mininet</td></tr>
+    <tr><td><code>attacks_ho_from_dataset</code></td><td>Attack-PerHost (dataset)</td><td>Same per-host detection</td><td>SDN link block per host</td><td>Replay dataset</td></tr>
+    <tr><td><code>marl_attacks</code></td><td>MARL</td><td>Hierarchical multi-agent (Coordinator + Host agents)</td><td>Distributed SDN block</td><td>Live Mininet</td></tr>
+    <tr><td><code>marl_attacks_from_dataset</code></td><td>MARL (dataset)</td><td>Same MARL task</td><td>Distributed SDN block</td><td>Replay dataset</td></tr>
   </tbody>
 </table>
 <div class="man-note">
-  <strong>Attack-PerHost</strong> is the primary demonstration scenario: a correct
+  <strong>Attack-PerHost</strong> (<code>attacks_ho</code>) is the primary demonstration scenario: a correct
   <em>Attacker</em> classification triggers an OpenDayLight flow rule that drops traffic
-  from that host at the switch level.
+  from that host at the switch level. Use the <code>_from_dataset</code> variant whenever you
+  want fast, reproducible runs without a running Mininet network.
 </div>
 
 <h3>Agent Configuration</h3>
@@ -96,8 +106,8 @@
 <ul>
   <li><strong>Algorithm</strong> — choose from Q-Learning, SARSA, DQN, PPO, A2C, Supervised.</li>
   <li><strong>Name</strong> — a free-form label shown in all charts and tables.</li>
-  <li><strong>Episodes</strong> — number of training episodes.</li>
-  <li><strong>Steps per episode</strong> — maximum steps before an episode resets.</li>
+  <li><strong>Episodes</strong> — number of training episodes (overrides <code>env_params.episodes</code> if set per-agent).</li>
+  <li><strong>Steps per episode</strong> — maximum steps before an episode resets (overrides <code>env_params.max_steps</code>).</li>
 </ul>
 <p>Multiple agents can run sequentially in the same experiment for easy comparison.</p>
 
@@ -117,33 +127,94 @@
 
 <h3>Global Settings</h3>
 <table>
-  <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>training_directory</code></td><td>Directory where experiment outputs and training artefacts are stored.</td></tr>
-    <tr><td><code>enable_web_interface</code></td><td>Enable or disable the web UI.</td></tr>
-    <tr><td><code>server_user</code></td><td>Unix user used by the runtime when launching Mininet-related processes.</td></tr>
-    <tr><td><code>log_level</code></td><td>Logging verbosity used by the application.</td></tr>
-    <tr><td><code>random_seed</code></td><td>Seed used to make runs reproducible.</td></tr>
+    <tr>
+      <td><code>training_directory</code></td><td><code>_training</code></td>
+      <td>Root directory where all experiment outputs are written. Each run creates a timestamped sub-folder: <code>&lt;training_directory&gt;/&lt;gym_type&gt;/&lt;YYYYMMDD-HHMMSS&gt;_&lt;switches&gt;_&lt;hosts&gt;_&lt;iots&gt;/</code>.</td>
+    </tr>
+    <tr>
+      <td><code>enable_web_interface</code></td><td><code>true</code></td>
+      <td>Enable or disable the web dashboard. Set to <code>false</code> to run headless from the command line only.</td>
+    </tr>
+    <tr>
+      <td><code>web_server_port</code></td><td><code>5000</code></td>
+      <td>TCP port the Flask web server listens on. Change this if port 5000 is already in use on your machine.</td>
+    </tr>
+    <tr>
+      <td><code>server_user</code></td><td><code>mininet-gym</code></td>
+      <td>Unix user that owns Mininet-related processes (e.g. <code>sudo mn</code> commands). Must have passwordless sudo for Mininet commands.</td>
+    </tr>
+    <tr>
+      <td><code>log_level</code></td><td><code>info</code></td>
+      <td>Logging verbosity: <code>info</code> for normal operation, <code>debug</code> for verbose per-step output. Debug mode generates significantly more I/O and may slow training.</td>
+    </tr>
+    <tr>
+      <td><code>random_seed</code></td><td><code>77</code></td>
+      <td>Integer seed passed to NumPy and Python's <code>random</code> module to make runs reproducible. Change to get a different but still reproducible outcome.</td>
+    </tr>
   </tbody>
 </table>
 
 <h3>Environment Parameters (<code>env_params</code>)</h3>
 <table>
-  <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>gym_type</code></td><td>Select which scenario pipeline to execute. Use <code>*_from_dataset</code> variants when replaying pre-recorded status JSON files; use non-dataset variants for live/synthetic traffic generation.</td></tr>
-    <tr><td><code>episodes</code></td><td>Number of training episodes.</td></tr>
-    <tr><td><code>max_steps</code></td><td>Maximum number of steps per episode.</td></tr>
-    <tr><td><code>test_episodes</code></td><td>Number of evaluation episodes run after training.</td></tr>
-    <tr><td><code>n_bins</code></td><td>Number of bins used by state discretisation. Higher values preserve more detail but increase the state-space size for tabular agents.</td></tr>
-    <tr><td><code>steps_min_percentage</code></td><td>Minimum fraction of episode steps required before early-stop checks are considered valid. Typical range: 0.7–0.95.</td></tr>
-    <tr><td><code>accuracy_min</code></td><td>Accuracy threshold used by early-stop logic. If reached (with <code>steps_min_percentage</code> satisfied), training can terminate early.</td></tr>
-    <tr><td><code>wait_after_read</code></td><td>Delay (seconds) after reading network counters before the next observation is collected.</td></tr>
-    <tr><td><code>show_normal_traffic</code></td><td>Show normal traffic generation events in the logs and UI.</td></tr>
-    <tr><td><code>print_training_chart</code></td><td>Generate chart images to disk during training.</td></tr>
-    <tr><td><code>must_check_env</code></td><td>Enable extra Gymnasium environment validity checks before running.</td></tr>
+    <tr>
+      <td><code>gym_type</code></td><td><code>attacks</code></td>
+      <td>Selects which scenario pipeline to execute. See the <strong>Gym Type</strong> table above for all valid values. Use <code>*_from_dataset</code> variants to replay pre-recorded <code>scenario.json</code> files; use plain variants for live traffic generation inside Mininet.</td>
+    </tr>
+    <tr>
+      <td><code>agent_execution_mode</code></td><td><code>parallel</code></td>
+      <td>Controls how multiple agents are scheduled within an episode. <code>parallel</code> (default): all agents act concurrently each step — normal production behaviour. <code>sequential</code>: agents act one after the other — useful for debugging to understand the environment's step-by-step response to each decision.</td>
+    </tr>
+    <tr>
+      <td><code>csv_file</code></td><td>—</td>
+      <td>Path to a pre-recorded traffic CSV file. <strong>Required only</strong> when <code>gym_type</code> is <code>classification_from_dataset</code> and when using the Supervised agent with a CSV data source. For JSON-based dataset replays the scenario file is selected via the UI instead.</td>
+    </tr>
+    <tr>
+      <td><code>episodes</code></td><td><code>10</code></td>
+      <td>Number of training episodes. One episode runs until <code>max_steps</code> is reached or the early-stop condition is met. More episodes → longer training but better convergence. Can be overridden per-agent.</td>
+    </tr>
+    <tr>
+      <td><code>max_steps</code></td><td><code>20</code></td>
+      <td>Maximum number of environment steps per episode. When this limit is reached the episode resets regardless of accuracy. Increase for scenarios that need sustained observation windows (e.g. long attack durations).</td>
+    </tr>
+    <tr>
+      <td><code>test_episodes</code></td><td><code>80</code></td>
+      <td>Number of evaluation episodes run after training completes. These episodes use the learned policy without exploration (ε = 0 for tabular agents) to produce the final metrics reported in the Results panel.</td>
+    </tr>
+    <tr>
+      <td><code>n_bins</code></td><td><code>4</code></td>
+      <td>Number of bins used by log-scale state discretisation for tabular agents (Q-Learning, SARSA). Higher values preserve more detail but grow the Q-table exponentially. Deep agents (DQN, PPO, A2C) ignore this parameter — they consume raw or normalised continuous features.</td>
+    </tr>
+    <tr>
+      <td><code>steps_min_percentage</code></td><td><code>0.9</code></td>
+      <td>Minimum fraction of <code>max_steps</code> that must elapse before early-stop is evaluated. E.g. 0.9 with 20 steps means at least 18 steps must complete. Prevents premature termination on lucky early episodes.</td>
+    </tr>
+    <tr>
+      <td><code>accuracy_min</code></td><td><code>0.9</code></td>
+      <td>Accuracy threshold for early-stop. If accuracy exceeds this value <em>and</em> <code>steps_min_percentage</code> is satisfied, the episode may terminate early. Set to <code>1.0</code> to disable early stop.</td>
+    </tr>
+    <tr>
+      <td><code>wait_after_read</code></td><td><code>1</code></td>
+      <td>Seconds to pause after querying OpenDayLight flow statistics before collecting the next observation. Increase on slow controllers or congested networks to avoid stale readings. Has no effect with <code>_from_dataset</code> variants.</td>
+    </tr>
+    <tr>
+      <td><code>show_normal_traffic</code></td><td><code>true</code></td>
+      <td>Include normal-traffic generation events in the web console log and server log. Disable to reduce log noise during long runs.</td>
+    </tr>
+    <tr>
+      <td><code>print_training_chart</code></td><td><code>true</code></td>
+      <td>Save per-episode reward and accuracy chart images to the run output folder during training. Disable to reduce disk I/O on resource-constrained machines.</td>
+    </tr>
+    <tr>
+      <td><code>must_check_env</code></td><td><code>false</code></td>
+      <td>Run Gymnasium's <code>check_env()</code> validator before starting. Useful when developing new scenario environments to catch API contract violations. Adds startup overhead; keep <code>false</code> in production.</td>
+    </tr>
   </tbody>
 </table>
+
 <div class="man-note">
   <strong>Scenario source (UI):</strong> The <em>Scenario Source</em> selector controls how the environment is initialised.
   <ul style="margin-top:6px">
@@ -154,48 +225,146 @@
 </div>
 
 <h3>Attack Parameters (<code>env_params.attacks</code>)</h3>
-<p>Active only for attack-oriented scenarios: <strong>Attack-Net</strong>, <strong>Attack-PerHost</strong>, <strong>MARL</strong>.</p>
+<p>Active for attack-oriented scenarios: <strong>Attack-Net</strong>, <strong>Attack-PerHost</strong>, <strong>MARL</strong> (and their <code>_from_dataset</code> equivalents).</p>
+
+<h4>Probability &amp; Timing</h4>
 <table>
-  <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Applies to</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>likely</code></td><td>Base probability that a host starts an attack when idle. Can evolve dynamically during generation depending on scenario logic.</td></tr>
-    <tr><td><code>likely_train</code></td><td>Attack likelihood during <strong>training</strong> episodes (Attack-PerHost only). Range: 0.0–1.0. Higher values create frequent attacks for policy learning.</td></tr>
-    <tr><td><code>likely_eval</code></td><td>Attack likelihood during <strong>evaluation</strong> episodes (Attack-PerHost only). Range: 0.0–1.0. Lower values simulate realistic sparse attack conditions.</td></tr>
-    <tr><td><code>max_attack_percentage</code></td><td>Upper cap for effective attack probability (0.0–1.0). Example: 0.9 means attack likelihood scales up to 90% in high-pressure phases.</td></tr>
-    <tr><td><code>short_attack_duration</code></td><td>Duration (steps) of SHORT_ATTACK windows. Lower values create bursty spikes; higher values create sustained micro-attacks.</td></tr>
-    <tr><td><code>long_attack_duration</code></td><td>Duration (steps) of LONG_ATTACK windows. Increase for persistent attacks; reduce for more fragmented behaviour.</td></tr>
-    <tr><td><code>no_attack_timeout</code></td><td>Cooldown (steps) after an attack before the same host can attack again. Lower values increase attack density.</td></tr>
-    <tr><td><code>unblock_min_hold_rounds</code></td><td>Minimum full rounds to keep a host blocked before allowing unblock.</td></tr>
-    <tr><td><code>unblock_required_normal_streak</code></td><td>Consecutive NORMAL decisions required while blocked before the host is unblocked.</td></tr>
-    <tr><td><code>apply_drop_rules</code></td><td>If <code>true</code>, the environment applies OpenDayLight drop rules when the agent takes the block action. If <code>false</code>, the environment provides reward feedback only without modifying network traffic.</td></tr>
+    <tr>
+      <td><code>likely</code></td><td><code>0.45</code></td><td>Attack-Net, global attacks</td>
+      <td>Base probability (0.0–0.5) that any idle host starts an attack at each step. A value of 0.45 means roughly 45 % chance per step per host. Used by the <code>attacks</code> and <code>attacks_from_dataset</code> scenarios; in <code>attacks_ho</code> it is superseded by <code>likely_train</code>/<code>likely_eval</code>.</td>
+    </tr>
+    <tr>
+      <td><code>likely_train</code></td><td><code>0.9</code></td><td>Attack-PerHost, MARL</td>
+      <td>Attack probability during <strong>training</strong> episodes (0.0–1.0). A high value (e.g. 0.9) exposes the agent to frequent attacks so it can learn the block policy quickly. Lower this if convergence is unstable.</td>
+    </tr>
+    <tr>
+      <td><code>likely_eval</code></td><td><code>0.3</code></td><td>Attack-PerHost, MARL</td>
+      <td>Attack probability during <strong>evaluation</strong> episodes (0.0–1.0). A lower value (e.g. 0.3) simulates a realistic sparse-attack environment for fair metrics. Must be ≤ <code>likely_train</code> in typical setups.</td>
+    </tr>
+    <tr>
+      <td><code>max_attack_percentage</code></td><td><code>0.9</code></td><td>All attack scenarios</td>
+      <td>Hard cap on effective attack probability regardless of dynamic scaling (0.0–1.0). Prevents the generator from creating pathological 100 % attack conditions that would give the agent no normal-traffic baseline.</td>
+    </tr>
+    <tr>
+      <td><code>short_attack_duration</code></td><td><code>5</code></td><td>Attack-PerHost, MARL</td>
+      <td>Length (in steps) of a <em>SHORT_ATTACK</em> window. Lower values (2–3) produce bursty spikes that are harder to detect before they end; higher values (8–10) give the agent more time to react.</td>
+    </tr>
+    <tr>
+      <td><code>long_attack_duration</code></td><td><code>25</code></td><td>Attack-PerHost, MARL</td>
+      <td>Length (in steps) of a <em>LONG_ATTACK</em> window. Increase for sustained attacks that stress mitigation latency; decrease for fragmented, intermittent attack patterns.</td>
+    </tr>
+    <tr>
+      <td><code>no_attack_timeout</code></td><td><code>3</code></td><td>Attack-PerHost, MARL</td>
+      <td>Cooldown period (steps) after any attack before the same host can attack again. A low value (3–5) creates high-density alternating attacks; a high value (15–30) spaces attacks out and makes normal-traffic windows more prominent.</td>
+    </tr>
   </tbody>
 </table>
 
-<h3>Detection Thresholds</h3>
-<p>Thresholds used by rule-based labelling in both attack and classification scenarios.</p>
+<h4>Unblock Policy</h4>
 <table>
-  <thead><tr><th>Parameter</th><th>Applies to</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>attacks.thresholds.packets</code></td><td>Attack scenarios</td><td>Absolute packet-count threshold. Values above this are treated as anomalous.</td></tr>
-    <tr><td><code>attacks.thresholds.var_packets</code></td><td>Attack scenarios</td><td>Allowed packet variation (%) versus baseline. Above this delta, traffic may be flagged as unstable.</td></tr>
-    <tr><td><code>attacks.thresholds.bytes</code></td><td>Attack scenarios</td><td>Absolute byte-volume threshold used with packet thresholds to characterise attack intensity.</td></tr>
-    <tr><td><code>attacks.thresholds.var_bytes</code></td><td>Attack scenarios</td><td>Allowed byte variation (%) versus baseline. Useful for volumetric anomaly detection.</td></tr>
-    <tr><td><code>classification.thresholds.packets</code></td><td>Classification</td><td>Packet threshold for traffic class labelling.</td></tr>
-    <tr><td><code>classification.thresholds.bytes</code></td><td>Classification</td><td>Byte threshold for traffic class labelling.</td></tr>
-    <tr><td><code>classification.thresholds.var_packets</code></td><td>Classification</td><td>Allowed packet variation percentage for classification.</td></tr>
-    <tr><td><code>classification.thresholds.var_bytes</code></td><td>Classification</td><td>Allowed byte variation percentage for classification.</td></tr>
+    <tr>
+      <td><code>unblock_min_hold_rounds</code></td><td><code>2</code></td>
+      <td>Minimum number of full episode rounds a host must remain SDN-blocked before the agent is permitted to unblock it. Prevents oscillation where a host is blocked and immediately unblocked every step.</td>
+    </tr>
+    <tr>
+      <td><code>unblock_required_normal_streak</code></td><td><code>2</code></td>
+      <td>Number of consecutive NORMAL decisions the agent must make for a blocked host before the block is lifted. Acts as a stability filter: the agent must see sustained normal behaviour, not a single clean step, before restoring connectivity.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>SDN Enforcement</h4>
+<table>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>apply_drop_rules</code></td><td><code>false</code></td>
+      <td>When <code>true</code> the environment pushes real OpenDayLight flow rules to drop traffic from an identified attacker at the OVS switch. When <code>false</code> the environment computes reward feedback without touching the network — useful for pure RL experiments that do not require a live SDN controller.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Detection Thresholds (<code>env_params.attacks.thresholds</code> and <code>env_params.classification.thresholds</code>)</h3>
+<p>
+  Thresholds are used by the <strong>rule-based labeller</strong> that converts raw OpenDayLight
+  flow statistics into ground-truth labels for reward computation. The labeller flags a host as
+  under attack when both the absolute counter and its variation exceed their respective thresholds.
+</p>
+
+<h4>Attack scenarios</h4>
+<table>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>attacks.thresholds.packets</code></td><td><code>22000</code></td>
+      <td>Absolute packet-count threshold per observation window. Values above this indicate anomalous traffic volume. Multiply by the number of hosts to derive the upper bound for log-bin discretisation in tabular agents.</td>
+    </tr>
+    <tr>
+      <td><code>attacks.thresholds.var_packets</code></td><td><code>50</code></td>
+      <td>Allowed packet-count variation (%) relative to a rolling baseline. If the delta exceeds this percentage the traffic is flagged as potentially unstable. Typical UDP floods produce variation well above 50 %.</td>
+    </tr>
+    <tr>
+      <td><code>attacks.thresholds.bytes</code></td><td><code>423000000</code></td>
+      <td>Absolute byte-volume threshold. Used alongside packet count to characterise attack intensity. Note: for <code>hping3 --flood --udp</code> attacks, packet count is the primary indicator; bytes play a secondary role.</td>
+    </tr>
+    <tr>
+      <td><code>attacks.thresholds.var_bytes</code></td><td><code>30</code></td>
+      <td>Allowed byte variation (%) relative to baseline. Useful for detecting volumetric anomalies in TCP or ICMP floods where payload size varies.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Classification scenario</h4>
+<table>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>classification.thresholds.packets</code></td><td><code>200</code></td>
+      <td>Packet count above which traffic is labelled as active (non-idle). Below this threshold a host is classified as <em>None</em>.</td>
+    </tr>
+    <tr>
+      <td><code>classification.thresholds.bytes</code></td><td><code>1000000</code></td>
+      <td>Byte volume used alongside packet count to distinguish between lightweight traffic types (Ping) and heavier ones (UDP, TCP).</td>
+    </tr>
+    <tr>
+      <td><code>classification.thresholds.var_packets</code></td><td><code>100</code></td>
+      <td>Allowed packet variation (%) for classification labelling. A high value (100 %) accommodates the natural burstiness of normal traffic without false positives.</td>
+    </tr>
+    <tr>
+      <td><code>classification.thresholds.var_bytes</code></td><td><code>100</code></td>
+      <td>Allowed byte variation (%) for classification labelling.</td>
+    </tr>
   </tbody>
 </table>
 
 <h3>Network Topology (<code>env_params.net_params</code>)</h3>
 <table>
-  <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>num_hosts</code></td><td>Number of regular hosts in the simulated network.</td></tr>
-    <tr><td><code>num_switches</code></td><td>Number of OVS switches in the simulated network.</td></tr>
-    <tr><td><code>num_iot</code></td><td>Number of IoT nodes in the simulated network.</td></tr>
-    <tr><td><code>traffic_types</code></td><td>Allowed normal-traffic generators. Common set: <code>none</code>, <code>ping</code>, <code>udp</code>, <code>tcp</code>.</td></tr>
-    <tr><td><code>start_cli</code></td><td>Open the Mininet CLI after creating the network (useful for manual inspection).</td></tr>
+    <tr>
+      <td><code>num_hosts</code></td><td><code>5</code></td>
+      <td>Number of regular hosts in the Mininet topology. Each host is a Mininet node that can generate normal traffic and, in attack scenarios, be assigned attacker or victim roles by the scenario generator.</td>
+    </tr>
+    <tr>
+      <td><code>num_switches</code></td><td><code>1</code></td>
+      <td>Number of OVS switches. The current topology is a star, so a single switch is standard. Multi-switch topologies are reserved for future work.</td>
+    </tr>
+    <tr>
+      <td><code>num_iots</code></td><td><code>5</code></td>
+      <td>Number of IoT nodes. IoT nodes generate lower-bandwidth traffic patterns and are observed by the agent but currently do not take attacker roles in single-agent scenarios.</td>
+    </tr>
+    <tr>
+      <td><code>traffic_types</code></td><td><code>["none","ping","udp","tcp"]</code></td>
+      <td>List of normal-traffic generators available to hosts during an episode. <code>none</code> means a host is idle; the others start the corresponding traffic tool (<code>ping</code>, <code>iperf</code> UDP, <code>iperf</code> TCP). Remove a type to exclude it from random assignment.</td>
+    </tr>
+    <tr>
+      <td><code>start_cli</code></td><td><code>false</code></td>
+      <td>Open the interactive Mininet CLI after the network is created. Useful for manual inspection and debugging. Training cannot start while the CLI is open; keep <code>false</code> for automated runs.</td>
+    </tr>
   </tbody>
 </table>
 
@@ -203,79 +372,322 @@
 <table>
   <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>ip</code></td><td>Controller IP address (e.g. <code>127.0.0.1</code> or Docker host IP).</td></tr>
-    <tr><td><code>port</code></td><td>Controller TCP port (default <code>8181</code> for OpenDayLight REST API).</td></tr>
-    <tr><td><code>usr</code></td><td>Controller username (default <code>admin</code>).</td></tr>
-    <tr><td><code>pwd</code></td><td>Controller password.</td></tr>
+    <tr>
+      <td><code>ip</code></td>
+      <td>IP address of the OpenDayLight REST API. Use <code>127.0.0.1</code> for a local installation or the Docker bridge IP (e.g. <code>172.17.0.1</code>) for a containerised ODL instance.</td>
+    </tr>
+    <tr>
+      <td><code>port</code></td>
+      <td>TCP port for the OpenDayLight REST API. The default ODL port is <code>8181</code>. Note: the Mininet controller connection uses <code>6633</code> (OpenFlow); the REST API for flow programming uses <code>8181</code>.</td>
+    </tr>
+    <tr>
+      <td><code>usr</code></td>
+      <td>OpenDayLight REST API username. Default ODL credential is <code>admin</code>.</td>
+    </tr>
+    <tr>
+      <td><code>pwd</code></td>
+      <td>OpenDayLight REST API password. Default ODL credential is <code>admin</code>. Store securely — do not commit real credentials to version control.</td>
+    </tr>
   </tbody>
 </table>
 <div class="man-warn">
   Ensure IP, port and credentials match your OpenDayLight instance before starting training.
-  A wrong controller address will prevent SDN drop rules from being applied.
+  A wrong controller address prevents SDN drop rules from being applied and may cause the
+  environment to hang waiting for an API response.
 </div>
 
 <h3>Agent Common Parameters (<code>agents.*</code>)</h3>
-<p>Each entry in the <code>agents</code> list represents one agent configuration. Multiple agents can be enabled in the same run.</p>
+<p>Each entry in the <code>agents</code> list represents one agent configuration. Multiple agents can be enabled for sequential comparison in the same run.</p>
 <table>
-  <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>name</code></td><td>Display name shown in charts, tables and PDF exports.</td></tr>
-    <tr><td><code>algorithm</code></td><td>Algorithm identifier: <code>q_learning</code>, <code>sarsa</code>, <code>dqn</code>, <code>ppo</code>, <code>a2c</code>, <code>supervised</code>.</td></tr>
-    <tr><td><code>enabled</code></td><td>Enable or disable this agent without removing its configuration.</td></tr>
-    <tr><td><code>progress_bar</code></td><td>Show a progress bar in the terminal while training this agent.</td></tr>
-    <tr><td><code>skip_learn</code></td><td>Skip learning and use the agent for evaluation or inspection only.</td></tr>
-    <tr><td><code>show_action</code></td><td>Log the chosen action at every step (verbose).</td></tr>
-    <tr><td><code>load</code></td><td>If <code>true</code>, attempt to load saved weights/artefacts before training.</td></tr>
-    <tr><td><code>load_dir</code></td><td>Relative path (from training root) to a saved run folder. Must contain artefacts compatible with the selected algorithm.</td></tr>
-    <tr><td><code>save</code></td><td>Save the trained model artefacts at the end of the run.</td></tr>
-    <tr><td><code>state_input_mode</code></td><td>Input representation for deep agents: <code>normalized</code> (recommended) or <code>raw</code>. Keep consistent when loading checkpoints.</td></tr>
-    <tr><td><code>net_arch</code></td><td>Neural network architecture list for deep agents (e.g. <code>[64, 64]</code>).</td></tr>
+    <tr>
+      <td><code>name</code></td><td>—</td>
+      <td>Display name shown in charts, confusion matrices, the metrics table, and PDF exports. Should be unique within a run (e.g. <code>DQN_quick</code>, <code>PPO_balanced</code>).</td>
+    </tr>
+    <tr>
+      <td><code>algorithm</code></td><td>—</td>
+      <td>Algorithm identifier: <code>Q-learning</code>, <code>SARSA</code>, <code>DQN</code>, <code>PPO</code>, <code>A2C</code>, <code>Supervised</code>. Case-insensitive.</td>
+    </tr>
+    <tr>
+      <td><code>enabled</code></td><td><code>true</code></td>
+      <td>Toggle this agent on or off without removing its configuration block. Disabled agents are skipped entirely at runtime.</td>
+    </tr>
+    <tr>
+      <td><code>progress_bar</code></td><td><code>false</code></td>
+      <td>Show a tqdm progress bar in the server terminal while training. Useful for debugging headless runs but adds minor overhead.</td>
+    </tr>
+    <tr>
+      <td><code>skip_learn</code></td><td><code>false</code></td>
+      <td>Skip the learning phase and go directly to evaluation. Requires <code>load: true</code> with a valid <code>load_dir</code> pointing to previously saved weights. Use to evaluate a trained model without re-training.</td>
+    </tr>
+    <tr>
+      <td><code>show_action</code></td><td><code>false</code></td>
+      <td>Log the action chosen by the agent at every step. Produces very verbose output; enable only for short debugging sessions.</td>
+    </tr>
+    <tr>
+      <td><code>load</code></td><td><code>false</code></td>
+      <td>Attempt to load saved model weights or Q-table artefacts from <code>load_dir</code> before training begins. If the file is not found the agent starts from scratch.</td>
+    </tr>
+    <tr>
+      <td><code>load_dir</code></td><td>—</td>
+      <td>Relative path from <code>training_directory</code> to a previously saved run folder, e.g. <code>attacks_ho/20260101-120000_1_5_5/DQN_quick/</code>. The system automatically disables loading if the path refers to a different <code>gym_type</code> than the current one.</td>
+    </tr>
+    <tr>
+      <td><code>save</code></td><td><code>true</code></td>
+      <td>Save trained model artefacts (weights, Q-table, scaler, metrics) to the run output folder at the end of training. Set to <code>false</code> for throwaway experiments.</td>
+    </tr>
+    <tr>
+      <td><code>state_input_mode</code></td><td><code>normalized</code></td>
+      <td>Input representation for deep agents (DQN, PPO, A2C). <code>normalized</code> (recommended): each feature is scaled to [0, 1] using a per-feature min-max scaler fitted on training data. <code>raw</code>: raw counter values fed directly to the network. Must stay consistent between training and evaluation when loading checkpoints.</td>
+    </tr>
+    <tr>
+      <td><code>net_arch</code></td><td><code>[8, 8]</code></td>
+      <td>Neural network hidden layer sizes for deep agents. <code>[8, 8]</code> means two hidden layers of 8 neurons each. Increase for complex scenarios (e.g. <code>[64, 64]</code>), but be aware of overfitting on small datasets.</td>
+    </tr>
   </tbody>
 </table>
 
 <h3>Algorithm-Specific Hyperparameters</h3>
 
-<h3>Q-Learning &amp; SARSA</h3>
+<h4>Q-Learning &amp; SARSA</h4>
 <table>
-  <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default (quick)</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>learning_rate</code></td><td>Step size for Q-table updates.</td></tr>
-    <tr><td><code>discount_factor</code></td><td>γ — how much future rewards are discounted (0–1).</td></tr>
-    <tr><td><code>exploration_rate</code></td><td>Initial ε for ε-greedy exploration.</td></tr>
-    <tr><td><code>exploration_decay</code></td><td>Multiplicative factor applied to ε after each episode.</td></tr>
+    <tr>
+      <td><code>learning_rate</code></td><td><code>0.2</code></td>
+      <td>Step size α for Q-table updates (0–1). Higher values make the agent learn faster but can cause oscillation. Lower values (0.01–0.05) produce smoother convergence over more episodes. SARSA is more sensitive to this than Q-Learning due to its on-policy nature.</td>
+    </tr>
+    <tr>
+      <td><code>discount_factor</code></td><td><code>0.3</code></td>
+      <td>γ — how much future rewards are discounted (0–1). A low value (0.3) makes the agent myopic, focusing on immediate reward — effective for short episodes. A high value (0.9) encourages long-horizon strategies and is better when attack sequences span many steps.</td>
+    </tr>
+    <tr>
+      <td><code>exploration_rate</code></td><td><code>1.0</code></td>
+      <td>Initial ε for ε-greedy exploration. Starting at 1.0 means fully random behaviour in episode 1; the agent gradually exploits its learned policy as ε decays.</td>
+    </tr>
+    <tr>
+      <td><code>exploration_decay</code></td><td><code>0.995</code></td>
+      <td>Multiplicative factor applied to ε after each episode: <code>ε ← ε × decay</code>. 0.995 provides fast decay (converges in ~200 episodes). Use 0.9995 for slow decay over thousands of episodes.</td>
+    </tr>
   </tbody>
 </table>
 
-<h3>DQN (Deep Q-Network)</h3>
+<h4>DQN (Deep Q-Network)</h4>
 <table>
-  <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default (quick)</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>learning_rate</code></td><td>Adam optimiser learning rate.</td></tr>
-    <tr><td><code>gamma</code></td><td>Discount factor for future rewards.</td></tr>
-    <tr><td><code>buffer_size</code></td><td>Capacity of the experience replay buffer.</td></tr>
-    <tr><td><code>batch_size</code></td><td>Mini-batch size drawn from the replay buffer per gradient update.</td></tr>
-    <tr><td><code>target_update_interval</code></td><td>Number of steps between target network weight copies.</td></tr>
-    <tr><td><code>learning_starts</code></td><td>Number of environment steps collected before learning begins.</td></tr>
-    <tr><td><code>exploration_fraction</code></td><td>Fraction of total training steps over which ε is annealed.</td></tr>
-    <tr><td><code>exploration_initial_eps</code></td><td>Starting value of ε.</td></tr>
-    <tr><td><code>exploration_final_eps</code></td><td>Final (minimum) value of ε.</td></tr>
+    <tr>
+      <td><code>learning_rate</code></td><td><code>0.005</code></td>
+      <td>Adam optimiser learning rate. Typical range: 1e-4 to 1e-2. Higher values converge faster but risk instability in the neural network. For noisy SDN environments, 0.001–0.005 is a good starting range.</td>
+    </tr>
+    <tr>
+      <td><code>gamma</code></td><td><code>0.3</code></td>
+      <td>Discount factor γ for future rewards (0–1). See the Q-Learning entry above; same semantics.</td>
+    </tr>
+    <tr>
+      <td><code>buffer_size</code></td><td><code>5000</code></td>
+      <td>Capacity of the experience replay buffer (number of transitions). The buffer stores <code>(state, action, reward, next_state, done)</code> tuples. Larger buffers improve sample diversity but require more RAM. For short episodes (20 steps × 100 episodes = 2000 transitions) a 5000-entry buffer is sufficient.</td>
+    </tr>
+    <tr>
+      <td><code>batch_size</code></td><td><code>16</code></td>
+      <td>Number of transitions sampled from the replay buffer per gradient update. Must be less than <code>learning_starts</code>. Larger batches reduce variance but slow down each update step.</td>
+    </tr>
+    <tr>
+      <td><code>target_update_interval</code></td><td><code>80</code></td>
+      <td>Number of environment steps between hard copies of the online network to the target network. A larger interval stabilises training (target Q-values change slowly) but slows adaptation to new patterns.</td>
+    </tr>
+    <tr>
+      <td><code>learning_starts</code></td><td><code>20</code></td>
+      <td>Number of random-action steps collected before gradient updates begin. Ensures the replay buffer has enough diverse transitions before training starts. Set to at least <code>batch_size</code>.</td>
+    </tr>
+    <tr>
+      <td><code>exploration_fraction</code></td><td><code>0.1</code></td>
+      <td>Fraction of total training steps over which ε is linearly annealed from <code>exploration_initial_eps</code> to <code>exploration_final_eps</code>. 0.1 means the first 10 % of steps are exploration-heavy.</td>
+    </tr>
+    <tr>
+      <td><code>exploration_initial_eps</code></td><td><code>1.0</code></td>
+      <td>Starting value of ε (fully random).</td>
+    </tr>
+    <tr>
+      <td><code>exploration_final_eps</code></td><td><code>0.1</code></td>
+      <td>Final (minimum) value of ε after annealing. A residual 10 % exploration prevents the agent from getting stuck in a local policy.</td>
+    </tr>
   </tbody>
 </table>
 
-<h3>PPO &amp; A2C</h3>
+<h4>PPO (Proximal Policy Optimisation)</h4>
 <table>
-  <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+  <thead><tr><th>Parameter</th><th>Default (quick)</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>learning_rate</code></td><td>Adam optimiser learning rate.</td></tr>
-    <tr><td><code>gamma</code></td><td>Discount factor for future rewards.</td></tr>
-    <tr><td><code>n_steps</code></td><td>Number of rollout steps collected before each policy update. Must satisfy <code>batch_size &lt; n_steps × n_envs</code>.</td></tr>
-    <tr><td><code>batch_size</code></td><td>Mini-batch size used for gradient updates (PPO only).</td></tr>
-    <tr><td><code>ent_coef</code></td><td>Entropy coefficient — higher values encourage exploration; lower values promote exploitation.</td></tr>
+    <tr>
+      <td><code>learning_rate</code></td><td><code>0.005</code></td>
+      <td>Adam optimiser learning rate for both actor and critic networks.</td>
+    </tr>
+    <tr>
+      <td><code>gamma</code></td><td><code>0.3</code></td>
+      <td>Discount factor γ.</td>
+    </tr>
+    <tr>
+      <td><code>n_steps</code></td><td><code>20</code></td>
+      <td>Number of rollout steps collected per environment before each policy update. Should match or exceed <code>max_steps</code> so that at least one full episode is included in each update batch. <strong>Must satisfy <code>batch_size &lt; n_steps × n_envs</code></strong>.</td>
+    </tr>
+    <tr>
+      <td><code>batch_size</code></td><td><code>1</code></td>
+      <td>Mini-batch size for policy gradient updates. With a single environment (<code>n_envs=1</code>) and <code>n_steps=20</code>, any value from 1 to 19 is valid. Larger mini-batches reduce update variance but require proportionally larger rollout buffers.</td>
+    </tr>
+    <tr>
+      <td><code>ent_coef</code></td><td><code>0.1</code></td>
+      <td>Entropy coefficient added to the loss to encourage exploration. Higher values (0.05–0.1) prevent premature policy collapse in early training; reduce toward 0.01 for fine-tuning a near-converged policy.</td>
+    </tr>
   </tbody>
 </table>
+
 <div class="man-tip">
-  <strong>Rule of thumb:</strong> <code>batch_size</code> must be strictly less than
-  <code>n_steps × n_envs</code>. Violating this causes a Stable-Baselines3 assertion error at startup.
+  <strong>PPO rule of thumb:</strong> <code>batch_size</code> must be strictly less than
+  <code>n_steps × n_envs</code>. Violating this triggers a Stable-Baselines3 assertion error at startup.
+  With a single environment, keep <code>batch_size = 1</code> or set <code>n_steps</code> proportionally larger.
+</div>
+
+<h4>A2C (Advantage Actor-Critic)</h4>
+<table>
+  <thead><tr><th>Parameter</th><th>Default (quick)</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>learning_rate</code></td><td><code>0.005</code></td>
+      <td>Adam optimiser learning rate.</td>
+    </tr>
+    <tr>
+      <td><code>gamma</code></td><td><code>0.3</code></td>
+      <td>Discount factor γ.</td>
+    </tr>
+    <tr>
+      <td><code>n_steps</code></td><td><code>20</code></td>
+      <td>Rollout steps before each policy update. Unlike PPO, A2C does not have a <code>batch_size</code> parameter — the entire rollout is used for a single synchronous update, which makes A2C faster per step but higher variance.</td>
+    </tr>
+    <tr>
+      <td><code>ent_coef</code></td><td><code>0.1</code></td>
+      <td>Entropy coefficient. Same semantics as PPO. A2C typically needs a higher value than PPO to stay exploratory.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Supervised Agent</h4>
+<table>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>train_test_split_ratio</code></td><td><code>0.20</code></td>
+      <td>Fraction of the initial dataset held out as a test set for the first evaluation (0–1). 0.20 means 20 % test / 80 % train. After each episode the agent accumulates new observations and retrains incrementally on the full growing dataset; this ratio only affects the initial baseline fit.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>Complete Experiment Configuration Example</h2>
+<p>
+  The following annotated YAML shows a minimal but complete configuration for a
+  <strong>Attack-PerHost</strong> experiment using three agents (DQN, PPO, Supervised).
+  Save it as <code>config/default.yaml</code> and adjust the controller address before starting.
+</p>
+
+<pre><code># ── Global ──────────────────────────────────────────────────────────────────
+training_directory: _training   # experiment outputs land in ./_training/
+enable_web_interface: true
+web_server_port: 5000
+server_user: mininet-gym
+log_level: info
+random_seed: 42
+
+# ── Environment ──────────────────────────────────────────────────────────────
+env_params:
+  gym_type: attacks_ho          # per-host attack detection + SDN block
+  episodes: 100                 # 100 training episodes
+  max_steps: 30                 # up to 30 steps per episode
+  test_episodes: 50             # 50 evaluation episodes after training
+  n_bins: 4                     # log-bin discretisation for tabular agents
+  steps_min_percentage: 0.9     # early-stop only after 27 of 30 steps
+  accuracy_min: 0.95            # early-stop if accuracy ≥ 95 %
+  wait_after_read: 1            # 1 s between ODL counter reads
+  show_normal_traffic: false    # reduce log noise
+  print_training_chart: true    # save reward/accuracy charts to disk
+  must_check_env: false
+
+  attacks:
+    likely_train: 0.9           # frequent attacks during training
+    likely_eval: 0.3            # sparse attacks during evaluation
+    short_attack_duration: 5
+    long_attack_duration: 25
+    no_attack_timeout: 3
+    unblock_min_hold_rounds: 2
+    unblock_required_normal_streak: 2
+    apply_drop_rules: false     # reward-only, no real ODL rules pushed
+    thresholds:
+      packets: 22000
+      var_packets: 50
+      bytes: 423000000
+      var_bytes: 30
+
+  net_params:
+    num_hosts: 5
+    num_switches: 1
+    num_iots: 5
+    traffic_types: ["none", "ping", "udp", "tcp"]
+    start_cli: false
+    controller:
+      ip: 127.0.0.1
+      port: 8181
+      usr: admin
+      pwd: admin
+
+# ── Agents ───────────────────────────────────────────────────────────────────
+agents:
+  - name: "DQN_demo"
+    algorithm: "DQN"
+    enabled: true
+    skip_learn: false
+    show_action: false
+    load: false
+    save: true
+    state_input_mode: "normalized"
+    net_arch: [8, 8]
+    learning_rate: 0.005
+    gamma: 0.3
+    buffer_size: 5000
+    batch_size: 16
+    target_update_interval: 80
+    learning_starts: 20
+    exploration_fraction: 0.1
+    exploration_initial_eps: 1.0
+    exploration_final_eps: 0.1
+
+  - name: "PPO_demo"
+    algorithm: "PPO"
+    enabled: true
+    skip_learn: false
+    show_action: false
+    load: false
+    save: true
+    state_input_mode: "normalized"
+    net_arch: [8, 8]
+    learning_rate: 0.005
+    gamma: 0.3
+    ent_coef: 0.1
+    n_steps: 30         # match max_steps so one episode = one rollout
+    batch_size: 1
+
+  - name: "Supervised_demo"
+    algorithm: "Supervised"
+    enabled: true
+    skip_learn: false
+    train_test_split_ratio: 0.20
+</code></pre>
+
+<div class="man-tip">
+  Start with <code>apply_drop_rules: false</code> to validate the agent's decision-making with
+  reward feedback only. Once accuracy exceeds 90 % in evaluation, flip it to <code>true</code>
+  and ensure the OpenDayLight controller is reachable to test real SDN mitigation.
 </div>
 
 <hr>
@@ -307,9 +719,9 @@
 
 <h3>Live Charts</h3>
 <ul>
-  <li><strong>Reward per Episode</strong> — cumulative reward obtained by the agent in each episode.</li>
-  <li><strong>Accuracy per Episode</strong> — percentage of correct classifications over the episode.</li>
-  <li><strong>ε (Epsilon) Decay</strong> — shows how exploration decreases over time (tabular / DQN).</li>
+  <li><strong>Reward per Episode</strong> — cumulative reward obtained by the agent in each episode. A rising trend indicates the agent is learning the correct classification policy.</li>
+  <li><strong>Accuracy per Episode</strong> — percentage of correct classifications (or block/no-block decisions) over the episode. Target: ≥ 90 % after convergence.</li>
+  <li><strong>ε (Epsilon) Decay</strong> — shows how exploration decreases over time for tabular agents (Q-Learning, SARSA) and DQN. Deep actor-critic agents (PPO, A2C) use entropy rather than ε and will not show this chart.</li>
 </ul>
 
 <h3>Host Status Monitor</h3>
@@ -318,17 +730,18 @@
   <strong style="color:#16a34a">Normal</strong>,
   <strong style="color:#dc2626">Attacker</strong>, or
   <strong style="color:#f97316">Victim</strong>.
-  When an SDN block is issued, the attacker cell displays a lock icon.
+  When an SDN block is issued, the attacker cell displays a lock icon (🔒).
 </p>
 <div class="man-warn">
   During heavy attacks the reward may drop sharply — this is expected. A well-trained agent
-  quickly recovers accuracy and triggers the SDN mitigation within a few steps.
+  quickly recovers accuracy and triggers SDN mitigation within a few steps.
 </div>
 
 <h3>Controls</h3>
 <ul>
-  <li><strong>Pause / Resume</strong> — suspends the training thread; the network keeps running.</li>
-  <li><strong>Stop</strong> — terminates the current experiment and saves partial results.</li>
+  <li><strong>Pause / Resume</strong> — suspends the training thread; the Mininet network keeps running and traffic continues. Useful for inspecting intermediate results.</li>
+  <li><strong>Stop</strong> — terminates the current experiment cleanly and saves all partial results to disk. The Results panel becomes available immediately.</li>
+  <li><strong>Reset</strong> — clears the live charts and console log without stopping training. Useful for decluttering the view between agent runs in a multi-agent experiment.</li>
 </ul>
 
 <hr>
@@ -362,19 +775,46 @@
 </div>
 
 <h3>Metrics Summary Table</h3>
-<p>For each agent the table shows:</p>
-<ul>
-  <li><strong>Accuracy</strong>, <strong>Precision</strong>, <strong>Recall</strong>, <strong>F1-score</strong></li>
-  <li><strong>Mitigation Ratio</strong> — SDN blocks issued / total attack events detected.</li>
-  <li><strong>False Negative Rate (FNR)</strong> — missed attacks; penalised ×2 in the reward function.</li>
-  <li><strong>Attack Latency</strong> — average steps from attack start to SDN block.</li>
-</ul>
+<p>For each agent the table shows the following metrics, computed over all evaluation (<code>test_episodes</code>) episodes:</p>
+<table>
+  <thead><tr><th>Metric</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Accuracy</strong></td>
+      <td>Fraction of steps where the agent's decision matches the ground-truth label. The primary convergence indicator.</td>
+    </tr>
+    <tr>
+      <td><strong>Precision</strong></td>
+      <td>Of all steps the agent labelled as "Attack", what fraction were true attacks. High precision means few false alarms.</td>
+    </tr>
+    <tr>
+      <td><strong>Recall</strong></td>
+      <td>Of all true attack steps, what fraction the agent correctly detected. High recall means few missed attacks. Trade-off with precision via the detection threshold.</td>
+    </tr>
+    <tr>
+      <td><strong>F1-score</strong></td>
+      <td>Harmonic mean of Precision and Recall. A balanced single-number summary especially useful when attack and normal classes are imbalanced.</td>
+    </tr>
+    <tr>
+      <td><strong>Mitigation Ratio</strong></td>
+      <td>Ratio of SDN block actions correctly issued to total true attack events detected. A value of 1.0 means every identified attacker was blocked. Only meaningful when <code>apply_drop_rules: true</code> or in Attack-PerHost / MARL scenarios.</td>
+    </tr>
+    <tr>
+      <td><strong>False Negative Rate (FNR)</strong></td>
+      <td>Fraction of actual attacks that the agent missed (failed to classify as Attack). FNR is penalised ×2 in the reward function, making it the most costly error in security scenarios. Target: as close to 0 as possible.</td>
+    </tr>
+    <tr>
+      <td><strong>Attack Latency</strong></td>
+      <td>Average number of environment steps between the start of an attack and the first correct SDN block action. Lower is better. Only available for Attack-PerHost and MARL scenarios.</td>
+    </tr>
+  </tbody>
+</table>
 
 <h3>Comparison Charts</h3>
 <ul>
-  <li><strong>Bar chart</strong> — side-by-side accuracy / F1 across all agents.</li>
-  <li><strong>Radar chart</strong> — multi-dimensional agent profile (accuracy, precision, recall, FNR, mitigation).</li>
-  <li><strong>Confusion Matrix</strong> — per-agent heatmap of predicted vs. true labels.</li>
+  <li><strong>Bar chart</strong> — side-by-side accuracy and F1 across all agents, making it easy to spot the best-performing algorithm at a glance.</li>
+  <li><strong>Radar chart</strong> — multi-dimensional agent profile covering accuracy, precision, recall, FNR, and mitigation ratio. A larger filled area indicates a more balanced and capable agent.</li>
+  <li><strong>Confusion Matrix</strong> — per-agent heatmap of predicted vs. true labels. The diagonal represents correct decisions; off-diagonal cells reveal systematic misclassifications (e.g. attacker mis-labelled as victim).</li>
 </ul>
 
 <h3>PDF Export</h3>
@@ -384,7 +824,7 @@
 </p>
 <div class="man-tip">
   You can also download the raw results as a <strong>ZIP archive</strong> (CSV + JSON + charts)
-  from the Results panel toolbar for offline analysis.
+  from the Results panel toolbar for offline analysis in Python, R, or Excel.
 </div>
 
 <hr>
@@ -395,40 +835,46 @@
 <p>
   Tabular off-policy TD method. The observation space is <strong>log-bin discretized</strong>
   to keep the state table manageable. Best suited for low-dimensional scenarios
-  (Classification, Attack-Net).
+  (Classification, Attack-Net). Converges quickly with small episode counts but
+  does not scale well beyond a few hosts.
 </p>
 
 <h3>SARSA</h3>
 <p>
   On-policy variant of Q-Learning. Uses the action actually taken (rather than the greedy
   action) for the TD update, making it slightly more conservative in exploration.
+  Preferred when the environment is stochastic and the greedy policy would over-exploit.
 </p>
 
 <h3>DQN — Deep Q-Network</h3>
 <p>
   Uses a neural network to approximate the Q-function. Includes an
-  <em>experience replay buffer</em> and a <em>target network</em>.
-  Implemented via <strong>Stable-Baselines3</strong>.
+  <em>experience replay buffer</em> (decorrelates transitions) and a <em>target network</em>
+  (stabilises the learning signal). Implemented via <strong>Stable-Baselines3</strong>.
+  Handles continuous or high-dimensional observations naturally.
 </p>
 
 <h3>PPO — Proximal Policy Optimization</h3>
 <p>
-  Actor-critic on-policy algorithm with a clipped surrogate objective.
-  Robust and sample-efficient; generally the best baseline for continuous or
-  large discrete observation spaces.
+  Actor-critic on-policy algorithm with a clipped surrogate objective that limits
+  the size of each policy update. Robust and sample-efficient; generally the best baseline for
+  continuous or large discrete observation spaces. The clip parameter prevents catastrophic
+  forgetting during training.
 </p>
 
 <h3>A2C — Advantage Actor-Critic</h3>
 <p>
-  Synchronous on-policy actor-critic. Faster per-step than PPO but may require
-  more episodes to converge. Good for quick experiments.
+  Synchronous on-policy actor-critic. Faster per step than PPO because it performs a single
+  update per rollout instead of multiple mini-batch passes. Good for quick experiments, but may
+  require more episodes to converge due to higher gradient variance.
 </p>
 
 <h3>Supervised Agent</h3>
 <p>
-  A classification baseline trained with supervised learning on labelled traffic data.
-  Supports <em>incremental learning</em>: the model is updated after each episode
-  with the new observations collected during training. Used as a performance ceiling reference.
+  A Decision Tree classifier trained with supervised learning on labelled traffic data.
+  Supports <em>incremental learning</em>: the model is retrained after each episode
+  on the cumulative set of all observations collected so far. Acts as a performance-ceiling
+  reference — it has access to ground-truth labels that RL agents must discover through interaction.
 </p>
 
 <hr>
@@ -438,11 +884,11 @@
   The <strong>Attack Generator</strong> runs on dedicated Mininet hosts and can produce:
 </p>
 <ul>
-  <li><strong>UDP Flood</strong> — high-rate UDP packets toward a victim host.</li>
-  <li><strong>TCP Flood</strong> — repeated TCP connection attempts.</li>
-  <li><strong>ICMP Flood</strong> — continuous ping storm.</li>
-  <li><strong>SYN Flood</strong> — half-open TCP connections to exhaust victim resources.</li>
-  <li><strong>Slowloris</strong> — slow HTTP attack that holds connections open.</li>
+  <li><strong>UDP Flood</strong> — high-rate UDP packets toward a victim host. Creates extreme packet counts visible in ODL flow statistics.</li>
+  <li><strong>TCP Flood</strong> — repeated TCP connection attempts. Stresses both packet and byte counters.</li>
+  <li><strong>ICMP Flood</strong> — continuous ping storm. Detectable by packet spike with relatively low byte volume.</li>
+  <li><strong>SYN Flood</strong> — half-open TCP connections to exhaust victim resources. Identifiable by abnormal SYN packet rate.</li>
+  <li><strong>Slowloris</strong> — slow HTTP attack that holds connections open without completing requests. Low bandwidth but persistent connection occupation.</li>
 </ul>
 <p>
   Attacks are injected randomly during training so that agents learn to detect and mitigate
@@ -453,17 +899,18 @@
 
 <h2>MARL — Multi-Agent Mode</h2>
 <p>
-  In the <strong>MARL</strong> scenario, two agent types collaborate via an internal
+  In the <strong>MARL</strong> scenario (<code>marl_attacks</code>), two agent types collaborate via an internal
   message bus:
 </p>
 <ul>
   <li>
     <strong>Coordinator</strong> — observes global network statistics (ℝ<sup>5</sup>),
-    decides whether to signal an alert to host agents.
+    decides whether to signal an alert to host agents. Acts as a supervisory tier.
   </li>
   <li>
     <strong>Host Agents</strong> (one per host) — observe per-host traffic (ℝ<sup>9</sup>),
-    take local block / no-block actions.
+    take local block / no-block actions. Each host agent also receives the coordinator's alert signal
+    as an extra feature in its observation vector.
   </li>
 </ul>
 <p>
@@ -471,8 +918,9 @@
   extra feature in each host agent's observation vector.
 </p>
 <div class="man-note">
-  MARL training is more resource-intensive. Reduce episodes or steps per episode if the
-  machine is under heavy load.
+  MARL training is more resource-intensive than single-agent modes: <code>num_hosts + 1</code> agents
+  run concurrently. Reduce <code>episodes</code> or <code>max_steps</code> if the machine is
+  under heavy load, or use <code>marl_attacks_from_dataset</code> for faster replay-based runs.
 </div>
 
 <hr>
@@ -482,33 +930,41 @@
 <h3>Training does not start</h3>
 <ul>
   <li>Make sure the Mininet topology is running (<code>sudo python main.py</code>).</li>
-  <li>Check that OpenDayLight is reachable at the configured address.</li>
-  <li>Verify no previous experiment is still running (use Stop first).</li>
+  <li>Check that OpenDayLight is reachable at the configured address and port.</li>
+  <li>Verify no previous experiment is still running (use <strong>Stop</strong> first, then wait for the status indicator to return to <em>Idle</em>).</li>
+  <li>For <code>_from_dataset</code> variants, confirm that a <code>scenario.json</code> file exists and is selected in the <em>Scenario Source</em> panel.</li>
 </ul>
 
 <h3>Charts are not updating</h3>
 <ul>
-  <li>Confirm the browser has an active WebSocket connection (look for the green dot in the status bar).</li>
-  <li>Reload the page — the Socket.IO client will reconnect automatically.</li>
+  <li>Confirm the browser has an active WebSocket connection (look for the green status dot).</li>
+  <li>Reload the page — the Socket.IO client will reconnect automatically and resume receiving events.</li>
 </ul>
 
 <h3>SDN blocks are never triggered</h3>
 <ul>
   <li>Only the <strong>Attack-PerHost</strong> and <strong>MARL</strong> scenarios issue SDN drop rules.</li>
-  <li>Make sure OpenDayLight credentials are correct in the config.</li>
+  <li>Ensure <code>apply_drop_rules: true</code> in the config; the default is <code>false</code>.</li>
+  <li>Verify OpenDayLight credentials and REST API port (8181) are correct.</li>
 </ul>
 
 <h3>Low accuracy after many episodes</h3>
 <ul>
   <li>Increase <code>episodes</code> or lower <code>learning_rate</code> for slower but more stable convergence.</li>
-  <li>For tabular agents (Q-Learning / SARSA) try increasing <code>epsilon_decay</code> to explore longer.</li>
-  <li>PPO / A2C may need more <code>n_steps</code> for complex scenarios.</li>
+  <li>For tabular agents (Q-Learning / SARSA) try increasing <code>exploration_decay</code> closer to 1.0 (e.g. 0.9995) to explore longer before committing.</li>
+  <li>PPO / A2C may need larger <code>n_steps</code> to capture full attack sequences within a single rollout.</li>
+  <li>Check that <code>n_bins</code> is not too low — a coarse discretisation may merge distinct states into the same bin.</li>
+</ul>
+
+<h3>PPO / A2C assertion error at startup</h3>
+<ul>
+  <li>Ensure <code>batch_size &lt; n_steps × n_envs</code>. With a single environment, set <code>batch_size = 1</code> or increase <code>n_steps</code>.</li>
 </ul>
 
 <h3>PDF export fails</h3>
 <ul>
-  <li>Ensure <strong>wkhtmltopdf</strong> or <strong>WeasyPrint</strong> is installed on the server.</li>
-  <li>Check server logs (<code>app.log</code>) for the detailed error.</li>
+  <li>Ensure <strong>WeasyPrint</strong> is installed on the server: <code>pip install weasyprint</code>.</li>
+  <li>Check server logs (<code>app.log</code>) for the detailed error message.</li>
 </ul>
 
 <hr>
@@ -534,7 +990,7 @@
 <p>
   Source code: <code>github.com/dipi-unimore/mininet-gym</code><br>
   Contact: <code>salvo.finistrella@unimore.it</code><br>
-  Paper: <em>ScienceDirect — doi.org/10.1016/j.simpa.2025…</em>
+  Paper: <em>ScienceDirect — <a href="https://doi.org/10.1016/j.softx.2025.102312" target="_blank">doi.org/10.1016/j.softx.2025.102312</a></em>
 </p>
 <div class="man-quicklinks">
   <a class="man-qlink" href="/screensaver.html" target="_blank">

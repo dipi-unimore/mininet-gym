@@ -35,7 +35,7 @@ Returning normalised observations caused two bugs:
      also [0,1] (since we set low/high to normalised bounds) — no further
      normalisation occurs, but the Q-table learned incorrect value ranges.
   2. Tabular agents received [0,1] values and passed them to get_discretized_state()
-     which expects raw values (range 0..threshold_packets*num_hosts etc.).
+     which expects raw per-host values (range 0..threshold_packets).
      All values collapsed into the first bin, making the Q-table useless.
 
 Key invariant

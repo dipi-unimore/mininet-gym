@@ -214,6 +214,42 @@ function hideCharts() {
     }
 }
 
+function resetTrainingDashboardForNewRun() {
+    hideCharts();
+
+    allInitialized = false;
+    pendingChartRestore = false;
+    chartDataRaw = {
+        accuracy: {},
+        reward: {}
+    };
+
+    lastHostTasks = {};
+    lastAgentStatuses = {};
+    lastAgentStepStats = {};
+    lastAgentTrainingSummaries = {};
+    lastAgentEvaluationSummaries = {};
+
+    window.lastHostTasks = lastHostTasks;
+    window.lastAgentStatuses = lastAgentStatuses;
+    window.lastAgentStepStats = lastAgentStepStats;
+    window.lastAgentTrainingSummaries = lastAgentTrainingSummaries;
+    window.lastAgentEvaluationSummaries = lastAgentEvaluationSummaries;
+
+    sessionStorage.removeItem('trainingSessionData');
+    sessionStorage.removeItem('chartDataRaw');
+
+    $('#websocket-log').empty();
+    $('#host-task-data').empty();
+    $('#real-time-status').empty();
+    $('#packets').text('0');
+    $('#bytes').text('0');
+    $('#var_packets').text('0');
+    $('#var_bytes').text('0');
+    $('#trendIndicatorPackets').empty();
+    $('#trendIndicatorBytes').empty();
+}
+
 
 // ===================================================================
 //  MAIN UPDATE FUNCTION AND INITIALIZATION
@@ -365,6 +401,7 @@ function updateData(data) {
 // Global scope functions to be called from app.js
 window.showCharts = showCharts;
 window.hideCharts = hideCharts;
+window.resetTrainingDashboardForNewRun = resetTrainingDashboardForNewRun;
 window.updateData = updateData;
 window.applyPendingChartRestore = applyPendingChartRestore;
 window.lastAgentTrainingSummaries = lastAgentTrainingSummaries;

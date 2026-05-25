@@ -961,12 +961,21 @@ function updateHostTasksTable(hostTasks) {
     var keys = Object.keys(hostTasks)
     if (keys.length > 0) {
         var hostTaskData = $("#host-task-data");
+        var showDropRuleDetails = typeof isDropRulesEnabled === 'function' ? isDropRulesEnabled() : true;
         hostTaskData.html("");
         keys.forEach(function (host) {
             var task = hostTasks[host];
             isLinkOff = task.linkStatus === 0;
             dstHost = task.destination;
             taskType = task.taskType;
+            imgSrcFile = "server-security";
+            imgDstFile = "secure";
+            imgLock = "";
+            dstHostClass = "";
+            dstImgClass = "";
+            hidden = "";
+            trafficTypeClass = "text-blue-600";
+
             if (taskType === "normal") {
                 trafficType = task.trafficType;
             } else {
@@ -974,21 +983,7 @@ function updateHostTasksTable(hostTasks) {
             }
             var taskItem = $("<li></li>");
             taskItem.addClass("flex items-center justify-between bg-white p-1 rounded shadow mb-1 mr-1");
-            trafficTypeClass = "text-blue-600";
-            imgLock = "";
-            dstHostClass = "";
-            dstImgClass = "";
-            hidden = "";
-            if (isLinkOff) {
-                imgSrcFile = "host-locked";
-                trafficTypeClass = "text-gray-600 line-through opacity-30";
-                imgDstFile = "secure";
-                imgLock = `<img src='/static/images/gif/firewall.gif' class='inline-block w-10 h-10'>`;
-                dstHostClass = "opacity-30";
-                dstImgClass = "opacity-30";
-                // Dim the entire row to signal link blocked by drop rule
-                taskItem.addClass("opacity-50 bg-gray-100");
-            } else if (taskType === "normal") {
+            if (taskType === "normal") {
                 imgSrcFile = "server-security";
                 if (trafficType === "tcp") {
                     trafficTypeClass = "text-orange-600";
@@ -1012,6 +1007,17 @@ function updateHostTasksTable(hostTasks) {
                 taskItem.addClass("bg-red-100");
                 trafficTypeClass = "font-bold blink_me text-brown-600";
             }
+
+            if (isLinkOff && showDropRuleDetails) {
+                imgSrcFile = "host-locked";
+                trafficTypeClass = "text-gray-600 line-through opacity-30";
+                imgLock = `<img src='/static/images/gif/firewall.gif' class='inline-block w-10 h-10'>`;
+                dstHostClass = "opacity-30";
+                dstImgClass = "opacity-30";
+                // Dim the entire row to signal link blocked by drop rule
+                taskItem.addClass("opacity-50 bg-gray-100");
+            }
+
             imgSrcTitle = host;
             imgDstTitle = dstHost;
             imgSrc = `<img src='/static/images/gif/${imgSrcFile}.gif' alt='${imgSrcTitle}' title='${imgSrcTitle}' class='inline-block w-10 h-10'>`;

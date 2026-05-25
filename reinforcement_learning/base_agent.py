@@ -5,7 +5,7 @@ import numpy as np
 import json
 from reinforcement_learning.scenarios.marl.constants import COORDINATOR
 from reinforcement_learning.network_env import NetworkEnv
-from utility.constants import ATTACKS_HO, GYM_TYPE, SystemLevels
+from utility.constants import ATTACKS_HO, CLASSIFICATION, CLASSIFICATION_FROM_DATASET, GYM_TYPE, SystemLevels
 from utility.my_log import information, debug, notify_client
 from colorama import Fore
 from gymnasium import spaces
@@ -206,12 +206,18 @@ class BaseAgent(ABC):
         Store per-step ground truth, prediction, and status data.
         Also sends Q-table coverage to the UI every qtable_coverage_interval steps.
         """
+        _is_classification = self.env.gym_type in (
+            GYM_TYPE[CLASSIFICATION], GYM_TYPE[CLASSIFICATION_FROM_DATASET]
+        )
         if self.env.gym_type == GYM_TYPE[ATTACKS_HO]:
             status['action_choosen'] = int(action)
             status['traffic_type']   = infos['action_correct']
         else:
             status['action_choosen'] = action
-            status['traffic_type']   = infos['action_correct']
+        if _is_classification:
+            status['traffic_type'] = infos['action_correct']
+        else:
+            status['action_correct'] = infos['is_correct_action']
 
         self.rewards.append(reward)
         self.ground_truth.append(infos['Ground_truth_step'])

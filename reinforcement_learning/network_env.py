@@ -429,7 +429,8 @@ class NetworkEnv(gym.Env, ABC):
             statuses = {host.name: "idle" for host in self.hosts}
             return statuses, False  
         host_tasks = {}
-        for host_name, host_task in self.host_tasks.items():
+        task_items = list(self.host_tasks.items())
+        for host_name, host_task in task_items:
             # Remove expired tasks
             host_tasks[host_name]={
                 "taskType": host_task["task_type"], 
@@ -446,7 +447,7 @@ class NetworkEnv(gym.Env, ABC):
 
         # Iterate through the tasks of all hosts
         current_time = time.time()
-        for host_name, task_info in self.host_tasks.items():
+        for host_name, task_info in task_items:
             # Check if the task is still active
             #if task_info["end_time"] is None or task_info["end_time"] > current_time:
             task_type = task_info["task_type"]                

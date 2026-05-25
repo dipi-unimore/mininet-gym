@@ -313,7 +313,7 @@ class NetworkEnvClassification(NetworkEnv):
         for host in self.global_state.host_states.keys():
             host_state = self.global_state.get_host_state(host)
             host_status = self.global_state.get_host_status(host)
-            if host_status is not None:
+            if host_status is not None and host_state is not None:
                 debug(Fore.WHITE + f"{host} "+Fore.GREEN +
                             f"- Packets {int(host_state[0])}/{int(host_state[4])} " +
                             f"- {format_bytes(int(host_state[2]))}B/{format_bytes(int(host_state[6]))}B\n" + Fore.WHITE)   

@@ -140,7 +140,7 @@ class NetworkEnvMarlAttackDetect(NetworkEnv):
             for host in self.global_state.host_states.keys():
                 host_state = self.global_state.get_host_state(host)
                 host_status = self.global_state.get_host_status(host)
-                if host_status is not None:
+                if host_status is not None and host_state is not None:
                     #print(f"{host}: {self.global_state.get_host_status(host)} - {self.global_state.get_host_state(host)} ")
                     if host_status['status'] in (HostStatus.ATTACKING, HostStatus.WAR):
                         level_function(Fore.WHITE + 

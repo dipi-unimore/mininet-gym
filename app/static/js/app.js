@@ -270,13 +270,16 @@ $(document).ready(async function () {
             success: function (response) {
                 showStatus(response.message, 'success');
                 if (response.status == STATUS.STARTING) {
+                    if (typeof resetTrainingDashboardForNewRun === 'function') {
+                        resetTrainingDashboardForNewRun();
+                    }
                     setStatus(SYSTEM_STATUS.TRAINING_STARTING, response.message );
                     saveTrainingStateToStorage(SYSTEM_STATUS.TRAINING_STARTING);
                     showCharts();
-                }
-                else
+                } else {
                     setStatus(SYSTEM_STATUS.RESUMED, response.message );
                     saveTrainingStateToStorage(SYSTEM_STATUS.RESUMED);
+                }
             },
             error: function (xhr) {
                 const response = xhr.responseJSON || { message: xhr.statusText };

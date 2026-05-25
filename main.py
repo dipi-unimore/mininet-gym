@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 from colorama import Fore
 from reinforcement_learning.agent_manager import AgentManager
 from reinforcement_learning.agents.adversarial_agent import continuous_traffic_generation
@@ -21,6 +22,30 @@ from app.socket_handler import get_socketio_instance, register_handlers, send_li
 import random, threading
 from app.app_api import start_api
 import json as js
+
+
+def ensure_default_config_file():
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    config_dir = os.path.join(repo_root, "config")
+    default_config_path = os.path.join(config_dir, "default.yaml")
+    base_config_path = os.path.join(repo_root, "base_config.yaml")
+
+    if os.path.exists(default_config_path):
+        return False
+
+    if not os.path.exists(base_config_path):
+        raise FileNotFoundError(
+            "Missing base_config.yaml. Cannot create config/default.yaml on first start."
+        )
+
+    os.makedirs(config_dir, exist_ok=True)
+    shutil.copy2(base_config_path, default_config_path)
+    print(
+        "Created config/default.yaml from base_config.yaml. "
+        "Edit config/default.yaml before restarting the application, "
+        "especially server_user if you need a different user for root privilege drop."
+    )
+    return True
 
 
 def start_experiment(config_dict, pause_event=None, stop_event=None):
@@ -95,6 +120,7 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
         }
         notify_client(level=SystemLevels.CONFIG, config=cfg)
         socketio.cfg = cfg
+        
 
     # Assign pause/stop events directly on base env
     env.pause_event = pause_event if pause_event else threading.Event()
@@ -167,6 +193,9 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
 
 
 def main(port=None):
+    if ensure_default_config_file():
+        return
+
     config, config_dict = read_config_file(
         'config/default.yaml',
         config_cleaner=lambda cfg: clean_load_dir(cfg, GYM_TYPE.keys())

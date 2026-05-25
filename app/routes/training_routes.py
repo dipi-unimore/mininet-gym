@@ -3,6 +3,7 @@ from threading import Thread
 from flask import Blueprint, jsonify
 
 from utility.constants import SystemStatus
+from utility.my_log import set_drop_rule_message_visibility
 
 
 def create_training_blueprint(state):
@@ -10,6 +11,13 @@ def create_training_blueprint(state):
 
     @bp.route('/start_training', methods=['POST'])
     def start_training():
+        attacks_cfg = state.get('current_config', {}).get('env_params', {}).get('attacks', {})
+        if isinstance(attacks_cfg, dict):
+            apply_drop_rules = bool(attacks_cfg.get('apply_drop_rules', True))
+        else:
+            apply_drop_rules = bool(getattr(attacks_cfg, 'apply_drop_rules', True))
+        set_drop_rule_message_visibility(apply_drop_rules)
+
         if state['pause_event'].is_set():
             state['pause_event'].clear()
             return jsonify({"status": SystemStatus.RESUMED, "message": "Resumed..."}), 200
