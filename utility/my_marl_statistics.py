@@ -2,6 +2,7 @@
 import matplotlib
 
 from utility.constants import SystemModes
+from utility.my_statistics import _plot_cm_pct
 matplotlib.use('Agg')  # Used for a non-GUI backend (Agg is for PNG output)
 import matplotlib.pyplot as plt, matplotlib.patches as mpatches, numpy as np, seaborn as sns,  pandas as pd
 from sklearn import metrics
@@ -434,46 +435,19 @@ def plot_test_confusion_matrix(dir_name, ground_truth, predicted, agent_name, mu
     return confusion_matrix
     
 def plot_confusion_matrix(dir_name, confusion_matrix, mode, agent_name, host_name='', labels = ['Normal', 'Dos Attack']):
-    # Calculate percentages for each row (actual class)
-    title_cm_font_size = 26
-    label_cm_font_size = 26
-    tick_cm_font_size = 26
-    row_sums = confusion_matrix.sum(axis=1, keepdims=True)
-    percentage_matrix = (confusion_matrix / row_sums) * 100
-
-    
-
-    # Create the confusion matrix DataFrame
-    confusion_matrix_df = pd.DataFrame(percentage_matrix, index=labels, columns=labels)
-
-    # Create an annotations DataFrame with the '%' symbol
-    annotations_df = confusion_matrix_df.map(lambda x: f'{x:.1f}%')
-
-    # Create the plot
-    plt.figure(figsize=(10, 8))
-    ax = sns.heatmap(confusion_matrix_df, annot=annotations_df, fmt='', cmap='viridis', annot_kws={'fontsize': label_cm_font_size * 2},
-                     linewidths=1, cbar=True)
-
-    # Replace underscores with spaces in the agent name for a cleaner title
-    #ag = agent_name.split(' ')[0] if 'score' not in agent_name else agent_name.replace(' in Evaluation', '').replace(' ', '_')
+    """Plot confusion matrix with percentages and counts in a unified format."""
     cleaned_agent_name = agent_name.replace('_', ' ')
+    title = f'Confusion Matrix - {mode} - {cleaned_agent_name} {host_name}'
+    filepath = f"{dir_name}/{agent_name}_matrix_{host_name}.png"
 
-    plt.ylabel('Truth', fontsize=label_cm_font_size)
-    plt.xlabel('Predicted', fontsize=label_cm_font_size)
-
-    # Set the font size for the tick labels
-    ax.tick_params(axis='x', labelsize=tick_cm_font_size)
-    ax.tick_params(axis='y', labelsize=tick_cm_font_size)
-
-    # Set the font size of the color bar labels
-    cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelsize=tick_cm_font_size)
-
-    plt.tight_layout()
-
-    plt.title(f'Confusion Matrix - {mode} - {cleaned_agent_name} {host_name}', fontsize=title_cm_font_size)
-    plt.savefig(f"{dir_name}/{agent_name}_matrix_{host_name}.png")
-    plt.close()  
+    _plot_cm_pct(
+        confusion_matrix,
+        display_labels=labels,
+        title=title,
+        filepath=filepath,
+        font_size=12,
+        figsize=(10, 8)
+    )
 
 
 #TODO: remove this function, not usefull, because now we have plot_cumulative_reward and 

@@ -59,36 +59,7 @@ from utility.my_log import error
 # Confusion matrix rendering helper
 # ------------------------------------------------------------------
 
-def _plot_cm_pct(cm, display_labels, title, filepath):
-    """Render a confusion matrix with 'pct%\\n(count)' cell annotations."""
-    total = cm.sum()
-    n = len(display_labels)
-
-    fig, ax = plt.subplots(figsize=(max(6, n * 2), max(5, n * 1.8)))
-    im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-    plt.colorbar(im, ax=ax)
-
-    ax.set_xticks(range(n))
-    ax.set_yticks(range(n))
-    ax.set_xticklabels(display_labels, rotation=45, ha="right")
-    ax.set_yticklabels(display_labels)
-
-    thresh = cm.max() / 2.0
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            count = int(cm[i, j])
-            pct = 100.0 * count / total if total > 0 else 0.0
-            text = f"{pct:.1f}%\n({count})"
-            ax.text(j, i, text, ha="center", va="center", fontsize=10,
-                    color="white" if count > thresh else "black")
-
-    ax.set_ylabel('True label')
-    ax.set_xlabel('Predicted label')
-    ax.set_title(title)
-    plt.tight_layout()
-    plt.savefig(filepath)
-    plt.close()
-
+from utility.my_statistics import _plot_cm_pct
 
 # ------------------------------------------------------------------
 # Color / legend helpers — 3-class host status palette

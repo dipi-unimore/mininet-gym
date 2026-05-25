@@ -5,6 +5,52 @@ import matplotlib.pyplot as plt, matplotlib.patches as mpatches, numpy as np, se
 from sklearn import metrics
 
 
+def _plot_cm_pct(cm, display_labels, title, filepath, font_size=10, figsize=None):
+    """
+    Render a confusion matrix with 'pct%\\n(count)' cell annotations.
+
+    Args:
+        cm: Confusion matrix (numpy array)
+        display_labels: List of label names for display
+        title: Title for the plot
+        filepath: Path where to save the PNG
+        font_size: Font size for annotations (default 10)
+        figsize: Figure size tuple (width, height). If None, auto-calculated.
+    """
+    total = cm.sum()
+    n = len(display_labels)
+
+    if figsize is None:
+        figsize = (max(8, n * 2.5), max(6, n * 2))
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('Count', fontsize=font_size)
+
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(display_labels, rotation=45, ha="right", fontsize=font_size)
+    ax.set_yticklabels(display_labels, fontsize=font_size)
+
+    thresh = cm.max() / 2.0
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            count = int(cm[i, j])
+            pct = 100.0 * count / total if total > 0 else 0.0
+            text = f"{pct:.1f}%\n({count})"
+            ax.text(j, i, text, ha="center", va="center", fontsize=font_size,
+                    color="white" if count > thresh else "black", weight="bold")
+
+    ax.set_ylabel('True label', fontsize=font_size + 2)
+    ax.set_xlabel('Predicted label', fontsize=font_size + 2)
+    ax.set_title(title, fontsize=font_size + 4, weight="bold")
+
+    plt.tight_layout()
+    plt.savefig(filepath, dpi=100, bbox_inches='tight')
+    plt.close()
+
+
 def _rolling_smooth(arr, window=None):
     s = pd.Series(np.array(arr, dtype=float))
     w = window or max(5, len(s) // 10)
@@ -386,12 +432,13 @@ def plot_agent_execution_confusion_matrix(indicators, dir_name, must_print = Tru
     try:
         cm = metrics.confusion_matrix(ground_truth, predicted, labels=labels)
         if must_print:
-            row_sums = cm.sum(axis=1, keepdims=True)
-            cm_pct = np.where(row_sums > 0, cm.astype(float) / row_sums * 100, 0.0)
-            cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix=cm_pct, display_labels=display_labels)
-            cm_display.plot(values_format='.1f')
-            plt.savefig(f"{dir_name}/matrix.png")
-            plt.close()
+            _plot_cm_pct(
+                cm,
+                display_labels=display_labels,
+                title=f"{title} Confusion Matrix" if title else "Confusion Matrix",
+                filepath=f"{dir_name}/matrix.png",
+                font_size=10
+            )
         return cm
     except Exception as e:
         error(Fore.RED+f"Error!\n{e}: {traceback.format_exc()}\n"+Fore.WHITE)
@@ -694,16 +741,15 @@ def get_colors_for_predictions(items):
     return colors
  
 def plot_test_confusion_matrix(dir_name, ground_truth, predicted, agent, labels=None, display_labels=None):
-    """
-    print confusion matrix as percentages (row-normalized)
-    """
+    """Plot test confusion matrix with percentages and counts."""
     cm = metrics.confusion_matrix(ground_truth, predicted, labels=labels)
-    row_sums = cm.sum(axis=1, keepdims=True)
-    cm_pct = np.where(row_sums > 0, cm.astype(float) / row_sums * 100, 0.0)
-    cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix=cm_pct, display_labels=display_labels)
-    cm_display.plot(values_format='.1f')
-    plt.savefig(f"{dir_name}/{agent}_matrix.png")
-    plt.close()
+    _plot_cm_pct(
+        cm,
+        display_labels=display_labels,
+        title=f"{agent} — Test Confusion Matrix" if agent else "Test Confusion Matrix",
+        filepath=f"{dir_name}/{agent}_matrix.png",
+        font_size=10
+    )
 
 
 #TODO: remove this function, not usefull, because now we have plot_cumulative_reward and 
