@@ -243,12 +243,18 @@ def plot_and_save_data_agent(agent, config):
     #Step 4: plotting training statistics
     information("Plotting training data\n",agent.name)
     if len(data.train_indicators)>2:
-        try :
+        try:
             plot_agent_cumulative_rewards(data.train_indicators, directory_name, agent.name)
+        except Exception as e:
+            error(Fore.RED+f"Error plotting cumulative rewards for {agent.name} !\n{e}\n{traceback.format_exc()}\n"+Fore.WHITE)
+        try:
             plot_agent_execution_statuses(data.train_indicators, directory_name, agent.name)
+        except Exception as e:
+            error(Fore.RED+f"Error plotting execution statuses for {agent.name} !\n{e}\n{traceback.format_exc()}\n"+Fore.WHITE)
+        try:
             plot_agent_execution_confusion_matrix(data.train_indicators, directory_name)
         except Exception as e:
-            error(Fore.RED+f"Error plotting training indicators for {agent.name} !\n{e}\n{traceback.format_exc()}\n"+Fore.WHITE)
+            error(Fore.RED+f"Error plotting execution confusion matrix for {agent.name} !\n{e}\n{traceback.format_exc()}\n"+Fore.WHITE)
     if isinstance(agent.instance, SupervisedAgent) and hasattr(agent.instance, 'y_test') and agent.instance.y_test:
         try:
             plot_test_confusion_matrix(directory_name, agent.instance.y_test, agent.instance.y_pred, agent.name, labels=[0,1], display_labels=["normal","attack"])

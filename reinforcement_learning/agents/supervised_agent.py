@@ -2,6 +2,7 @@
 Classification
 """
 
+import os
 import joblib
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -43,31 +44,37 @@ class SupervisedAgent:
         self.y_test = []
         self.y_pred = []
 
-        if json_file is None:
-            raise ValueError("A json_file must be provided for the SupervisedAgent.")
-
-        # Baseline fit from the dataset file
-        if gym_type in [GYM_TYPE[ATTACKS_FROM_DATASET], GYM_TYPE[ATTACKS]]:
-            X, y = self._init_attack_detection_from_file(json_file)
-        elif gym_type in [GYM_TYPE[CLASSIFICATION_FROM_DATASET], GYM_TYPE[CLASSIFICATION]]:
-            X, y = self._init_traffic_classification_from_file(json_file)
-        elif gym_type in [GYM_TYPE[MARL_ATTACKS_FROM_DATASET], GYM_TYPE[MARL_ATTACKS]]:
-            X, y = self._init_attack_detection_from_file(json_file)
-        else:
-            raise ValueError(f"Unsupported gym_type for SupervisedAgent: {gym_type}")
-
         self.clf = DecisionTreeClassifier(max_depth=4)
-        X_train, X_test, y_train, y_test = train_test_split(
-            X.values if hasattr(X, 'values') else X,
-            y.values if hasattr(y, 'values') else y,
-            test_size=self.train_test_split_ratio, random_state=42
-        )
-        self.clf.fit(X_train, y_train)
-        y_pred = self.clf.predict(X_test)
-        self.accuracy = float(accuracy_score(y_test, y_pred))
-        self.precision, self.recall, self.fscore, _ = precision_recall_fscore_support(
-            y_test, y_pred, average='macro', zero_division=0.0
-        )
+
+        # Baseline fit from dataset file — only when the file actually exists.
+        # For live gym types (attacks, classification, marl_attacks) the file may
+        # not be present; in that case skip the baseline and let learn() build the
+        # model from environment data incrementally.
+        is_dataset_type = json_file and os.path.isfile(json_file)
+
+        if not is_dataset_type:
+            information(f"No dataset file found ({json_file}), starting without baseline fit.\n", self.name)
+        else:
+            if gym_type in [GYM_TYPE[ATTACKS_FROM_DATASET], GYM_TYPE[ATTACKS]]:
+                X, y = self._init_attack_detection_from_file(json_file)
+            elif gym_type in [GYM_TYPE[CLASSIFICATION_FROM_DATASET], GYM_TYPE[CLASSIFICATION]]:
+                X, y = self._init_traffic_classification_from_file(json_file)
+            elif gym_type in [GYM_TYPE[MARL_ATTACKS_FROM_DATASET], GYM_TYPE[MARL_ATTACKS]]:
+                X, y = self._init_attack_detection_from_file(json_file)
+            else:
+                raise ValueError(f"Unsupported gym_type for SupervisedAgent: {gym_type}")
+
+            X_train, X_test, y_train, y_test = train_test_split(
+                X.values if hasattr(X, 'values') else X,
+                y.values if hasattr(y, 'values') else y,
+                test_size=self.train_test_split_ratio, random_state=42
+            )
+            self.clf.fit(X_train, y_train)
+            y_pred = self.clf.predict(X_test)
+            self.accuracy = float(accuracy_score(y_test, y_pred))
+            self.precision, self.recall, self.fscore, _ = precision_recall_fscore_support(
+                y_test, y_pred, average='macro', zero_division=0.0
+            )
 
     # ------------------------------------------------------------------
     # Main training loop — called by train_agent()
@@ -92,7 +99,9 @@ class SupervisedAgent:
 
             state, _ = env.reset(options={"is_discretized_state": False, "is_real_state": True})
             episode_data = []
+            episode_statuses = []
             step = 0
+            correct_predictions = 0
             done = truncated = False
 
             while not done and not truncated and step < env.max_steps:
@@ -103,11 +112,30 @@ class SupervisedAgent:
                 # label comes from the environment truth, not from the action.
                 action = self._get_action(state)
                 next_state, _reward, done, truncated, info = env.step(
-                    action, options={"is_real_state": True}
+                    action,
+                    options={
+                        "is_discretized_state": False,
+                        "is_real_state": True,
+                        "current_step":         step,
+                        "correct_predictions":  correct_predictions,
+                        "show_action":          False,
+                        "name":                 self.name,
+                    }
+
                 )
 
                 label = info['action_correct']
+                is_correct = (action == label)
+                if is_correct:
+                    correct_predictions += 1
                 episode_data.append({'id': label, 'features': list(state)})
+
+                step_status = {'action_choosen': action, 'action_correct': is_correct}
+                if self.is_classification_gym_type:
+                    step_status['traffic_type'] = label
+                if 'status' in info:
+                    step_status.update(info['status'])
+                episode_statuses.append(step_status)
 
                 state = next_state
                 step += 1
@@ -115,7 +143,7 @@ class SupervisedAgent:
             # Accumulate this episode on top of all previous ones
             self.accumulated_statuses.extend(episode_data)
 
-            accuracy = self._train_and_evaluate(episode + 1, step)
+            accuracy = self._train_and_evaluate(episode + 1, step, correct_predictions, episode_statuses)
 
             information(
                 f"Episode {episode + 1} done — steps: {step} "
@@ -128,7 +156,7 @@ class SupervisedAgent:
     # Incremental fit + evaluate on the full accumulated buffer
     # ------------------------------------------------------------------
 
-    def _train_and_evaluate(self, episode, steps):
+    def _train_and_evaluate(self, episode, steps, correct_predictions=0, episode_statuses=None):
         """
         Split accumulated buffer, refit, compute metrics, notify dashboard.
         Returns accuracy (float 0-1).
@@ -137,11 +165,7 @@ class SupervisedAgent:
             return 0.0
 
         X = [s['features'] for s in self.accumulated_statuses]
-        if self.is_classification_gym_type:
-            y = [s['id'] for s in self.accumulated_statuses]
-        else:
-            # attacks: binary label
-            y = [int(s['id'] >= 2) for s in self.accumulated_statuses]
+        y = [s['id'] for s in self.accumulated_statuses]
 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=self.train_test_split_ratio, random_state=42
@@ -171,6 +195,9 @@ class SupervisedAgent:
             'episode': episode,
             'steps': steps,
             'accuracy': accuracy,
+            'correct_predictions': correct_predictions,
+            'cumulative_reward': correct_predictions,
+            'episode_statuses': episode_statuses or [],
         })
 
         try:
@@ -202,9 +229,10 @@ class SupervisedAgent:
 
     def _get_action(self, state):
         try:
+            # DecisionTreeClassifier raises NotFittedError before the first fit
             return int(self.predict(state)[0])
         except Exception:
-            return 0
+            return 0  # random-enough default before first fit
 
     # ------------------------------------------------------------------
     # Persistence
@@ -256,7 +284,7 @@ class SupervisedAgent:
         rows = []
         for s in statuses:
             rows.append({
-                'is_attack':                  int(s['id'] >= 2),
+                'is_attack':                  s['id'],
                 'packets':                    s['packets'],
                 'packets_percentage_change':  s['packetsPercentageChange'],
                 'bytes':                      s['bytes'],
