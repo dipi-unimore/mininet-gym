@@ -336,26 +336,19 @@ function renderDataList( gym_type, list) {
     dirListDataHtml = '';
     list.forEach(exp => {
         const isSelected = resultsSelectionMode && selectedResultItems.has(String(exp.path || ''));
-        const testEpisodes = Number(exp.test_episodes || 0);
-        const accuracyMinValue = Number(exp.min_accuracy || 0);
-        const accuracyMeanValue = Number(exp.mean_accuracy || 0);
-        const accuracyMaxValue = Number(exp.max_accuracy || 0);
-        const scoreMinValue = testEpisodes > 0 ? Number(exp.min_score || 0) / testEpisodes : 0;
-        const scoreMeanValue = testEpisodes > 0 ? Number(exp.mean_score || 0) / testEpisodes : 0;
-        const scoreMaxValue = testEpisodes > 0 ? Number(exp.max_score || 0) / testEpisodes : 0;
         if (exp.agents_data.length >1 ) {
             agent_title = `${exp.agents_data.map(_ => _.agent_name).join(', ')}`;
-            accuracy_title = `${exp.name_min_accuracy}=${accuracyMinValue}/${accuracyMeanValue}/${exp.name_max_accuracy}=${accuracyMaxValue}`;
-            accuracy_value = `${(accuracyMinValue * 100).toFixed(2)}/${(accuracyMeanValue * 100).toFixed(2)}/${(accuracyMaxValue * 100).toFixed(2)}`;
+            accuracy_title = `${exp.name_min_accuracy}=${exp.min_accuracy }/${exp.mean_accuracy }/${exp.name_max_accuracy}=${exp.max_accuracy }`;
+            accuracy_value = `${(exp.min_accuracy * 100).toFixed(2)}/${(exp.mean_accuracy * 100).toFixed(2)}/${(exp.max_accuracy * 100).toFixed(2)}`;
             score_title = `${exp.name_min_score}=${exp.min_score }/${exp.mean_score }/${exp.name_max_score}=${exp.max_score }`;
-            score_value = `${(scoreMinValue * 100).toFixed(2)}/${(scoreMeanValue * 100).toFixed(2)}/${(scoreMaxValue * 100).toFixed(2)}`;
+            score_value = `${((exp.min_score / exp.test_episodes) * 100).toFixed(2)}/${(exp.mean_score / exp.test_episodes * 100).toFixed(2)}/${(exp.max_score / exp.test_episodes * 100).toFixed(2)}`;
         }
         else{
             agent_title = `${exp.agents_data[0].agent_name}`;
-            accuracy_title = `${accuracyMinValue}/${accuracyMeanValue}/${accuracyMaxValue}`;
-            accuracy_value = `${(accuracyMinValue * 100).toFixed(2)}/${(accuracyMeanValue * 100).toFixed(2)}/${(accuracyMaxValue * 100).toFixed(2)}`;
-            score_title = `${exp.min_score }/${exp.mean_score }/${exp.max_score }`;
-            score_value = `${(scoreMinValue * 100).toFixed(2)}/${(scoreMeanValue * 100).toFixed(2)}/${(scoreMaxValue * 100).toFixed(2)}`;
+            accuracy_title = `${exp.mean_accuracy}`;
+            accuracy_value = `${(exp.mean_accuracy * 100).toFixed(2)}`;
+            score_title = `${exp.mean_score }`;
+            score_value = `${((exp.mean_score / exp.test_episodes) * 100).toFixed(2)}`;
 
         }
         const dirItemHtml = `
@@ -432,7 +425,6 @@ function renderResultModalContent(gym_type, path, data) {
 
     // Costruiamo il percorso base per le immagini (assumendo sia relativo al path dei dati)
     const basePath = `static-training/${data.path}`;
-    const isAttackScenario = String(gym_type || '').toLowerCase().includes('attack');
     const testEpisodes = Number(data.test_episodes || 0);
     const trainMeanAccPct = Number(data.mean_accuracy || 0) * 100;
     const trainMinAccPct = Number(data.min_accuracy || 0) * 100;
@@ -444,7 +436,7 @@ function renderResultModalContent(gym_type, path, data) {
         ? data.mitigation_summary
         : null;
     const mitigationRatioPct = mitigationSummary
-        ? Number(mitigationSummary.mitigation_ratio || 0) * 100
+        ? Number(mitigationSummary.mitigated_under_attack_ratio || 0) * 100
         : 0;
     let mitigationRatioClass = 'text-red-600';
     if (mitigationRatioPct >= 80) {
@@ -455,47 +447,6 @@ function renderResultModalContent(gym_type, path, data) {
     const agentNames = Array.isArray(data.agents_data)
         ? data.agents_data.map(a => a.agent_name).join(', ')
         : '-';
-    const agentSummaryRows = Array.isArray(data.agents_data)
-        ? data.agents_data.map(agent => {
-            const testScoreValue = Number((data.test_scores && data.test_scores[agent.agent_name]) || 0);
-            const testScorePct = testEpisodes > 0 ? (testScoreValue / testEpisodes) * 100 : 0;
-            return {
-                agentName: agent.agent_name || '-',
-                trainingAccuracyPct: Number(agent.accuracy || 0) * 100,
-                testScorePct,
-                testScoreValue,
-            };
-        })
-        : [];
-    const agentSortState = (selectedResultDetail && selectedResultDetail.agentSortState) || { col: 'testScorePct', asc: false };
-    const sortedAgentRows = [...agentSummaryRows].sort((a, b) => {
-        let leftValue;
-        let rightValue;
-        switch (agentSortState.col) {
-            case 'agentName':
-                leftValue = a.agentName.toLowerCase();
-                rightValue = b.agentName.toLowerCase();
-                break;
-            case 'trainingAccuracyPct':
-                leftValue = a.trainingAccuracyPct;
-                rightValue = b.trainingAccuracyPct;
-                break;
-            case 'testScorePct':
-            default:
-                leftValue = a.testScorePct;
-                rightValue = b.testScorePct;
-                break;
-        }
-        const cmp = typeof leftValue === 'number' && typeof rightValue === 'number'
-            ? leftValue - rightValue
-            : String(leftValue).localeCompare(String(rightValue));
-        return agentSortState.asc ? cmp : -cmp;
-    });
-    const sortIndicators = {
-        agentName: agentSortState.col === 'agentName' ? (agentSortState.asc ? '↑' : '↓') : '⇅',
-        trainingAccuracyPct: agentSortState.col === 'trainingAccuracyPct' ? (agentSortState.asc ? '↑' : '↓') : '⇅',
-        testScorePct: agentSortState.col === 'testScorePct' ? (agentSortState.asc ? '↑' : '↓') : '⇅',
-    };
     const pngFiles = Array.isArray(data.files)
         ? data.files.filter(f => String(f).toLowerCase().endsWith('.png'))
         : [];
@@ -537,7 +488,7 @@ let modalContentHtml = `
                         <p>Train Eps: <strong>${data.training_episodes}</strong></p>
                         <p>Max Steps: <strong>${data.max_steps}</strong></p>
                         <p>Test Eps: <strong>${data.test_episodes}</strong></p>
-                        <p>Acc (min/mean/max): <strong class="text-green-600">${(Number(data.min_accuracy || 0) * 100).toFixed(1)}% / ${(Number(data.mean_accuracy || 0) * 100).toFixed(1)}% / ${(Number(data.max_accuracy || 0) * 100).toFixed(1)}%</strong></p>
+                        <p>Mean Acc: <strong class="text-green-600">${(data.mean_accuracy * 100).toFixed(1)}%</strong></p>
                     </div>
                 </div>
 
@@ -621,7 +572,7 @@ let modalContentHtml = `
                 </div>
             </div>
 
-            <div class="mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
                     <h4 class="font-bold text-emerald-800 mb-3 uppercase text-xs">Training Summary</h4>
                     <div class="space-y-1 text-sm">
@@ -643,37 +594,12 @@ let modalContentHtml = `
                         <p><span class="font-semibold">Best agent:</span> ${data.name_max_score || '-'}</p>
                         <p><span class="font-semibold">Worst agent:</span> ${data.name_min_score || '-'}</p>
                         <p><span class="font-semibold">Test charts:</span> ${Array.isArray(data.test_charts) ? data.test_charts.length : 0}</p>
-                        ${isAttackScenario && mitigationSummary ? `
-                        <p><span class="font-semibold">Attack episodes:</span> ${Number(mitigationSummary.attack_episodes || 0)}</p>
+                        ${mitigationSummary ? `
+                        <p><span class="font-semibold">Mitigation episodes:</span> ${Number(mitigationSummary.episodes_with_mitigation_data || 0)}</p>
+                        <p><span class="font-semibold">Under attack (total):</span> ${Number(mitigationSummary.total_under_attack_count || 0)}</p>
+                        <p><span class="font-semibold">Mitigated (total):</span> ${Number(mitigationSummary.total_mitigated_under_attack_count || 0)}</p>
                         <p><span class="font-semibold">Mitigation ratio:</span> <span class="font-semibold ${mitigationRatioClass}">${mitigationRatioPct.toFixed(2)}%</span></p>
                         ` : ''}
-                    </div>
-                </div>
-
-                <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                    <h4 class="font-bold text-slate-800 mb-3 uppercase text-xs">Agent Summary</h4>
-                    <div class="flex items-center justify-between gap-3 mb-2">
-                        <span class="text-[10px] text-gray-500">Click a header to sort</span>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-xs bg-white border border-slate-200 rounded-lg overflow-hidden">
-                            <thead class="bg-slate-100 text-slate-900">
-                                <tr>
-                                    <th class="text-left px-2 py-1 cursor-pointer select-none result-detail-agent-sort" data-sort-col="agentName">Agent ${sortIndicators.agentName}</th>
-                                    <th class="text-right px-2 py-1 cursor-pointer select-none result-detail-agent-sort" data-sort-col="trainingAccuracyPct">Training accuracy % ${sortIndicators.trainingAccuracyPct}</th>
-                                    <th class="text-right px-2 py-1 cursor-pointer select-none result-detail-agent-sort" data-sort-col="testScorePct">Test score % ${sortIndicators.testScorePct}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${sortedAgentRows.map(row => `
-                                    <tr class="border-t border-slate-100 hover:bg-slate-50">
-                                        <td class="px-2 py-1 font-medium break-words">${escapeHtml(row.agentName)}</td>
-                                        <td class="px-2 py-1 text-right" title="Training accuracy: ${row.trainingAccuracyPct.toFixed(2)}%">${row.trainingAccuracyPct.toFixed(2)}%</td>
-                                        <td class="px-2 py-1 text-right" title="Test score: ${row.testScoreValue}/${testEpisodes}">${row.testScorePct.toFixed(2)}%</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
                     </div>
                 </div>
             </div>
@@ -1087,22 +1013,6 @@ $(document).ready(function() {
         } finally {
             $(this).prop('disabled', false).text(originalText);
         }
-    });
-
-    $(document).on('click', '.result-detail-agent-sort', function(event) {
-        event.preventDefault();
-        if (!selectedResultDetail || !selectedResultDetail.data) {
-            return;
-        }
-
-        const sortCol = String($(this).data('sort-col') || 'testScorePct');
-        const currentSort = selectedResultDetail.agentSortState || { col: 'testScorePct', asc: false };
-        const nextSort = {
-            col: sortCol,
-            asc: currentSort.col === sortCol ? !currentSort.asc : (sortCol === 'agentName'),
-        };
-        selectedResultDetail.agentSortState = nextSort;
-        renderResultModalContent(selectedResultDetail.gym_type, selectedResultDetail.path, selectedResultDetail.data);
     });
 
     $(document).on('click', '#toggle-results-selection-btn', function(event) {
