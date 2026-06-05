@@ -8,6 +8,7 @@ from .results_service import (
 	build_scenario_list,
 	build_test_scenario_preview,
 	delete_result_dir,
+	delete_result_dirs,
 	load_saved_config_by_relative_path,
 	reprint_result_charts,
 )

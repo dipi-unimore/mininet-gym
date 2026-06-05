@@ -65,11 +65,71 @@ def _get_candidate_test_dirs(dir_path, test_dir):
     return candidate_test_dirs
 
 
+def _count_attack_episodes(value):
+    if isinstance(value, dict):
+        total = 0
+        for item in value.values():
+            total += _count_attack_episodes(item)
+        return total
+
+    if isinstance(value, (list, tuple, set, np.ndarray)):
+        total = 0
+        for item in value:
+            total += _count_attack_episodes(item)
+        return total
+
+    try:
+        return 1 if int(value) == 1 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _flatten_numeric_sequence(value):
+    if isinstance(value, dict):
+        flattened = []
+        for item in value.values():
+            flattened.extend(_flatten_numeric_sequence(item))
+        return flattened
+
+    if isinstance(value, (list, tuple, set, np.ndarray)):
+        flattened = []
+        for item in value:
+            flattened.extend(_flatten_numeric_sequence(item))
+        return flattened
+
+    try:
+        return [int(value)]
+    except (TypeError, ValueError):
+        return []
+
+
+def _compute_detection_ratio_from_ground_truth(ground_truth, predicted_values):
+    ground_truth_values = _flatten_numeric_sequence(ground_truth)
+    predicted_sequence = _flatten_numeric_sequence(predicted_values)
+
+    if not ground_truth_values or not predicted_sequence:
+        return 0.0
+
+    compared_length = min(len(ground_truth_values), len(predicted_sequence))
+    attack_count = 0
+    detected_count = 0
+
+    for index in range(compared_length):
+        gt_value = ground_truth_values[index]
+        pred_value = predicted_sequence[index]
+        if gt_value == 1:
+            attack_count += 1
+            if pred_value == 1:
+                detected_count += 1
+
+    return float(detected_count / attack_count) if attack_count > 0 else 0.0
+
+
 def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_config, agent_names):
     merged_test_scores = {}
     test_charts = []
     detected_test_episodes = []
-    mitigation_entries = []
+    mitigation_by_agent = {}
 
     for test_dir_path in candidate_test_dirs:
         test_file_path = os.path.join(test_dir_path, "test.json")
@@ -106,10 +166,43 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
                     merged_test_scores[test_agent_name] = score_value
 
         history = test_data.get("mitigation_history", [])
-        if isinstance(history, list):
+        # try to infer test agent name for this test.json (same logic used for score assignment)
+        test_agent_name = ""
+        predicted = test_data.get("predicted", {})
+        if isinstance(predicted, dict) and predicted:
+            try:
+                test_agent_name = next(iter(predicted.keys()))
+            except Exception:
+                test_agent_name = ""
+        if not test_agent_name:
+            test_folder_name = os.path.basename(test_dir_path)
+            if test_folder_name.startswith(f"{test_dir}_"):
+                test_agent_name = test_folder_name[len(f"{test_dir}_"):]
+        if not test_agent_name and len(agent_names) == 1:
+            test_agent_name = agent_names[0]
+
+        key = test_agent_name or '_unknown'
+        if isinstance(history, list) and history:
             for entry in history:
                 if isinstance(entry, dict):
-                    mitigation_entries.append(entry)
+                    mitigation_by_agent.setdefault(key, []).append(entry)
+        else:
+            ground_truth = test_data.get("ground_truth", [])
+            attack_episodes = _count_attack_episodes(ground_truth)
+            predicted_map = test_data.get("predicted", {})
+
+            if isinstance(predicted_map, dict) and predicted_map:
+                for agent_name, predicted_values in predicted_map.items():
+                    agent_key = str(agent_name or key or '_unknown')
+                    mitigation_by_agent.setdefault(agent_key, []).append({
+                        "under_attack_count": int(attack_episodes),
+                        "mitigated_under_attack_ratio": _compute_detection_ratio_from_ground_truth(ground_truth, predicted_values),
+                    })
+            else:
+                mitigation_by_agent.setdefault(key, []).append({
+                    "under_attack_count": int(attack_episodes),
+                    "mitigated_under_attack_ratio": _compute_detection_ratio_from_ground_truth(ground_truth, predicted),
+                })
 
         test_folder_rel = os.path.relpath(test_dir_path, dir_path)
         for file_name in os.listdir(test_dir_path):
@@ -119,45 +212,84 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
                 else:
                     test_charts.append(f"{test_folder_rel}/{file_name}")
 
-    mitigation_summary = _summarize_mitigation_entries(mitigation_entries)
+    mitigation_summary = _summarize_mitigation_entries(mitigation_by_agent)
     return merged_test_scores, test_charts, detected_test_episodes, mitigation_summary
 
 
 def _summarize_mitigation_entries(mitigation_entries):
+    """
+    Summarize mitigation information.
+
+    Accepts either:
+      - a dict mapping agent_name -> list of mitigation entry dicts, or
+      - a flat list of mitigation entry dicts (backwards compatibility).
+
+    Returns a dict with:
+      - attack_episodes: total number of attacks recorded across all episodes (sum of under_attack_count)
+      - mitigation_ratio: average across agents of the agents' mean mitigated ratio (0..1)
+      - episodes_with_mitigation_data: total number of mitigation entries processed
+    """
+    # Normalize input to mapping agent -> entries
+    if isinstance(mitigation_entries, dict):
+        mitigation_by_agent = mitigation_entries
+    else:
+        mitigation_by_agent = {"_unknown": mitigation_entries or []}
+
     total_under_attack = 0
-    total_mitigated = 0
+    episodes_with_mitigation_data = 0
+    per_agent_means = []
 
-    for entry in mitigation_entries:
-        try:
-            under_attack = int(entry.get("under_attack_count", 0))
-        except (TypeError, ValueError):
-            under_attack = 0
-        try:
-            mitigated = int(entry.get("mitigated_under_attack_count", 0))
-        except (TypeError, ValueError):
-            mitigated = 0
+    for agent, entries in mitigation_by_agent.items():
+        if not isinstance(entries, list) or not entries:
+            continue
+        episodes_with_mitigation_data += len(entries)
+        per_episode_ratios = []
+        for entry in entries:
+            try:
+                under_attack = int(entry.get("under_attack_count", 0))
+            except (TypeError, ValueError):
+                under_attack = 0
+            try:
+                mitigated = int(entry.get("mitigated_under_attack_count", 0))
+            except (TypeError, ValueError):
+                mitigated = 0
 
-        if under_attack < 0:
-            under_attack = 0
-        if mitigated < 0:
-            mitigated = 0
+            if under_attack < 0:
+                under_attack = 0
+            if mitigated < 0:
+                mitigated = 0
 
-        total_under_attack += under_attack
-        total_mitigated += min(mitigated, under_attack)
+            total_under_attack += under_attack
 
-    ratio = float(total_mitigated / total_under_attack) if total_under_attack > 0 else 0.0
+            # Prefer an explicit per-entry ratio if available
+            if entry.get("mitigated_under_attack_ratio") is not None:
+                try:
+                    ratio_val = float(entry.get("mitigated_under_attack_ratio", 0.0))
+                except (TypeError, ValueError):
+                    ratio_val = 0.0
+            else:
+                ratio_val = float(min(mitigated, under_attack) / under_attack) if under_attack > 0 else 0.0
+
+            per_episode_ratios.append(ratio_val)
+
+        if per_episode_ratios:
+            per_agent_means.append(float(np.mean(per_episode_ratios)))
+
+    mitigation_ratio = float(np.mean(per_agent_means)) if per_agent_means else 0.0
+
     return {
-        "episodes_with_mitigation_data": len(mitigation_entries),
+        "attack_episodes": int(total_under_attack),
+        "mitigation_ratio": mitigation_ratio,
+        "episodes_with_mitigation_data": int(episodes_with_mitigation_data),
         "total_under_attack_count": int(total_under_attack),
-        "total_mitigated_under_attack_count": int(total_mitigated),
-        "mitigated_under_attack_ratio": ratio,
+        "mitigated_under_attack_ratio": mitigation_ratio,
     }
 
 
 def _compute_test_score_stats(test_scores, gym_type_in_config, test_episodes):
-    min_score = test_episodes
+    min_score = None
     name_min_score = ""
-    max_score = 0
+    max_score = None
     name_max_score = ""
     mean_scores = []
 
@@ -170,15 +302,17 @@ def _compute_test_score_stats(test_scores, gym_type_in_config, test_episodes):
                 mean_agent_score = float(agent_score)
             except (TypeError, ValueError):
                 continue
-        if mean_agent_score < min_score:
+        if min_score is None or mean_agent_score < min_score:
             min_score = mean_agent_score
             name_min_score = agent_name
-        if mean_agent_score > max_score:
+        if max_score is None or mean_agent_score > max_score:
             max_score = mean_agent_score
             name_max_score = agent_name
         mean_scores.append(mean_agent_score)
 
     mean_score = float(np.mean(mean_scores)) if mean_scores else 0
+    min_score = float(min_score) if min_score is not None else 0
+    max_score = float(max_score) if max_score is not None else 0
     return min_score, name_min_score, max_score, name_max_score, mean_score
 
 
@@ -201,9 +335,9 @@ def _collect_agents_data(
 ):
     agents_data = []
     all_accuracies = []
-    min_accuracy = 0
+    min_accuracy = None
     name_min_accuracy = ""
-    max_accuracy = 0
+    max_accuracy = None
     name_max_accuracy = ""
 
     for agent_name in agent_names:
@@ -248,14 +382,16 @@ def _collect_agents_data(
             "print_training_chart": print_training_chart,
         })
 
-        if accuracy > min_accuracy:
+        if min_accuracy is None or accuracy < min_accuracy:
             min_accuracy = accuracy
             name_min_accuracy = agent_name
-        if accuracy < max_accuracy:
+        if max_accuracy is None or accuracy > max_accuracy:
             max_accuracy = accuracy
             name_max_accuracy = agent_name
         all_accuracies.append(accuracy)
 
+    min_accuracy = float(min_accuracy) if min_accuracy is not None else 0
+    max_accuracy = float(max_accuracy) if max_accuracy is not None else 0
     return True, "", {
         "agents_data": agents_data,
         "mean_accuracy": float(np.mean(all_accuracies)) if all_accuracies else 0,
@@ -314,6 +450,50 @@ def delete_result_dir(current_config, relative_result_path):
         return {"status": "error", "message": f"Unable to delete result path: {exc}"}, 500
 
     return {"status": "success", "message": "Result directory deleted"}, 200
+
+
+def delete_result_dirs(current_config, relative_result_paths):
+    if not isinstance(relative_result_paths, list) or not relative_result_paths:
+        return {"status": "error", "message": "Missing result paths"}, 400
+
+    deleted_paths = []
+    failed_paths = []
+    unique_paths = list(dict.fromkeys(str(path or '').strip() for path in relative_result_paths if str(path or '').strip()))
+
+    if not unique_paths:
+        return {"status": "error", "message": "Missing result paths"}, 400
+
+    for path in unique_paths:
+        response, status_code = delete_result_dir(current_config, path)
+        if status_code == 200:
+            deleted_paths.append(path)
+        else:
+            failed_paths.append({
+                "path": path,
+                "status_code": status_code,
+                "message": response.get("message", "Unable to delete result path"),
+            })
+
+    if not deleted_paths:
+        return {
+            "status": "error",
+            "message": "Unable to delete selected result folders",
+            "deleted_paths": deleted_paths,
+            "failed_paths": failed_paths,
+        }, 400
+
+    status = "success" if not failed_paths else "partial"
+    status_code = 200 if not failed_paths else 207
+    message = f"Deleted {len(deleted_paths)} result folder(s)"
+    if failed_paths:
+        message = f"{message}, {len(failed_paths)} failed"
+
+    return {
+        "status": status,
+        "message": message,
+        "deleted_paths": deleted_paths,
+        "failed_paths": failed_paths,
+    }, status_code
 
 
 def _pdf_usable_width(pdf):
@@ -481,7 +661,7 @@ def build_result_pdf_response(current_config, gym_type, result_path, data):
 
     _pdf_section_title(pdf, "Summary")
     mitigation_summary = data.get("mitigation_summary", {}) if isinstance(data.get("mitigation_summary", {}), dict) else {}
-    mitigation_ratio = float(mitigation_summary.get("mitigated_under_attack_ratio", 0) or 0)
+    mitigation_ratio = float(mitigation_summary.get("mitigation_ratio", mitigation_summary.get("mitigated_under_attack_ratio", 0)) or 0)
     summary_cards = [
         ("Network config", data.get("network_config", "-")),
         ("Training episodes", data.get("training_episodes", "-")),
@@ -495,9 +675,7 @@ def build_result_pdf_response(current_config, gym_type, result_path, data):
     if mitigation_summary:
         mitigation_ratio_color = _mitigation_ratio_color(mitigation_ratio)
         summary_cards.extend([
-            ("Mitigation episodes", mitigation_summary.get("episodes_with_mitigation_data", 0)),
-            ("Under attack total", mitigation_summary.get("total_under_attack_count", 0)),
-            ("Mitigated total", mitigation_summary.get("total_mitigated_under_attack_count", 0)),
+            ("Attack episodes", mitigation_summary.get("attack_episodes", mitigation_summary.get("total_under_attack_count", 0))),
             ("Mitigation ratio", f"{round(mitigation_ratio * 100, 2)}%", mitigation_ratio_color),
         ])
     _pdf_summary_cards(pdf, summary_cards)
@@ -560,7 +738,7 @@ def build_results_dir_list(current_config):
     from utility.my_log import information, debug, error as log_error
     
     results_dir_list = []
-    expected_files = ["log.txt", "metrics_comparison.png", "radar_chart.png", "statuses.json"]
+    expected_files = ["metrics_comparison.png", "radar_chart.png", "statuses.json"] #"log.txt", 
     data_file_in_agent_folder = "data.json"
     test_dir = "TEST"
     expected_files_in_agent_folder_print_training_chart_enabled = ["matrix.png", "metrics.png", "metrics_combined.png", "rewards.png"]
@@ -1562,6 +1740,18 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
             plot_radar_chart as _plot_radar,
             plot_metrics_kfold as _plot_kfold,
             plot_metrics_violin as _plot_violin,
+            plot_agent_training_confusion_matrix as _plot_train_cm,
+        )
+    elif detected_gym_type.startswith(ATTACKS_HO):
+        from utility.my_ho_statistics import (
+            plot_metrics as _plot_metrics,
+            plot_combined_performance_over_time as _plot_combined,
+            plot_comparison_bar_charts as _plot_comparison,
+            plot_radar_chart as _plot_radar,
+            plot_metrics_kfold as _plot_kfold,
+            plot_metrics_violin as _plot_violin,
+            plot_ho_agent_execution_confusion_matrix as _plot_train_cm,
+            plot_ho_agent_execution_statuses as _plot_statuses,
         )
     else:
         from utility.my_statistics import (
@@ -1571,6 +1761,8 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
             plot_radar_chart as _plot_radar,
             plot_metrics_kfold as _plot_kfold,
             plot_metrics_violin as _plot_violin,
+            plot_agent_execution_confusion_matrix as _plot_train_cm,
+            plot_agent_execution_statuses as _plot_statuses,
         )
 
     reprinted = []
@@ -1624,6 +1816,29 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
         except Exception as exc:
             errors.append(f"Error reprinting {agent_name}: {exc}")
             continue
+
+        # Reprint training confusion matrix
+        train_indicators = data.get("train_indicators", [])
+        if train_indicators:
+            try:
+                if is_marl:
+                    # MARL uses plot_agent_training_confusion_matrix signature
+                    _plot_train_cm(train_indicators, agent_dir, agent_name, title=agent_name)
+                else:
+                    # HO and others use must_print and title parameters
+                    _plot_train_cm(train_indicators, agent_dir, must_print=True, title=agent_name)
+                reprinted.append(f"{agent_name}/confusion_matrix")
+            except Exception as exc:
+                errors.append(f"Error reprinting confusion matrix for {agent_name}: {exc}")
+
+        # Reprint episode statuses (for ATTACKS_HO and others)
+        if detected_gym_type.startswith(ATTACKS_HO) or not is_marl and detected_gym_type not in [ATTACKS, CLASSIFICATION, CLASSIFICATION_FROM_DATASET]:
+            if train_indicators:
+                try:
+                    _plot_statuses(train_indicators, agent_dir, title=agent_name)
+                    reprinted.append(f"{agent_name}/episode_statuses")
+                except Exception as exc:
+                    errors.append(f"Error reprinting episode statuses for {agent_name}: {exc}")
 
         agents_metrics[agent_name] = agent_plot_metrics
 

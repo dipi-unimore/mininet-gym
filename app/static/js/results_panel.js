@@ -9,6 +9,7 @@ function renderResultsPanel() {
         .then(list => {
             list_results_dir = list; // Store globally for sorting
             renderResultsList(list);
+            syncResultsSelectionToolbar();
         })
         .catch(error => {
             console.error('Error fetching load dir list:', error);
@@ -39,6 +40,8 @@ let list_results_dir = [];
 let zoomImages = [];
 let zoomIndex = -1;
 let selectedResultDetail = null;
+let resultsSelectionMode = false;
+let selectedResultItems = new Map();
 let _resultsSortState = {}; // { [scenarioId]: { col, asc } }
 let _chartDescriptions = null; // cached chart_descriptions.json
 
@@ -70,6 +73,77 @@ function escapeAttr(value) {
     return String(value || '').replace(/'/g, "&#39;").replace(/\"/g, '&quot;');
 }
 
+function syncResultsSelectionToolbar() {
+    const selectedCount = selectedResultItems.size;
+    $('#results-selection-count').text(`${selectedCount} selected`);
+    $('#bulk-delete-results-btn').prop('disabled', !resultsSelectionMode || selectedCount === 0);
+    $('#clear-results-selection-btn').prop('disabled', selectedCount === 0);
+    $('#toggle-results-selection-btn')
+        .toggleClass('bg-blue-600 text-white hover:bg-blue-700', !resultsSelectionMode)
+        .toggleClass('bg-slate-800 text-white hover:bg-slate-900', resultsSelectionMode)
+        .text(resultsSelectionMode ? 'Exit selection mode' : 'Enable selection mode');
+
+    $('.result-select-toggle').toggleClass('hidden', !resultsSelectionMode);
+    $('.results-result-row').each(function () {
+        const rowPath = String($(this).data('path') || '');
+        const isSelected = resultsSelectionMode && selectedResultItems.has(rowPath);
+        $(this)
+            .toggleClass('bg-blue-50 ring-1 ring-blue-300', isSelected)
+            .toggleClass('bg-white', !isSelected);
+        $(this).find('.result-select-checkbox').prop('checked', isSelected);
+    });
+}
+
+function setResultsSelectionMode(enabled) {
+    resultsSelectionMode = Boolean(enabled);
+    if (!resultsSelectionMode) {
+        selectedResultItems.clear();
+    }
+    syncResultsSelectionToolbar();
+}
+
+function toggleResultSelection(path, kind = 'complete', forceSelected = null) {
+    const normalizedPath = String(path || '');
+    if (!normalizedPath) {
+        return;
+    }
+
+    const shouldSelect = forceSelected === null
+        ? !selectedResultItems.has(normalizedPath)
+        : Boolean(forceSelected);
+
+    if (shouldSelect) {
+        selectedResultItems.set(normalizedPath, { kind: String(kind || 'complete') });
+    } else {
+        selectedResultItems.delete(normalizedPath);
+    }
+
+    syncResultsSelectionToolbar();
+}
+
+function clearResultSelection() {
+    selectedResultItems.clear();
+    syncResultsSelectionToolbar();
+}
+
+function deleteResultPaths(paths) {
+    return new Promise((resolve, reject) => {
+        $.ajax({
+            url: '/delete_result_dirs',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ paths }),
+            success: function (response) {
+                resolve(response);
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                reject(response.message || 'Unable to delete selected results');
+            }
+        });
+    });
+}
+
 function setScenarioFilterButtonState(scenarioId, mode) {
     const allButtons = $(`.scenario-filter-btn[data-scenario-id="${scenarioId}"]`);
     allButtons.removeClass('bg-blue-600 text-white border-blue-700').addClass('bg-white hover:bg-gray-100');
@@ -97,6 +171,7 @@ function applyScenarioFilter(scenarioId, mode) {
 function renderResultsList(list) {
     const dirGymTypeListEl = $('#results-list');
     dirGymTypeListEl.html(''); // Clear existing content
+    const existingResultPaths = new Set();
     list.forEach(gt => {
         if (gt.data.length === 0) {
             heightScroll = '';
@@ -106,6 +181,7 @@ function renderResultsList(list) {
             height = gt.data.length < 10 ? gt.data.length * 9 : 96;
             heightScroll = `h-${height} overflow-y-scroll`;
             dirListDataHtml = renderDataList(gt.gym_type,gt.data);
+            gt.data.forEach(exp => existingResultPaths.add(String(exp.path || '')));
         }
 
         const incompleteData = Array.isArray(gt.incomplete_data) ? gt.incomplete_data : [];
@@ -116,11 +192,18 @@ function renderResultsList(list) {
                     <h4 class="text-sm font-bold text-amber-700 mb-2">Incomplete (${incompleteCount})</h4>
                     <ul class="max-h-48 overflow-y-auto space-y-1">
                         ${incompleteData.map(inc => `
-                            <li class="text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1 grid grid-cols-12 gap-2 items-center">
+                            <li class="results-result-row text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1 grid grid-cols-12 gap-2 items-center hover:bg-amber-100" data-gym-type="${escapeAttr(gt.gym_type)}" data-path="${escapeAttr(inc.path || '')}" data-result-kind="incomplete">
                                 <span class="col-span-3 font-semibold">${inc.datetime || '-'}</span>
-                                <span class="col-span-4 text-gray-600" title="${inc.path || '-'}">${inc.path || '-'}</span>
-                                <span class="col-span-4 text-amber-900">${inc.reason || 'Unknown reason'}</span>
-                                <span class="col-span-1 text-right">
+                                <span class="col-span-4 text-gray-600 break-words" title="${inc.path || '-'}">${inc.path || '-'}</span>
+                                <span class="col-span-3 text-amber-900">${inc.reason || 'Unknown reason'}</span>
+                                <span class="col-span-2 text-right flex items-center justify-end gap-2">
+                                    <label class="result-select-toggle inline-flex items-center gap-1 text-[10px] text-gray-500 ${resultsSelectionMode ? '' : 'hidden'}">
+                                        <input type="checkbox"
+                                               class="result-select-checkbox h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                               data-path="${escapeAttr(inc.path || '')}"
+                                               data-result-kind="incomplete">
+                                        <span>Select</span>
+                                    </label>
                                     <button
                                         type="button"
                                         class="delete-incomplete-result-btn text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
@@ -140,6 +223,8 @@ function renderResultsList(list) {
                     <p class="text-xs text-gray-500 italic bg-gray-50 border rounded px-2 py-1">No incomplete experiments for this scenario.</p>
                 </div>
             `;
+
+        incompleteData.forEach(inc => existingResultPaths.add(String(inc.path || '')));
 
         const scenarioId = gt.gym_type.replace(/\s+/g, '-');
         const dirGymTypeHtml = `
@@ -185,6 +270,11 @@ function renderResultsList(list) {
 
         dirGymTypeListEl.append(dirGymTypeHtml);
     });
+
+    selectedResultItems = new Map(
+        [...selectedResultItems.entries()].filter(([path]) => existingResultPaths.has(path))
+    );
+    syncResultsSelectionToolbar();
 
 }
 
@@ -245,23 +335,31 @@ function updateResultsSortHeaders(gymType) {
 function renderDataList( gym_type, list) {
     dirListDataHtml = '';
     list.forEach(exp => {
+        const isSelected = resultsSelectionMode && selectedResultItems.has(String(exp.path || ''));
+        const testEpisodes = Number(exp.test_episodes || 0);
+        const accuracyMinValue = Number(exp.min_accuracy || 0);
+        const accuracyMeanValue = Number(exp.mean_accuracy || 0);
+        const accuracyMaxValue = Number(exp.max_accuracy || 0);
+        const scoreMinValue = testEpisodes > 0 ? Number(exp.min_score || 0) / testEpisodes : 0;
+        const scoreMeanValue = testEpisodes > 0 ? Number(exp.mean_score || 0) / testEpisodes : 0;
+        const scoreMaxValue = testEpisodes > 0 ? Number(exp.max_score || 0) / testEpisodes : 0;
         if (exp.agents_data.length >1 ) {
             agent_title = `${exp.agents_data.map(_ => _.agent_name).join(', ')}`;
-            accuracy_title = `${exp.name_min_accuracy}=${exp.min_accuracy }/${exp.mean_accuracy }/${exp.name_max_accuracy}=${exp.max_accuracy }`;
-            accuracy_value = `${(exp.min_accuracy * 100).toFixed(2)}/${(exp.mean_accuracy * 100).toFixed(2)}/${(exp.max_accuracy * 100).toFixed(2)}`;
+            accuracy_title = `${exp.name_min_accuracy}=${accuracyMinValue}/${accuracyMeanValue}/${exp.name_max_accuracy}=${accuracyMaxValue}`;
+            accuracy_value = `${(accuracyMinValue * 100).toFixed(2)}/${(accuracyMeanValue * 100).toFixed(2)}/${(accuracyMaxValue * 100).toFixed(2)}`;
             score_title = `${exp.name_min_score}=${exp.min_score }/${exp.mean_score }/${exp.name_max_score}=${exp.max_score }`;
-            score_value = `${((exp.min_score / exp.test_episodes) * 100).toFixed(2)}/${(exp.mean_score / exp.test_episodes * 100).toFixed(2)}/${(exp.max_score / exp.test_episodes * 100).toFixed(2)}`;
+            score_value = `${(scoreMinValue * 100).toFixed(2)}/${(scoreMeanValue * 100).toFixed(2)}/${(scoreMaxValue * 100).toFixed(2)}`;
         }
         else{
             agent_title = `${exp.agents_data[0].agent_name}`;
-            accuracy_title = `${exp.mean_accuracy}`;
-            accuracy_value = `${(exp.mean_accuracy * 100).toFixed(2)}`;
-            score_title = `${exp.mean_score }`;
-            score_value = `${((exp.mean_score / exp.test_episodes) * 100).toFixed(2)}`;
+            accuracy_title = `${accuracyMinValue}/${accuracyMeanValue}/${accuracyMaxValue}`;
+            accuracy_value = `${(accuracyMinValue * 100).toFixed(2)}/${(accuracyMeanValue * 100).toFixed(2)}/${(accuracyMaxValue * 100).toFixed(2)}`;
+            score_title = `${exp.min_score }/${exp.mean_score }/${exp.max_score }`;
+            score_value = `${(scoreMinValue * 100).toFixed(2)}/${(scoreMeanValue * 100).toFixed(2)}/${(scoreMaxValue * 100).toFixed(2)}`;
 
         }
         const dirItemHtml = `
-            <li class="p-2 border-b cursor-pointer hover:bg-gray-100 results-dir-item grid grid-cols-9 text-xs" onclick="loadResultsData('${gym_type}', '${exp.path}')">
+            <li class="results-result-row p-2 border-b cursor-pointer hover:bg-gray-100 text-xs grid grid-cols-9 ${isSelected ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-white'}" data-gym-type="${escapeAttr(gym_type)}" data-path="${escapeAttr(exp.path)}" data-result-kind="complete">
                 <span>${exp.datetime}</span>
                 <span>${exp.network_config}</span>
                 <span>${exp.training_episodes}</span>
@@ -270,7 +368,15 @@ function renderDataList( gym_type, list) {
                 <span title="${accuracy_title}">${accuracy_value}</span>
                 <span>${exp.test_episodes}</span>
                 <span title="${score_title}">${score_value}</span>
-                <span class="text-right">
+                <span class="text-right flex items-center justify-end gap-2">
+                    <label class="result-select-toggle inline-flex items-center gap-1 text-[10px] text-gray-500 ${resultsSelectionMode ? '' : 'hidden'}">
+                        <input type="checkbox"
+                               class="result-select-checkbox h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                               data-path="${escapeAttr(exp.path)}"
+                               data-result-kind="complete"
+                               ${isSelected ? 'checked' : ''}>
+                        <span>Select</span>
+                    </label>
                     <button
                         type="button"
                         class="delete-result-btn text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
@@ -326,6 +432,7 @@ function renderResultModalContent(gym_type, path, data) {
 
     // Costruiamo il percorso base per le immagini (assumendo sia relativo al path dei dati)
     const basePath = `static-training/${data.path}`;
+    const isAttackScenario = String(gym_type || '').toLowerCase().includes('attack');
     const testEpisodes = Number(data.test_episodes || 0);
     const trainMeanAccPct = Number(data.mean_accuracy || 0) * 100;
     const trainMinAccPct = Number(data.min_accuracy || 0) * 100;
@@ -337,7 +444,7 @@ function renderResultModalContent(gym_type, path, data) {
         ? data.mitigation_summary
         : null;
     const mitigationRatioPct = mitigationSummary
-        ? Number(mitigationSummary.mitigated_under_attack_ratio || 0) * 100
+        ? Number(mitigationSummary.mitigation_ratio || 0) * 100
         : 0;
     let mitigationRatioClass = 'text-red-600';
     if (mitigationRatioPct >= 80) {
@@ -348,6 +455,47 @@ function renderResultModalContent(gym_type, path, data) {
     const agentNames = Array.isArray(data.agents_data)
         ? data.agents_data.map(a => a.agent_name).join(', ')
         : '-';
+    const agentSummaryRows = Array.isArray(data.agents_data)
+        ? data.agents_data.map(agent => {
+            const testScoreValue = Number((data.test_scores && data.test_scores[agent.agent_name]) || 0);
+            const testScorePct = testEpisodes > 0 ? (testScoreValue / testEpisodes) * 100 : 0;
+            return {
+                agentName: agent.agent_name || '-',
+                trainingAccuracyPct: Number(agent.accuracy || 0) * 100,
+                testScorePct,
+                testScoreValue,
+            };
+        })
+        : [];
+    const agentSortState = (selectedResultDetail && selectedResultDetail.agentSortState) || { col: 'testScorePct', asc: false };
+    const sortedAgentRows = [...agentSummaryRows].sort((a, b) => {
+        let leftValue;
+        let rightValue;
+        switch (agentSortState.col) {
+            case 'agentName':
+                leftValue = a.agentName.toLowerCase();
+                rightValue = b.agentName.toLowerCase();
+                break;
+            case 'trainingAccuracyPct':
+                leftValue = a.trainingAccuracyPct;
+                rightValue = b.trainingAccuracyPct;
+                break;
+            case 'testScorePct':
+            default:
+                leftValue = a.testScorePct;
+                rightValue = b.testScorePct;
+                break;
+        }
+        const cmp = typeof leftValue === 'number' && typeof rightValue === 'number'
+            ? leftValue - rightValue
+            : String(leftValue).localeCompare(String(rightValue));
+        return agentSortState.asc ? cmp : -cmp;
+    });
+    const sortIndicators = {
+        agentName: agentSortState.col === 'agentName' ? (agentSortState.asc ? '↑' : '↓') : '⇅',
+        trainingAccuracyPct: agentSortState.col === 'trainingAccuracyPct' ? (agentSortState.asc ? '↑' : '↓') : '⇅',
+        testScorePct: agentSortState.col === 'testScorePct' ? (agentSortState.asc ? '↑' : '↓') : '⇅',
+    };
     const pngFiles = Array.isArray(data.files)
         ? data.files.filter(f => String(f).toLowerCase().endsWith('.png'))
         : [];
@@ -389,7 +537,7 @@ let modalContentHtml = `
                         <p>Train Eps: <strong>${data.training_episodes}</strong></p>
                         <p>Max Steps: <strong>${data.max_steps}</strong></p>
                         <p>Test Eps: <strong>${data.test_episodes}</strong></p>
-                        <p>Mean Acc: <strong class="text-green-600">${(data.mean_accuracy * 100).toFixed(1)}%</strong></p>
+                        <p>Acc (min/mean/max): <strong class="text-green-600">${(Number(data.min_accuracy || 0) * 100).toFixed(1)}% / ${(Number(data.mean_accuracy || 0) * 100).toFixed(1)}% / ${(Number(data.max_accuracy || 0) * 100).toFixed(1)}%</strong></p>
                     </div>
                 </div>
 
@@ -473,7 +621,7 @@ let modalContentHtml = `
                 </div>
             </div>
 
-            <div class="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
                     <h4 class="font-bold text-emerald-800 mb-3 uppercase text-xs">Training Summary</h4>
                     <div class="space-y-1 text-sm">
@@ -495,12 +643,37 @@ let modalContentHtml = `
                         <p><span class="font-semibold">Best agent:</span> ${data.name_max_score || '-'}</p>
                         <p><span class="font-semibold">Worst agent:</span> ${data.name_min_score || '-'}</p>
                         <p><span class="font-semibold">Test charts:</span> ${Array.isArray(data.test_charts) ? data.test_charts.length : 0}</p>
-                        ${mitigationSummary ? `
-                        <p><span class="font-semibold">Mitigation episodes:</span> ${Number(mitigationSummary.episodes_with_mitigation_data || 0)}</p>
-                        <p><span class="font-semibold">Under attack (total):</span> ${Number(mitigationSummary.total_under_attack_count || 0)}</p>
-                        <p><span class="font-semibold">Mitigated (total):</span> ${Number(mitigationSummary.total_mitigated_under_attack_count || 0)}</p>
+                        ${isAttackScenario && mitigationSummary ? `
+                        <p><span class="font-semibold">Attack episodes:</span> ${Number(mitigationSummary.attack_episodes || 0)}</p>
                         <p><span class="font-semibold">Mitigation ratio:</span> <span class="font-semibold ${mitigationRatioClass}">${mitigationRatioPct.toFixed(2)}%</span></p>
                         ` : ''}
+                    </div>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                    <h4 class="font-bold text-slate-800 mb-3 uppercase text-xs">Agent Summary</h4>
+                    <div class="flex items-center justify-between gap-3 mb-2">
+                        <span class="text-[10px] text-gray-500">Click a header to sort</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs bg-white border border-slate-200 rounded-lg overflow-hidden">
+                            <thead class="bg-slate-100 text-slate-900">
+                                <tr>
+                                    <th class="text-left px-2 py-1 cursor-pointer select-none result-detail-agent-sort" data-sort-col="agentName">Agent ${sortIndicators.agentName}</th>
+                                    <th class="text-right px-2 py-1 cursor-pointer select-none result-detail-agent-sort" data-sort-col="trainingAccuracyPct">Training accuracy % ${sortIndicators.trainingAccuracyPct}</th>
+                                    <th class="text-right px-2 py-1 cursor-pointer select-none result-detail-agent-sort" data-sort-col="testScorePct">Test score % ${sortIndicators.testScorePct}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${sortedAgentRows.map(row => `
+                                    <tr class="border-t border-slate-100 hover:bg-slate-50">
+                                        <td class="px-2 py-1 font-medium break-words">${escapeHtml(row.agentName)}</td>
+                                        <td class="px-2 py-1 text-right" title="Training accuracy: ${row.trainingAccuracyPct.toFixed(2)}%">${row.trainingAccuracyPct.toFixed(2)}%</td>
+                                        <td class="px-2 py-1 text-right" title="Test score: ${row.testScoreValue}/${testEpisodes}">${row.testScorePct.toFixed(2)}%</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -715,6 +888,7 @@ $(document).on('click', '.result-sort-th', function () {
 $(document).ready(function() {
     ensureZoomControls();
     getChartDescriptions(); // preload so first zoom is instant
+    syncResultsSelectionToolbar();
 
     // 1. Apertura Zoom al click su un'immagine del modal
     $(document).on('click', '.clickable-img', function() {
@@ -915,16 +1089,124 @@ $(document).ready(function() {
         }
     });
 
+    $(document).on('click', '.result-detail-agent-sort', function(event) {
+        event.preventDefault();
+        if (!selectedResultDetail || !selectedResultDetail.data) {
+            return;
+        }
+
+        const sortCol = String($(this).data('sort-col') || 'testScorePct');
+        const currentSort = selectedResultDetail.agentSortState || { col: 'testScorePct', asc: false };
+        const nextSort = {
+            col: sortCol,
+            asc: currentSort.col === sortCol ? !currentSort.asc : (sortCol === 'agentName'),
+        };
+        selectedResultDetail.agentSortState = nextSort;
+        renderResultModalContent(selectedResultDetail.gym_type, selectedResultDetail.path, selectedResultDetail.data);
+    });
+
+    $(document).on('click', '#toggle-results-selection-btn', function(event) {
+        event.preventDefault();
+        setResultsSelectionMode(!resultsSelectionMode);
+    });
+
+    $(document).on('click', '#clear-results-selection-btn', function(event) {
+        event.preventDefault();
+        clearResultSelection();
+    });
+
+    $(document).on('click', '#bulk-delete-results-btn', async function(event) {
+        event.preventDefault();
+
+        const selectedEntries = Array.from(selectedResultItems.entries()).map(([path, meta]) => ({ path, kind: meta.kind || 'complete' }));
+        if (selectedEntries.length === 0) {
+            showStatus('Select at least one result to delete.', 'error');
+            return;
+        }
+
+        const paths = selectedEntries.map(entry => entry.path);
+        const completeEntries = selectedEntries.filter(entry => entry.kind === 'complete');
+        const incompleteCount = selectedEntries.length - completeEntries.length;
+        const hasComplete = completeEntries.length > 0;
+
+        const confirmMessage = [
+            completeEntries.length === 1
+                ? 'Delete this complete result folder?' 
+                : `Delete these ${completeEntries.length} complete result folders?`,
+            '',
+            'Complete selections:',
+            ...completeEntries.map(entry => `- ${entry.path}`),
+            incompleteCount > 0 ? '' : null,
+            incompleteCount > 0 ? `Incomplete selections: ${incompleteCount} item(s) will also be deleted.` : null,
+            '',
+            'This action cannot be undone.'
+        ].filter(Boolean).join('\n');
+
+        if (hasComplete && !window.confirm(confirmMessage)) {
+            return;
+        }
+
+        const btn = $(this);
+        const originalText = btn.text();
+        btn.prop('disabled', true).text('Deleting...');
+
+        try {
+            const response = await deleteResultPaths(paths);
+            const deletedCount = Array.isArray(response.deleted_paths) ? response.deleted_paths.length : 0;
+            const failedCount = Array.isArray(response.failed_paths) ? response.failed_paths.length : 0;
+
+            if (deletedCount > 0 && failedCount === 0) {
+                showStatus(`Deleted ${deletedCount} result folder(s).`, 'success');
+            } else if (deletedCount > 0) {
+                showStatus(`Deleted ${deletedCount} result folder(s), ${failedCount} failed.`, 'warning');
+            } else {
+                throw new Error(response.message || 'Unable to delete selected results');
+            }
+
+            clearResultSelection();
+            setResultsSelectionMode(false);
+            renderResultsPanel();
+        } catch (errMessage) {
+            showStatus(`Error deleting selected results: ${errMessage}`, 'error');
+        } finally {
+            btn.prop('disabled', false).text(originalText);
+        }
+    });
+
+    $(document).on('click', '.results-result-row', function(event) {
+        if ($(event.target).closest('button, input, label, a').length > 0) {
+            return;
+        }
+
+        const gymType = $(this).data('gym-type');
+        const path = $(this).data('path');
+        const kind = $(this).data('result-kind') || 'complete';
+
+        if (resultsSelectionMode) {
+            toggleResultSelection(path, kind);
+            return;
+        }
+
+        loadResultsData(gymType, path);
+    });
+
+    $(document).on('click', '.result-select-checkbox', function(event) {
+        event.stopPropagation();
+        const rowKind = $(this).data('result-kind') || $(this).closest('.results-result-row').data('result-kind') || 'complete';
+        toggleResultSelection($(this).data('path'), rowKind, $(this).is(':checked'));
+    });
+
     $(document).on('click', '.delete-result-btn, .delete-incomplete-result-btn', async function(event) {
         event.stopPropagation();
         event.preventDefault();
         const path = $(this).data('path');
+        const isIncompleteDelete = $(this).hasClass('delete-incomplete-result-btn');
         if (!path) {
             showStatus('Invalid result path.', 'error');
             return;
         }
 
-        if (!window.confirm(`Delete result folder "${path}"? This action cannot be undone.`)) {
+        if (!isIncompleteDelete && !window.confirm(`Delete result folder "${path}"? This action cannot be undone.`)) {
             return;
         }
 

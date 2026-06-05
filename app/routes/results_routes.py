@@ -14,6 +14,7 @@ from ..services import (
     build_result_statuses_preview,
     build_test_scenario_preview,
     delete_result_dir,
+    delete_result_dirs,
     load_saved_config_by_relative_path,
     reprint_result_charts,
 )
@@ -79,6 +80,13 @@ def create_results_blueprint(state):
         payload = request.get_json(silent=True) or {}
         path = payload.get('path', '')
         response, status_code = delete_result_dir(state['current_config'], path)
+        return jsonify(response), status_code
+
+    @bp.route('/delete_result_dirs', methods=['POST'])
+    def delete_result_dirs_route():
+        payload = request.get_json(silent=True) or {}
+        paths = payload.get('paths', [])
+        response, status_code = delete_result_dirs(state['current_config'], paths)
         return jsonify(response), status_code
 
     @bp.route('/get_load_dir_list', methods=['GET'])

@@ -806,15 +806,15 @@ def plot_comparison_bar_charts(dir_name,
     plt.title(title)
     plt.xlabel("RL Strategy")
     plt.ylabel("Metric Value (%)")
-    plt.xticks(index + bar_width * (num_metrics - 1) / 2, strategy_names)
+    plt.xticks(index + bar_width * (num_metrics - 1) / 2, strategy_names, rotation=45, ha='right')
     plt.ylim(y_lower_limit, y_upper_limit)
     plt.legend()
     plt.grid(axis='y', linestyle='--', alpha=0.6)
     plt.tight_layout()
     plt.savefig(f"{dir_name}/metrics_comparison.png")
     plt.close()
-    
-#normalized_segments = normalize_individual_segments(segments)     
+
+#normalized_segments = normalize_individual_segments(segments)
 def normalize_individual_segments(arrays):
     # Normalize each segment individually between 0 and 100
     normalized_segments = []

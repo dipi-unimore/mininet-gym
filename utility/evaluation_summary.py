@@ -79,18 +79,24 @@ def _build_mitigation_summary(mitigation_history):
         return None
 
     total_under_attack = 0
-    total_mitigated = 0
+    ratios = []
     for item in mitigation_history:
         if not isinstance(item, dict):
             continue
         total_under_attack += _to_int(item.get("under_attack_count"), default=0)
-        total_mitigated += _to_int(item.get("mitigated_under_attack_count"), default=0)
+        ratio_value = item.get("mitigated_under_attack_ratio", None)
+        if ratio_value is None:
+            under_attack = _to_int(item.get("under_attack_count"), default=0)
+            mitigated = _to_int(item.get("mitigated_under_attack_count"), default=0)
+            ratio_value = float(min(mitigated, under_attack) / under_attack) if under_attack > 0 else 0.0
+        ratios.append(_to_float(ratio_value) or 0.0)
 
-    ratio = float(total_mitigated / total_under_attack) if total_under_attack > 0 else 0.0
+    ratio = float(sum(ratios) / len(ratios)) if ratios else 0.0
     return {
         "episodes_with_mitigation_data": len(mitigation_history),
+        "attack_episodes": total_under_attack,
+        "mitigation_ratio": ratio,
         "total_under_attack_count": total_under_attack,
-        "total_mitigated_under_attack_count": min(total_mitigated, total_under_attack),
         "mitigated_under_attack_ratio": ratio,
     }
 

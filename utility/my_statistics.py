@@ -568,22 +568,39 @@ def plot_agent_test(test, dir_name, title=''):
         title (str, optional): _description_. Defaults to ''.
     """
     # Extracting indicators to plot
-    episodes = range(1,len(test["ground_truth"])+1)
     ground_truth = [item[1] for item in test["ground_truth"]]
-    plt.plot(episodes, ground_truth, label='Ground truth', color='purple')
-    
+    n_points = len(ground_truth)
+
+    # Limit points to avoid memory issues with large datasets
+    max_points = 5000
+    if n_points > max_points:
+        step = n_points // max_points
+        ground_truth = ground_truth[::step]
+        step_size = step
+    else:
+        step_size = 1
+
+    episodes = range(1, len(ground_truth) + 1)
+
+    plt.figure(figsize=(14, 6), dpi=80)
+    plt.plot(episodes, ground_truth, label='Ground truth', color='purple', linewidth=0.5)
+
     i=1
     for name, items in test["predicted"].items():
-        values = [item[1]-i for item in items]
-        plt.plot(episodes, values, label=name)
+        # Apply same step to predicted data
+        values = [item[1]-i for item in items[::step_size]]
+        plt.plot(episodes, values, label=name, linewidth=0.5)
         i+=1
-        
+
     plt.title(f'{title} prediction')
     plt.xlabel('Test Episodes')
+    plt.ylabel('Prediction Value')
     plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
 
-    # Save figure
-    plt.savefig(f"{dir_name}/test_episodes.png")
+    # Save figure with low DPI to reduce memory
+    plt.savefig(f"{dir_name}/test_episodes.png", dpi=100)
     plt.close() 
     
 
@@ -1107,7 +1124,7 @@ def plot_comparison_bar_charts(dir_name,
     plt.title(title)
     plt.xlabel("RL Strategy")
     plt.ylabel("Metric Value (%)")
-    plt.xticks(index + bar_width * (num_metrics - 1) / 2, strategy_names)
+    plt.xticks(index + bar_width * (num_metrics - 1) / 2, strategy_names, rotation=45, ha='right')
     plt.ylim(y_lower_limit, y_upper_limit)
     plt.legend()
     plt.grid(axis='y', linestyle='--', alpha=0.6)

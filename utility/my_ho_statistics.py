@@ -476,22 +476,36 @@ def plot_ho_agent_test(test, dir_name, title=''):
         title:    Optional title prefix.
     """
     ground_truth = [map_ho_status_id_to_class(v) for v in test["ground_truth"]]
+    n_points = len(ground_truth)
+
+    # Limit points to avoid memory issues with large datasets
+    max_points = 5000
+    if n_points > max_points:
+        step = n_points // max_points
+        ground_truth = ground_truth[::step]
+        step_size = step
+    else:
+        step_size = 1
+
     episodes = range(1, len(ground_truth) + 1)
 
-    plt.figure(figsize=(12, 5))
+    plt.figure(figsize=(14, 6), dpi=80)
     plt.plot(episodes, ground_truth, label='Ground Truth',
-             color='black', linewidth=1.5)
+             color='black', linewidth=1.0)
 
     for agent_name, preds in test["predicted"].items():
-        plt.plot(episodes, preds, label=agent_name, linestyle='--')
+        # Apply same step to predicted data
+        preds_subset = preds[::step_size]
+        plt.plot(episodes, preds_subset, label=agent_name, linestyle='--', linewidth=0.8)
 
     plt.yticks([0, 1, 2], ["Normal", "Under Attack", "Attacking"])
     plt.title(f"{title} Predictions vs Ground Truth")
     plt.xlabel("Evaluation micro-steps")
     plt.ylabel("Host Status")
     plt.legend()
+    plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig(f"{dir_name}/test_episodes.png")
+    plt.savefig(f"{dir_name}/test_episodes.png", dpi=100)
     plt.close()
 
 
@@ -601,6 +615,7 @@ from utility.my_statistics import (  # noqa: E402
     plot_comparison_bar_charts,
     plot_radar_chart,
     plot_metrics_kfold,
+    plot_metrics_violin,
 )
 
 
