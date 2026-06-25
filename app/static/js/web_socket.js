@@ -48,16 +48,30 @@ async function syncTrainingStateOnReconnect() {
             timeout: 5000
         });
         
+        // Merge server-side summaries into in-memory dicts (server wins only if no local data)
+        function _mergeSummariesFromResponse(agentButtonState) {
+            if (!agentButtonState) return;
+            window.lastAgentTrainingSummaries = window.lastAgentTrainingSummaries || {};
+            window.lastAgentEvaluationSummaries = window.lastAgentEvaluationSummaries || {};
+            Object.keys(agentButtonState).forEach(agent => {
+                const st = agentButtonState[agent] || {};
+                if (st.training_summary && !window.lastAgentTrainingSummaries[agent]) {
+                    window.lastAgentTrainingSummaries[agent] = st.training_summary;
+                }
+                if (st.evaluation_summary && !window.lastAgentEvaluationSummaries[agent]) {
+                    window.lastAgentEvaluationSummaries[agent] = st.evaluation_summary;
+                }
+            });
+        }
+
         if (response.is_training) {
             console.log('Training state synced after reconnect:', response.message);
             // Map the status response to system status
-            let newState = SYSTEM_STATUS.IDLE;
+            let newState = SYSTEM_STATUS.TRAINING_RUNNING;
             if (response.is_paused) {
                 newState = SYSTEM_STATUS.PAUSED;
             } else if (response.is_stopping) {
                 newState = SYSTEM_STATUS.STOPPED;
-            } else if (response.status === 'RUNNING') {
-                newState = SYSTEM_STATUS.TRAINING_RUNNING;
             }
             setStatus(newState, response.message);
 
@@ -67,6 +81,11 @@ async function syncTrainingStateOnReconnect() {
             if (currentConfig && currentConfig.cfg && currentConfig.cfg.agents && currentConfig.cfg.hosts) {
                 initializeAgentsCharts(currentConfig.cfg.isMultiAgent, currentConfig.cfg.agents, currentConfig.cfg.hosts);
             }
+
+            // Merge server-side summaries then re-enable buttons
+            _mergeSummariesFromResponse(response.agent_button_state);
+            if (typeof restoreTrainingResultsButtonStates === 'function') restoreTrainingResultsButtonStates();
+            if (typeof restoreEvaluationResultsButtonStates === 'function') restoreEvaluationResultsButtonStates();
 
             // Restore chart data — pass server-side agent_chart_data for page-refresh recovery
             let chartDataRestored = false;
@@ -80,9 +99,18 @@ async function syncTrainingStateOnReconnect() {
                 showStatus(`Synchronized: ${response.message}`, 'info');
             }
         } else {
-            // No active training, clear status
+            // No active training: if we were in a training state, training finished while
+            // disconnected — show FINISHED so the guard in setStatus doesn't block the transition.
             localStorage.removeItem('trainingStatus');
-            setStatus(SYSTEM_STATUS.IDLE, 'No active training');
+            if (systemStatus > SYSTEM_STATUS.IDLE && systemStatus !== SYSTEM_STATUS.FINISHED) {
+                setStatus(SYSTEM_STATUS.FINISHED, 'Training completed');
+            } else {
+                setStatus(SYSTEM_STATUS.IDLE, 'No active training');
+            }
+            // Merge server-side summaries then re-enable buttons
+            _mergeSummariesFromResponse(response.agent_button_state);
+            if (typeof restoreTrainingResultsButtonStates === 'function') restoreTrainingResultsButtonStates();
+            if (typeof restoreEvaluationResultsButtonStates === 'function') restoreEvaluationResultsButtonStates();
         }
     } catch (error) {
         console.warn('Could not sync training state on reconnect:', error);
@@ -124,6 +152,9 @@ function initializeWebSocket() {
                 if (typeof currentConfig !== 'undefined' && currentConfig) {
                     currentConfig.cfg = data.config;
                 }
+                // Re-enable buttons for summaries already in memory (reset by initializeAgentsCharts)
+                if (typeof restoreTrainingResultsButtonStates === 'function') restoreTrainingResultsButtonStates();
+                if (typeof restoreEvaluationResultsButtonStates === 'function') restoreEvaluationResultsButtonStates();
                 continue;
             }
             if (data.level == 'data') {
@@ -178,7 +209,8 @@ function initializeWebSocket() {
     });
 
     socket.on('status_update', function (data) {
-        msg = `${data.mode} ${data.status}`
+        let msg = `${data.mode} ${data.status}`
+        let newState = SYSTEM_STATUS.UNKNOWN;
         if (data.status == STATUS.IDLE) {
             newState = SYSTEM_STATUS.IDLE;
         } else if (data.status === STATUS.STARTING) {

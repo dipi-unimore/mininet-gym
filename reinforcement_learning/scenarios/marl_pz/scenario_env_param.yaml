@@ -1,0 +1,44 @@
+attacks:
+  # Attack probability during normal and scenario generation
+  likely: 0.45
+  likely_train: 0.5
+  likely_eval: 0.3
+
+  # Duration (in steps) of short and long attacks
+  short_attack_duration: 5
+  long_attack_duration: 25
+
+  # Minimum steps before declaring no-attack
+  no_attack_timeout: 3
+
+  # Anti-oscillation: minimum rounds a host must remain blocked
+  # before it can be unblocked when action switches back to NORMAL_TRAFFIC
+  unblock_min_hold_rounds: 2
+
+  # Anti-oscillation: consecutive NORMAL_TRAFFIC predictions required
+  # while blocked before unblocking
+  unblock_required_normal_streak: 2
+
+  # Whether to apply OVS flow-drop rules when ATTACK_OUT is detected.
+  # Default false: agents observe and classify without actively blocking.
+  apply_drop_rules: false
+
+  # Include a coordinator agent that aggregates host signals and broadcasts
+  # attack alerts back to all hosts.
+  # true  → possible_agents = hosts + coordinator
+  #         host obs adds 1 msg_count feature  (5 or 9 features total)
+  # false → possible_agents = hosts only
+  #         host obs has no msg feature        (4 or 8 features total)
+  use_coordinator: true
+
+  # Whether to include percentage-variation features in host observations.
+  # false → obs (use_coordinator=true):  [rx_pkts, rx_bytes, tx_pkts, tx_bytes, msg_count]   (5)
+  #         obs (use_coordinator=false): [rx_pkts, rx_bytes, tx_pkts, tx_bytes]               (4)
+  # true  → obs adds 4 pct-change features (+4 each case)
+  include_percentage_variations: false
+
+  thresholds:
+    packets: 80000
+    var_packets: 50
+    bytes: 250000000
+    var_bytes: 30

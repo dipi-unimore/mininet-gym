@@ -5,18 +5,22 @@ ATTACKS_FROM_DATASET = 'attacks_from_dataset'
 ATTACKS_HO = 'attacks_ho'
 ATTACKS_HO_FROM_DATASET = 'attacks_ho_from_dataset'
 MARL_ATTACKS = 'marl_attacks'
-MARL_ATTACKS_FROM_DATASET = 'marl_attacks_from_dataset'   
+MARL_ATTACKS_FROM_DATASET = 'marl_attacks_from_dataset'
+MARL_PZ = 'marl_pz'
+MARL_PZ_FROM_DATASET = 'marl_pz_from_dataset'
 FROM_DATASET = 'from_dataset'
 
 GYM_TYPE = {
-    CLASSIFICATION_FROM_DATASET: 0, 
+    CLASSIFICATION_FROM_DATASET: 0,
     CLASSIFICATION: 1,
     ATTACKS_HO: 2,
     ATTACKS_HO_FROM_DATASET: 3,
     ATTACKS: 4,
     ATTACKS_FROM_DATASET: 5,
     MARL_ATTACKS: 6,
-    MARL_ATTACKS_FROM_DATASET: 7
+    MARL_ATTACKS_FROM_DATASET: 7,
+    MARL_PZ: 8,
+    MARL_PZ_FROM_DATASET: 9,
 }
 
 ALGO_Q_LEARNING = 'q-learning'

@@ -12,6 +12,8 @@ def gym_type_to_scenario_folder(gym_type: str) -> str | None:
         return None
     if gym_type.startswith('attacks_ho'):
         return 'attack_detect_host_observable'
+    if gym_type.startswith('marl_pz'):
+        return 'marl_pz'
     if gym_type.startswith('marl_attacks'):
         return 'marl'
     if gym_type.startswith('attacks'):

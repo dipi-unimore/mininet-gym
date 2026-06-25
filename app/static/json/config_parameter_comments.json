@@ -19,7 +19,7 @@
   "env_params.wait_after_read": "Delay after reading network counters.",
   "ui.scenario_source_help": "Scenario source behavior:\n\nGenerate new (default): a new scenario is created when training starts.\nGenerate test scenario: creates a preview in memory and opens the analysis popup; no file is saved.\nLoad existing: click a row to select an existing scenario.json and open its popup details.\n\nWhen entering Training with Load existing:\n- episodes <- scenario training episodes\n- max_steps <- scenario train max steps\n- test_episodes <- scenario eval episodes\nThis sync happens only when navigating to Training, not during inspection.",
 
-  "env_params.attacks": "Attack scheduling and mitigation parameters for ATTACKS/ATTACKS_HO/MARL attack-oriented scenarios.",
+  "env_params.attacks":"Attack scheduling and mitigation parameters for ATTACKS/ATTACKS_HO/MARL attack-oriented scenarios.",
   "env_params.attacks.likely": "Base probability that a host starts an attack when idle. This value can dynamically evolve during generation depending on scenario logic.",
   "env_params.attacks.likely_train": "Attack likelihood during TRAINING episodes (ATTACKS_HO only). Range: 0.0-1.0, default 0.9. Higher values create frequent attacks for agent learning and policy development.",
   "env_params.attacks.likely_eval": "Attack likelihood during EVALUATION/TEST episodes (ATTACKS_HO only). Range: 0.0-1.0, default 0.3. Lower values provide realistic sparse attack conditions for final testing.",
@@ -30,6 +30,7 @@
   "env_params.attacks.unblock_min_hold_rounds": "Minimum full rounds to keep a host blocked before allowing unblock.",
   "env_params.attacks.unblock_required_normal_streak": "Consecutive NORMAL decisions required while blocked before unblocking.",
   "env_params.attacks.apply_drop_rules": "If true, the environment applies drop rules to the traffic when the agent takes the 'drop' action. This can be used to simulate the effect of blocking traffic in a real network. If false, the environment will not apply drop rules and will only provide feedback to the agent based on its actions.",
+  "env_params.attacks.include_percentage_variations": "ATTACKS_HO only. Controls the per-host observation size. false (default) → shape (4,): RX packets, RX bytes, TX packets, TX bytes — counters only, less noise, faster convergence. true → shape (8,): adds 4 percentage-variation columns (Δ%). Changing this value makes saved models incompatible.",
   "env_params.attacks.thresholds": "Thresholds used by rule-based labeling/detection features in attack environments.",
   "env_params.attacks.thresholds.packets": "Absolute packet-count threshold. Values above this are treated as anomalous/suspicious depending on scenario logic.",
   "env_params.attacks.thresholds.var_packets": "Allowed packet variation (%) versus baseline. Above this delta, traffic may be flagged as unstable/anomalous.",

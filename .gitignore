@@ -32,6 +32,13 @@ config/**/*.yaml
 #__pycache__ dir
 __pycache__
 
+#artifacts
+artifacts/*
+
+# #latex files
+# *.tex
+# *.sty
+
 #Json file
 #*.json
 
@@ -304,3 +311,24 @@ Temporary Items
 [Ss]cripts
 pyvenv.cfg
 pip-selfcheck.json
+docs/papers/thesis/thesys_main.aux
+docs/papers/thesis/thesys_main.bbl
+docs/papers/thesis/thesys_main.blg
+docs/papers/thesis/thesys_main.fdb_latexmk
+docs/papers/thesis/thesys_main.fls
+docs/papers/thesis/thesys_main.loa
+docs/papers/thesis/thesys_main.lof
+docs/papers/thesis/thesys_main.lot
+docs/papers/thesis/thesys_main.out
+docs/papers/thesis/thesys_main.pdf
+docs/papers/thesis/thesys_main.synctex.gz
+docs/papers/thesis/thesys_main.toc
+docs/papers/thesis/chapters/ch01_introduction.aux
+docs/papers/thesis/chapters/ch02_background.aux
+docs/papers/thesis/chapters/ch03_marl_survey.aux
+docs/papers/thesis/chapters/ch05_single_agent.aux
+docs/papers/thesis/chapters/ch06_enhanced_single_agent.aux
+docs/papers/thesis/chapters/ch07_marl_coordination.aux
+docs/papers/thesis/chapters/ch08_marl_experiments.aux
+docs/papers/thesis/chapters/ch09_vrp.aux
+docs/papers/thesis/chapters/ch10_conclusions.aux

@@ -292,3 +292,577 @@ ul#host-task-data li span {
     font-size:.73rem; color:#6b7280; text-align:center;
     padding:6px 10px; font-style:italic;
 }
+/* ── Config tabs ─────────────────────────────────────────────────────────── */
+.config-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #6b7280;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+}
+.config-tab:hover {
+    color: #1d4ed8;
+    background: rgba(59, 130, 246, 0.05);
+}
+.config-tab.cfg-tab-active {
+    color: #1d4ed8;
+    border-bottom-color: #2563eb;
+    background: #fff;
+    font-weight: 600;
+}
+
+/* ── Env sub-tabs ────────────────────────────────────────────────────────── */
+.env-sub-tab-bar {
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 6px 6px 0 0;
+}
+.env-sub-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: #6b7280;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+}
+.env-sub-tab:hover {
+    color: #1d4ed8;
+    background: rgba(59, 130, 246, 0.05);
+}
+.env-sub-tab.env-subtab-active {
+    color: #1d4ed8;
+    border-bottom-color: #2563eb;
+    font-weight: 600;
+}
+.env-sub-tab-note {
+    font-size: 0.68rem;
+    font-weight: 400;
+    opacity: 0.6;
+    font-style: italic;
+}
+
+/* ── Agent tabs ───────────────────────────────────────────────────────────── */
+.agent-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #374151;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+}
+.agent-tab:hover {
+    color: #1d4ed8;
+    background: rgba(59, 130, 246, 0.05);
+}
+.agent-tab.agent-tab-active {
+    color: #1d4ed8;
+    border-bottom-color: #2563eb;
+    font-weight: 600;
+}
+.agent-tab.agent-tab-disabled { color: #9ca3af; }
+.agent-tab.agent-tab-disabled.agent-tab-active {
+    color: #9ca3af;
+    border-bottom-color: #9ca3af;
+}
+.agent-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.agent-dot-on  { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.5); }
+.agent-dot-off { background: #d1d5db; }
+
+/* ── Results scenario tabs ───────────────────────────────────────────────── */
+.results-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #6b7280;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+}
+.results-tab:hover {
+    color: #1d4ed8;
+    background: rgba(59, 130, 246, 0.05);
+}
+.results-tab.cfg-tab-active {
+    color: #1d4ed8;
+    border-bottom-color: #2563eb;
+    background: #fff;
+    font-weight: 600;
+}
+.res-tab-badge {
+    display: inline-block;
+    font-size: 0.67rem;
+    font-weight: 500;
+    background: rgba(100, 150, 220, 0.15);
+    border-radius: 9999px;
+    padding: 1px 7px;
+}
+
+/* ── Theme toggle button ──────────────────────────────────────────────────── */
+.cy-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    background: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    color: #4b5563;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.cy-theme-toggle:hover {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+/* ── Header & nav base styles (light theme) ─────────────────────────────── */
+.cy-header {
+    background: #f1f5f9;
+    border-bottom: 1px solid #cbd5e1;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+}
+.cy-logo-link { text-decoration: none; }
+.cy-title { display: flex; flex-direction: column; line-height: 1.1; }
+.cy-title-main {
+    font-size: 1.2rem; font-weight: 800; letter-spacing: -0.02em;
+    color: #1e40af;
+}
+.cy-title-sub {
+    font-size: 0.65rem; font-weight: 500; color: #64748b;
+    letter-spacing: 0.06em; text-transform: uppercase;
+}
+.cy-nav-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 8px; border: 1px solid transparent;
+    font-size: 0.8125rem; font-weight: 500; color: #374151;
+    background: transparent; cursor: pointer;
+    transition: all 0.15s ease;
+}
+.cy-nav-btn:hover {
+    color: #1d4ed8;
+    background: #dbeafe;
+    border-color: #bfdbfe;
+}
+.cy-nav-btn.cy-nav-active {
+    color: #1d4ed8;
+    background: #dbeafe;
+    border-color: #93c5fd;
+}
+.cy-nav-help {
+    color: #b45309; border-color: rgba(180,83,9,0.15);
+}
+.cy-nav-help:hover {
+    color: #92400e; background: #fef3c7; border-color: rgba(180,83,9,0.3);
+}
+.cy-btn-ghost {
+    background: transparent; border: 1px solid #d1d5db; color: #6b7280;
+    border-radius: 8px; cursor: pointer;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CYBERNETDARK THEME  —  data-theme="cyber"
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-theme="cyber"] {
+    --c-bg:        #080e1a;
+    --c-surface:   #0d1626;
+    --c-card:      #111f33;
+    --c-card-2:    #162540;
+    --c-border:    #1e3050;
+    --c-border-hi: #2a4570;
+    --c-accent:    #00d4ff;
+    --c-accent-2:  #0ea5e9;
+    --c-accent-dim:rgba(0,212,255,0.08);
+    --c-danger:    #f43f5e;
+    --c-success:   #10b981;
+    --c-warn:      #f59e0b;
+    --c-text-1:    #dde6f0;
+    --c-text-2:    #7a9ab8;
+    --c-text-3:    #3d5a78;
+    --c-glow:      0 0 16px rgba(0,212,255,0.18);
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+[data-theme="cyber"],
+[data-theme="cyber"] body {
+    background: radial-gradient(ellipse at 20% 0%, #0a1628 0%, var(--c-bg) 60%);
+    color: var(--c-text-1);
+    min-height: 100vh;
+}
+
+/* ── Tailwind color overrides ────────────────────────────────────────────── */
+[data-theme="cyber"] .bg-white           { background-color: var(--c-card)    !important; }
+[data-theme="cyber"] .bg-gray-50         { background-color: var(--c-surface) !important; }
+[data-theme="cyber"] .bg-gray-50\/70     { background-color: rgba(13,22,38,.85)!important; }
+[data-theme="cyber"] .bg-gray-100        { background-color: var(--c-card-2)  !important; }
+[data-theme="cyber"] .bg-gray-200        { background-color: var(--c-card-2)  !important; }
+[data-theme="cyber"] .bg-slate-50        { background-color: var(--c-surface) !important; }
+[data-theme="cyber"] .bg-slate-100       { background-color: var(--c-card)    !important; }
+[data-theme="cyber"] .bg-blue-50         { background-color: rgba(0,100,200,.12)!important; }
+[data-theme="cyber"] .bg-amber-50        { background-color: rgba(180,100,0,.12)!important; }
+[data-theme="cyber"] .bg-emerald-50      { background-color: rgba(0,120,80,.12)!important; }
+[data-theme="cyber"] .bg-indigo-50       { background-color: rgba(60,40,160,.15)!important; }
+[data-theme="cyber"] .bg-red-50          { background-color: rgba(160,20,40,.12)!important; }
+[data-theme="cyber"] .bg-rose-50         { background-color: rgba(160,20,40,.12)!important; }
+[data-theme="cyber"] .bg-purple-50       { background-color: rgba(100,40,160,.12)!important; }
+[data-theme="cyber"] .bg-yellow-50       { background-color: rgba(140,100,0,.12)!important; }
+
+[data-theme="cyber"] .text-gray-900,
+[data-theme="cyber"] .text-gray-800      { color: var(--c-text-1) !important; }
+[data-theme="cyber"] .text-gray-700,
+[data-theme="cyber"] .text-gray-600      { color: var(--c-text-2) !important; }
+[data-theme="cyber"] .text-gray-500,
+[data-theme="cyber"] .text-gray-400      { color: var(--c-text-3) !important; }
+[data-theme="cyber"] .text-gray-300      { color: #4d6a87 !important; }
+[data-theme="cyber"] .text-slate-700     { color: var(--c-text-2) !important; }
+[data-theme="cyber"] .text-black         { color: var(--c-text-1) !important; }
+
+[data-theme="cyber"] .border,
+[data-theme="cyber"] .border-gray-100,
+[data-theme="cyber"] .border-gray-200,
+[data-theme="cyber"] .border-gray-300    { border-color: var(--c-border) !important; }
+[data-theme="cyber"] .border-blue-100,
+[data-theme="cyber"] .border-blue-200    { border-color: rgba(0,180,220,.25) !important; }
+[data-theme="cyber"] .border-amber-200   { border-color: rgba(200,130,0,.25) !important; }
+[data-theme="cyber"] .border-emerald-200 { border-color: rgba(0,160,100,.25) !important; }
+[data-theme="cyber"] .border-indigo-200  { border-color: rgba(80,60,200,.3)  !important; }
+[data-theme="cyber"] .border-gray-800    { border-color: var(--c-border-hi) !important; }
+
+[data-theme="cyber"] .divide-gray-100 > * + *,
+[data-theme="cyber"] .divide-gray-200 > * + * { border-color: var(--c-border) !important; }
+
+[data-theme="cyber"] .shadow-sm,
+[data-theme="cyber"] .shadow,
+[data-theme="cyber"] .shadow-xl,
+[data-theme="cyber"] .shadow-2xl        { box-shadow: 0 2px 12px rgba(0,0,0,.55) !important; }
+
+/* ── Navigation ──────────────────────────────────────────────────────────── */
+[data-theme="cyber"] .cy-header {
+    background: rgba(8,14,26,0.96);
+    border-bottom: 1px solid var(--c-border);
+    box-shadow: 0 1px 24px rgba(0,212,255,0.06);
+    backdrop-filter: blur(8px);
+}
+[data-theme="cyber"] .cy-logo-link { text-decoration: none; }
+[data-theme="cyber"] .cy-title      { display: flex; flex-direction: column; line-height: 1.1; }
+[data-theme="cyber"] .cy-title-main {
+    font-size: 1.2rem; font-weight: 800; letter-spacing: -0.02em;
+    color: var(--c-accent);
+    text-shadow: 0 0 18px rgba(0,212,255,0.5);
+}
+[data-theme="cyber"] .cy-title-sub  { font-size: 0.65rem; font-weight: 500; color: var(--c-text-3); letter-spacing: 0.06em; text-transform: uppercase; }
+
+[data-theme="cyber"] .cy-nav-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 8px; border: 1px solid transparent;
+    font-size: 0.8125rem; font-weight: 500; color: var(--c-text-2);
+    background: transparent; cursor: pointer;
+    transition: all 0.15s ease;
+}
+[data-theme="cyber"] .cy-nav-btn:hover {
+    color: var(--c-accent);
+    background: var(--c-accent-dim);
+    border-color: rgba(0,212,255,0.2);
+}
+[data-theme="cyber"] .cy-nav-btn.cy-nav-active {
+    color: var(--c-accent);
+    background: var(--c-accent-dim);
+    border-color: rgba(0,212,255,0.35);
+    box-shadow: 0 0 10px rgba(0,212,255,0.12);
+}
+[data-theme="cyber"] .cy-nav-help {
+    color: #f59e0b; border-color: rgba(245,158,11,0.2);
+}
+[data-theme="cyber"] .cy-nav-help:hover {
+    color: #fbbf24; background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.4);
+}
+[data-theme="cyber"] .cy-btn-ghost {
+    background: transparent; border: 1px solid var(--c-border); color: var(--c-text-2);
+    border-radius: 8px; cursor: pointer;
+}
+[data-theme="cyber"] .cy-card {
+    background: var(--c-card); border: 1px solid var(--c-border); color: var(--c-text-1);
+}
+
+/* ── Mobile nav ──────────────────────────────────────────────────────────── */
+[data-theme="cyber"] #mobile-nav-toast {
+    background: rgba(10,16,28,0.97) !important;
+    border-color: var(--c-border) !important;
+    backdrop-filter: blur(10px);
+}
+
+/* ── Cards & rounded panels ──────────────────────────────────────────────── */
+[data-theme="cyber"] .rounded-xl,
+[data-theme="cyber"] .rounded-2xl {
+    border-color: var(--c-border);
+}
+[data-theme="cyber"] [class*="rounded"][class*="bg-white"],
+[data-theme="cyber"] [class*="rounded"][class*="bg-gray-50"] {
+    border: 1px solid var(--c-border);
+}
+
+/* ── Form inputs ──────────────────────────────────────────────────────────── */
+[data-theme="cyber"] .config-input {
+    background-color: var(--c-surface) !important;
+    color: var(--c-accent) !important;
+    border: 1px solid var(--c-border) !important;
+    border-radius: 6px;
+}
+[data-theme="cyber"] .config-input:focus {
+    border-color: var(--c-accent) !important;
+    box-shadow: 0 0 0 2px rgba(0,212,255,0.15) !important;
+    outline: none;
+}
+[data-theme="cyber"] .config-input[readonly] {
+    background-color: var(--c-bg) !important;
+    color: var(--c-text-3) !important;
+    opacity: 0.6;
+}
+[data-theme="cyber"] .config-select {
+    background-color: var(--c-surface) !important;
+    color: var(--c-text-1) !important;
+    border: 1px solid var(--c-border) !important;
+    border-radius: 6px;
+}
+[data-theme="cyber"] .config-select:focus {
+    border-color: var(--c-accent) !important;
+    box-shadow: 0 0 0 2px rgba(0,212,255,0.15) !important;
+}
+[data-theme="cyber"] input[type="text"],
+[data-theme="cyber"] input[type="number"],
+[data-theme="cyber"] input[type="password"],
+[data-theme="cyber"] select:not(.config-select):not(#add-agent-algo-select) {
+    background-color: var(--c-surface) !important;
+    color: var(--c-text-1) !important;
+    border-color: var(--c-border) !important;
+}
+[data-theme="cyber"] input:focus,
+[data-theme="cyber"] select:focus {
+    border-color: var(--c-accent) !important;
+    box-shadow: 0 0 0 2px rgba(0,212,255,0.12) !important;
+    outline: none;
+}
+[data-theme="cyber"] #add-agent-algo-select {
+    background-color: var(--c-surface) !important;
+    color: var(--c-text-1) !important;
+    border-color: var(--c-border) !important;
+}
+[data-theme="cyber"] .load-dir-input {
+    background-color: var(--c-surface) !important;
+    color: var(--c-accent) !important;
+    border-color: var(--c-border) !important;
+}
+
+/* ── Config tabs (override light theme) ──────────────────────────────────── */
+[data-theme="cyber"] .config-tab {
+    color: var(--c-text-3);
+    background: transparent;
+    border-bottom-color: transparent;
+}
+[data-theme="cyber"] .config-tab:hover {
+    color: var(--c-accent);
+    background: var(--c-accent-dim);
+}
+[data-theme="cyber"] .config-tab.cfg-tab-active {
+    color: var(--c-accent);
+    border-bottom-color: var(--c-accent);
+    background: rgba(0,212,255,0.05);
+    font-weight: 600;
+}
+[data-theme="cyber"] .config-tab img { filter: brightness(0.6); }
+[data-theme="cyber"] .config-tab.cfg-tab-active img { filter: brightness(1.2) saturate(1.5); }
+
+/* ── Details / summary ───────────────────────────────────────────────────── */
+[data-theme="cyber"] summary::before { color: var(--c-accent-2); }
+[data-theme="cyber"] details[open] > summary::before { color: var(--c-accent); }
+[data-theme="cyber"] details[open] summary { color: var(--c-text-2) !important; }
+
+/* ── Nested config sections ──────────────────────────────────────────────── */
+[data-theme="cyber"] [class*="border-indigo-500"] {
+    border-left-color: var(--c-accent) !important;
+    background-color: rgba(0,30,55,0.5) !important;
+}
+
+/* ── Agent cards ─────────────────────────────────────────────────────────── */
+[data-theme="cyber"] .bg-slate-700 { background-color: #0a2540 !important; }
+[data-theme="cyber"] .bg-emerald-700 { background-color: #064e3b !important; }
+[data-theme="cyber"] .bg-rose-800   { background-color: #4c0519 !important; }
+
+/* ── Buttons (minor glow on primary) ─────────────────────────────────────── */
+[data-theme="cyber"] .bg-blue-600, [data-theme="cyber"] .bg-blue-500 {
+    background-color: #0369a1 !important;
+    box-shadow: 0 0 10px rgba(3,105,161,0.4);
+}
+[data-theme="cyber"] .bg-blue-600:hover, [data-theme="cyber"] .bg-blue-500:hover {
+    background-color: #0284c7 !important;
+    box-shadow: 0 0 14px rgba(2,132,199,0.5);
+}
+[data-theme="cyber"] .bg-emerald-500, [data-theme="cyber"] .bg-green-500 {
+    background-color: #065f46 !important;
+    box-shadow: 0 0 8px rgba(16,185,129,0.3);
+}
+[data-theme="cyber"] .bg-emerald-500:hover, [data-theme="cyber"] .bg-green-500:hover {
+    background-color: #047857 !important;
+}
+[data-theme="cyber"] .bg-indigo-500 { background-color: #3730a3 !important; }
+[data-theme="cyber"] .bg-red-600    { background-color: #9f1239 !important; }
+[data-theme="cyber"] .bg-yellow-500 { background-color: #92400e !important; }
+
+/* ── Log / terminal area ─────────────────────────────────────────────────── */
+[data-theme="cyber"] .bg-gray-900 {
+    background-color: #030810 !important;
+    border: 1px solid var(--c-border);
+}
+[data-theme="cyber"] .text-gray-300 { color: #7ab3cc !important; }
+[data-theme="cyber"] .text-green-400 { color: #34d399 !important; }
+
+/* ── Table / list rows ───────────────────────────────────────────────────── */
+[data-theme="cyber"] tr.border-b { border-color: var(--c-border) !important; }
+[data-theme="cyber"] .hover\:bg-gray-100:hover { background-color: rgba(0,212,255,0.05) !important; }
+[data-theme="cyber"] .hover\:bg-gray-50:hover  { background-color: rgba(0,212,255,0.04) !important; }
+[data-theme="cyber"] .bg-emerald-100 { background-color: rgba(0,100,60,.25) !important; }
+[data-theme="cyber"] .bg-rose-100    { background-color: rgba(160,20,40,.2) !important; }
+[data-theme="cyber"] .bg-yellow-500  { background-color: rgba(245,158,11,.7)!important; }
+
+/* ── Modal overlays ──────────────────────────────────────────────────────── */
+[data-theme="cyber"] .bg-gray-900.bg-opacity-75 {
+    background-color: rgba(4,8,18,0.88) !important;
+}
+[data-theme="cyber"] #result-modal > div,
+[data-theme="cyber"] #load-dir-modal > div,
+[data-theme="cyber"] #config-modal > div,
+[data-theme="cyber"] #config-list-modal > div,
+[data-theme="cyber"] #last-result-modal > div,
+[data-theme="cyber"] #agent-info-popup > div {
+    background: var(--c-card) !important;
+    border: 1px solid var(--c-border-hi);
+    box-shadow: 0 0 40px rgba(0,212,255,0.08), 0 20px 60px rgba(0,0,0,0.7);
+}
+
+/* ── Loading overlay ─────────────────────────────────────────────────────── */
+[data-theme="cyber"] #loading-overlay > div {
+    background: rgba(13,22,38,0.97) !important;
+    border-color: var(--c-border-hi) !important;
+}
+[data-theme="cyber"] .border-t-blue-600 { border-top-color: var(--c-accent) !important; }
+[data-theme="cyber"] .border-gray-200.border-t-blue-600 { border-color: var(--c-border); border-top-color: var(--c-accent) !important; }
+
+/* ── Status message ──────────────────────────────────────────────────────── */
+[data-theme="cyber"] #status-message {
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--c-border-hi);
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+[data-theme="cyber"] ::-webkit-scrollbar       { width: 5px; height: 5px; }
+[data-theme="cyber"] ::-webkit-scrollbar-track { background: var(--c-bg); }
+[data-theme="cyber"] ::-webkit-scrollbar-thumb { background: var(--c-border-hi); border-radius: 99px; }
+[data-theme="cyber"] ::-webkit-scrollbar-thumb:hover { background: var(--c-accent-2); }
+
+/* ── Gauge (training page) ───────────────────────────────────────────────── */
+[data-theme="cyber"] .gauge-bg    { stroke: var(--c-border-hi); }
+[data-theme="cyber"] .gauge-fill  { stroke: var(--c-accent); }
+[data-theme="cyber"] .gauge-text  { color: var(--c-text-1); }
+[data-theme="cyber"] .gauge-label { color: var(--c-text-3); }
+
+/* ── Load-dir modal list ─────────────────────────────────────────────────── */
+[data-theme="cyber"] .load-dir-item { color: var(--c-text-1); }
+[data-theme="cyber"] .load-dir-item:hover { background: var(--c-accent-dim) !important; }
+
+/* ── Placeholder text ────────────────────────────────────────────────────── */
+[data-theme="cyber"] ::placeholder { color: var(--c-text-3) !important; opacity: 1; }
+
+/* ── Cyan text accents ───────────────────────────────────────────────────── */
+[data-theme="cyber"] .text-blue-800  { color: var(--c-accent) !important; }
+[data-theme="cyber"] .text-blue-600  { color: var(--c-accent-2) !important; }
+[data-theme="cyber"] .text-blue-500  { color: var(--c-accent-2) !important; }
+[data-theme="cyber"] .text-blue-700  { color: var(--c-accent) !important; }
+[data-theme="cyber"] .text-indigo-700{ color: #818cf8 !important; }
+[data-theme="cyber"] .text-emerald-800 { color: #34d399 !important; }
+[data-theme="cyber"] .text-amber-800,
+[data-theme="cyber"] .text-amber-900 { color: #fbbf24 !important; }
+[data-theme="cyber"] .text-red-700   { color: var(--c-danger) !important; }
+[data-theme="cyber"] .text-green-600 { color: #34d399 !important; }
+[data-theme="cyber"] .text-yellow-300 { color: #fde68a !important; }
+
+/* ── Badge (agents count) ────────────────────────────────────────────────── */
+[data-theme="cyber"] .bg-blue-100  { background-color: rgba(0,150,220,.15) !important; }
+[data-theme="cyber"] .text-blue-700{ color: var(--c-accent) !important; }
+
+/* ── Results tabs (cyber) ────────────────────────────────────────────────── */
+[data-theme="cyber"] .results-tab-bar { border-bottom-color: var(--c-border) !important; }
+[data-theme="cyber"] .results-tab { color: var(--c-text-3); }
+[data-theme="cyber"] .results-tab:hover { color: var(--c-accent); background: var(--c-accent-dim); }
+[data-theme="cyber"] .results-tab.cfg-tab-active {
+    color: var(--c-accent);
+    border-bottom-color: var(--c-accent);
+    background: var(--c-surface);
+    text-shadow: 0 0 8px rgba(0,212,255,.4);
+}
+[data-theme="cyber"] .res-tab-badge { background: rgba(0,180,220,.15); color: var(--c-text-3); }
+
+/* ── Theme toggle (cyber) ────────────────────────────────────────────────── */
+[data-theme="cyber"] .cy-theme-toggle {
+    border-color: var(--c-border);
+    color: var(--c-text-2);
+}
+[data-theme="cyber"] .cy-theme-toggle:hover {
+    background: var(--c-accent-dim);
+    color: var(--c-accent);
+}
+
+/* ── Env sub-tabs (cyber) ────────────────────────────────────────────────── */
+[data-theme="cyber"] .env-sub-tab-bar { background: rgba(0,180,220,0.03); border-bottom-color: var(--c-border); }
+[data-theme="cyber"] .env-sub-tab { color: var(--c-text-3); }
+[data-theme="cyber"] .env-sub-tab:hover { color: var(--c-accent); background: var(--c-accent-dim); }
+[data-theme="cyber"] .env-sub-tab.env-subtab-active {
+    color: var(--c-accent);
+    border-bottom-color: var(--c-accent);
+    text-shadow: 0 0 8px rgba(0,212,255,0.35);
+}
+
+/* ── Agent tabs (cyber) ───────────────────────────────────────────────────── */
+[data-theme="cyber"] .agent-tab { color: var(--c-text-2); }
+[data-theme="cyber"] .agent-tab:hover { color: var(--c-accent); background: var(--c-accent-dim); }
+[data-theme="cyber"] .agent-tab.agent-tab-active {
+    color: var(--c-accent);
+    border-bottom-color: var(--c-accent);
+    text-shadow: 0 0 8px rgba(0,212,255,0.35);
+}
+[data-theme="cyber"] .agent-tab.agent-tab-disabled { color: var(--c-text-3); }
+[data-theme="cyber"] .agent-tab.agent-tab-disabled.agent-tab-active { color: var(--c-text-3); border-bottom-color: var(--c-text-3); }
+[data-theme="cyber"] .agent-dot-on  { background: #00ff88; box-shadow: 0 0 6px rgba(0,255,136,0.5); }
+[data-theme="cyber"] .agent-dot-off { background: var(--c-border-hi); }

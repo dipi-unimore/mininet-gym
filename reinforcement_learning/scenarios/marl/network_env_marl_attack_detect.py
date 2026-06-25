@@ -30,7 +30,8 @@ class NetworkEnvMarlAttackDetect(NetworkEnv):
 
         self.last_short_attack_timestamp = time.time()
         self.last_long_attack_timestamp = time.time()
-        
+        self.show_complete_network_status = getattr(params, 'show_complete_network_status', False)
+
         if self.gym_type == GYM_TYPE[MARL_ATTACKS]:
             self.attack_likely = self.init_attack_likely = params.attacks.likely
             self.update_state_thread_instance = threading.Thread(target=self.update_state_thread, args=())            

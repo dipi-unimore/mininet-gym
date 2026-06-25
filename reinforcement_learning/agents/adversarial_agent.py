@@ -7,6 +7,7 @@ from mininet.net import Mininet
 from mininet.node import Host
 
 from utility.network_attacks import AttackType, launch_attack_smart, launch_udp_flood_async
+from utility.host_cmd_lock import get_host_cmd_lock
 
 global_is_dos_attack_active = False
 
@@ -536,25 +537,13 @@ def is_serious_warning(output: str) -> bool:
 # Port management to avoid conflicts
 _used_ports = set()
 _port_lock = threading.Lock()
-_host_cmd_locks = {}
-_host_cmd_locks_lock = threading.Lock()
-
-
-def _get_host_cmd_lock(host):
-    host_name = getattr(host, 'name', str(id(host)))
-    with _host_cmd_locks_lock:
-        lock = _host_cmd_locks.get(host_name)
-        if lock is None:
-            lock = threading.Lock()
-            _host_cmd_locks[host_name] = lock
-        return lock
 
 
 def _host_cmd(host, command, wait_timeout=5.0, retries=5, retry_delay=0.1):
     if wait_timeout is not None and wait_timeout > 0:
         wait_for_host_ready(host, timeout=wait_timeout)
 
-    lock = _get_host_cmd_lock(host)
+    lock = get_host_cmd_lock(host)
     last_error = None
     with lock:
         for _ in range(retries):
@@ -669,9 +658,16 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
         if not wait_for_host_ready(dst_host, timeout=max_wait_time):
             error(f"Destination host {dst_host.name} still busy after {max_wait_time}s - attempting anyway")
             # Don't return None - try to proceed anyway
+
+        src_ip = src_host.IP()
+        dst_ip = dst_host.IP()
+        if not src_ip or not dst_ip:
+            error(f"Skipping traffic: {src_host.name} IP={src_ip}, {dst_host.name} IP={dst_ip} (host has no interface)")
+            return TrafficTypes.NONE, None, None
+
         if traffic_type == TrafficTypes.PING:
             # Generate ping traffic
-            client_output = _host_cmd(src_host, f"ping -c {int(duration)} {dst_host.IP()} 2>&1 &")
+            client_output = _host_cmd(src_host, f"ping -c {int(duration)} {dst_ip} >/dev/null 2>&1 &")
             
             if color is not Fore.BLACK:
                 color = Fore.GREEN if color is None else color
@@ -721,7 +717,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             client_log_file = f"/tmp/iperf_client_{src_host.name}_{port_number}.log"
             
             try:
-                _host_cmd(src_host, f"bash -c 'timeout {duration+1}s iperf -c {dst_host.IP()} -u -p {port_number} -t {duration} >{client_log_file} 2>&1 & echo $! >{client_pid_file}'", wait_timeout=0)
+                _host_cmd(src_host, f"bash -c 'timeout {duration+1}s iperf -c {dst_ip} -u -p {port_number} -t {duration} >{client_log_file} 2>&1 & echo $! >{client_pid_file}'", wait_timeout=0)
             except AssertionError:
                 error(f"Failed to start client on {src_host.name} - host still busy")
                 # Clean up server
@@ -817,7 +813,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             try:
                 # Start client with better error handling
                 client_cmd = (
-                    f"bash -c 'timeout {duration+1}s iperf -c {dst_host.IP()} "
+                    f"bash -c 'timeout {duration+1}s iperf -c {dst_ip} "
                     f"-p {port_number} -t {duration} -i 1 "
                     f">{client_log_file} 2>&1 & echo $! >{client_pid_file}'"
                 )
@@ -835,7 +831,10 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             
             # Verify client started
             if wait_for_host_ready(src_host, timeout=1.0):
-                client_pid = _host_cmd(src_host, f"cat {client_pid_file} 2>/dev/null", wait_timeout=0).strip()
+                raw_pid = _host_cmd(src_host, f"cat {client_pid_file} 2>/dev/null", wait_timeout=0).strip()
+                client_pid = raw_pid.split()[0] if raw_pid else ''
+                if not client_pid.isdigit():
+                    client_pid = ''
                 if client_pid:
                     client_check = _host_cmd(src_host, f"ps -p {client_pid} -o pid=", wait_timeout=0).strip()
                     if not client_check:

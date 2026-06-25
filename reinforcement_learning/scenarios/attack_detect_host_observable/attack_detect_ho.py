@@ -117,9 +117,21 @@ def attack_detect_ho_main(config, am: AgentManager,
         scenario_evaluation = list(scenario["evaluation"])
         del scenario
 
+        # ── Stop background update_state thread before sequential replay ───
+        # In sequential mode each round drives its own update_state() calls via
+        # the wrapper.  The background thread (update_state_thread) would also
+        # call update_state() on its own timer, consuming additional df entries
+        # and exhausting the scenario dataset prematurely (observed: attacks
+        # disappear after ~70 of 100 training episodes).
+        if hasattr(base_env, 'stop_update_event') and base_env.stop_update_event:
+            base_env.stop_update_event.set()
+        if hasattr(base_env, 'update_state_thread_instance'):
+            base_env.update_state_thread_instance.join(timeout=5.0)
+
         # ── Phase 2 + 3: train and evaluate each agent sequentially ───
         agents_metrics  = {}
         agents_summary  = {}
+        all_statuses    = []   # accumulates (agent_name, statuses) for root statuses.json
 
         trainable = [
             agent for agent in am.agents_params
@@ -151,12 +163,23 @@ def attack_detect_ho_main(config, am: AgentManager,
                 )
 
                 # ── Train ──────────────────────────────────────────────────
+                # Reset statuses so each agent's statuses are independent.
+                base_env.statuses    = []
                 base_env.df          = list(scenario_training)
                 base_env.min_accuracy = 2.0   # disable early termination
                 train_agent.env       = wrapped_env
 
                 train_agent(agent)
                 base_env.min_accuracy = config.env_params.accuracy_min  # restore
+
+                # ── Save per-agent training statuses ───────────────────────
+                if base_env.statuses:
+                    agent_dir = create_directory_training_execution(
+                        config, agent_name=agent.name
+                    )
+                    agent_statuses = list(base_env.statuses)
+                    save_data_to_file(agent_statuses, agent_dir, "train_statuses")
+                    all_statuses.extend(agent_statuses)
 
                 if config.env_params.print_training_chart:
                     notify_client(
@@ -177,6 +200,8 @@ def attack_detect_ho_main(config, am: AgentManager,
                     mode=SystemModes.EVALUATION,
                     message=f"Evaluating {agent.name}...",
                 )
+                _configure_wrapper_for_agent_state(agent, wrapped_env)
+                base_env.statuses = []
                 base_env.df = list(scenario_evaluation)
                 score, gt, pred, mitigation_history = _evaluate_single_agent(
                     agent, wrapped_env, base_env,
@@ -250,13 +275,30 @@ def attack_detect_ho_main(config, am: AgentManager,
                     f"R={recall*100:.1f}%  "
                     f"F1={f1*100:.1f}%\n"
                 )
+                # Accumulate evaluation statuses for root statuses.json
+                if base_env.statuses:
+                    all_statuses.extend(list(base_env.statuses))
 
         # Supervised agents
         for agent in am.agents_params:
             if agent.algorithm.lower() == ALGO_SUPERVISED \
-                    and len(base_env.statuses) > 0:
+                    and len(all_statuses) > 0:
+                if not hasattr(agent.instance, "train"):
+                    warning_message = (
+                        f"Agent {agent.name} is not supported in {ATTACKS_HO} "
+                        f"in this environment (missing train method). Skipping."
+                    )
+                    information(Fore.YELLOW + warning_message + "\n" + Fore.WHITE)
+                    notify_client(
+                        level=SystemLevels.STATUS,
+                        status=SystemStatus.RUNNING,
+                        mode=SystemModes.TRAINING,
+                        message=warning_message,
+                    )
+                    continue
+
                 information(f"Training supervised agent {agent.name}\n")
-                agent.instance.train(base_env.statuses)
+                agent.instance.train(all_statuses)
 
         # ── Phase 4: comparative summary ──────────────────────────────
         if len(agents_metrics) > 0:
@@ -279,16 +321,18 @@ def attack_detect_ho_main(config, am: AgentManager,
             except Exception:
                 pass
 
-        # Plot environment statuses
+        # Plot environment statuses (all agents combined)
         base_env.stop()
-        if len(base_env.statuses) > 2:
-            statuses = list(base_env.statuses)
+        # Flush any remaining statuses from the last agent
+        if base_env.statuses:
+            all_statuses.extend(list(base_env.statuses))
+        if len(all_statuses) > 2:
             save_data_to_file(
-                statuses, config.training_execution_directory, "statuses"
+                all_statuses, config.training_execution_directory, "statuses"
             )
             try:
                 plot_ho_enviroment_execution_statutes(
-                    statuses, config.training_execution_directory, "Statuses"
+                    all_statuses, config.training_execution_directory, "Statuses"
                 )
             except Exception as e:
                 error(Fore.RED
@@ -470,6 +514,12 @@ def _evaluate_single_agent(agent, wrapped_env: PerHostScanWrapper,
         information(f"\n*** Eval episode {episode+1}/{test_episodes} "
                     f"[{agent.name}] ***\n")
         state, _ = wrapped_env.reset(options={"is_real_state": True})
+        # Each evaluation episode is exactly 1 round.  By advancing the round
+        # counter to max_steps-1 here, the wrapper sees done=True after the
+        # single round and skips the trailing update_state() call that would
+        # otherwise consume a second df step per episode (halving the usable
+        # evaluation scenario).
+        wrapped_env._current_round_step = wrapped_env.env.max_steps - 1
         last_infos = None
 
         for host_idx in range(wrapped_env.num_hosts):
@@ -496,14 +546,14 @@ def _evaluate_single_agent(agent, wrapped_env: PerHostScanWrapper,
             information(
                 f"  {agent.name} | {base_env.hosts[host_idx].name}"
                 + color
-                + f" pred={action} gt={host_status_id} raw_gt={raw_host_status_id}"
+                + f" pred={action} gt={host_status_id} sd={[int(i) for i in base_env.get_discretized_state(state)]}"
                 + Fore.WHITE + "\n"
             )
 
             state, _, done, truncated, infos = wrapped_env.step(action)
             last_infos = infos
-            if done or truncated:
-                break
+            # if done or truncated:
+            #     break
 
         if isinstance(last_infos, dict):
             mitigation_history.append({
@@ -682,6 +732,14 @@ def plot_and_save_data_agent(agent, config):
                   + f"{e}\n{traceback.format_exc()}\n" + Fore.WHITE)
 
     save_data_to_file(data.__dict__, directory_name)
+
+    # Free the per-step payload from each indicator — plotting and saving are done.
+    # The episode-level summary fields (episode, steps, cumulative_reward, …) are kept.
+    import gc
+    for ind in data.train_indicators:
+        ind['episode_statuses'] = None
+    gc.collect()
+
     try:
         notify_client(
             level=SystemLevels.DATA,

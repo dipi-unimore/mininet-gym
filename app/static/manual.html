@@ -288,6 +288,24 @@
   </tbody>
 </table>
 
+<h4>Observation Space (<code>attacks_ho</code> and <code>attacks_ho_from_dataset</code>)</h4>
+<table>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>attacks.include_percentage_variations</code></td><td><code>false</code></td>
+      <td>
+        Controls whether percentage-variation features are included in the per-host observation vector.
+        <ul>
+          <li><code>false</code> (default) — observation shape <code>(4,)</code>: <em>RX packets, RX bytes, TX packets, TX bytes</em>. Simpler input; agents typically converge faster because the counters carry the primary attack signal.</li>
+          <li><code>true</code> — observation shape <code>(8,)</code>: adds four delta columns (Δ% RX packets, Δ% RX bytes, Δ% TX packets, Δ% TX bytes) to the four counter values above. May help in edge cases where relative variation is more discriminative than absolute volume, but often makes learning harder due to the extra noise.</li>
+        </ul>
+        Changing this value alters the observation space shape; saved models trained with one setting are not compatible with the other.
+      </td>
+    </tr>
+  </tbody>
+</table>
+
 <h3>Detection Thresholds (<code>env_params.attacks.thresholds</code> and <code>env_params.classification.thresholds</code>)</h3>
 <p>
   Thresholds are used by the <strong>rule-based labeller</strong> that converts raw OpenDayLight

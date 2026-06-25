@@ -170,113 +170,134 @@ function applyScenarioFilter(scenarioId, mode) {
 // Renders the list of saved training sessions
 function renderResultsList(list) {
     const dirGymTypeListEl = $('#results-list');
-    dirGymTypeListEl.html(''); // Clear existing content
+    dirGymTypeListEl.html('');
     const existingResultPaths = new Set();
+
+    if (!list || list.length === 0) {
+        dirGymTypeListEl.html('<p class="p-4 text-gray-500">No results found.</p>');
+        return;
+    }
+
+    let tabBarHtml = '<div class="results-tab-bar flex flex-wrap gap-1 border-b border-gray-200 mb-4 pb-1">';
+    let tabPanelsHtml = '';
+    let firstTabId = null;
+
     list.forEach(gt => {
+        const scenarioId = gt.gym_type.replace(/\s+/g, '-');
+        if (!firstTabId) firstTabId = scenarioId;
+
+        const completeCount = gt.data.length;
+        const incompleteData = Array.isArray(gt.incomplete_data) ? gt.incomplete_data : [];
+        const incompleteCount = incompleteData.length;
+
+        tabBarHtml += `<button class="results-tab" data-results-tab="${scenarioId}">
+            ${gt.gym_type} <span class="res-tab-badge">${completeCount}/${incompleteCount}</span>
+        </button>`;
+
+        let dirListDataHtml;
+        let heightScroll;
         if (gt.data.length === 0) {
             heightScroll = '';
-            dirListDataHtml = '<p class="p-2 text-gray-500  results-dir-item ">No saved training sessions found.</p>';
-        }
-        else {
-            height = gt.data.length < 10 ? gt.data.length * 9 : 96;
+            dirListDataHtml = '<p class="p-2 text-gray-500 results-dir-item">No saved training sessions found.</p>';
+        } else {
+            const height = gt.data.length < 10 ? gt.data.length * 9 : 96;
             heightScroll = `h-${height} overflow-y-scroll`;
-            dirListDataHtml = renderDataList(gt.gym_type,gt.data);
+            dirListDataHtml = renderDataList(gt.gym_type, gt.data);
             gt.data.forEach(exp => existingResultPaths.add(String(exp.path || '')));
         }
 
-        const incompleteData = Array.isArray(gt.incomplete_data) ? gt.incomplete_data : [];
-        const incompleteCount = incompleteData.length;
         const incompleteSectionHtml = incompleteCount > 0
-            ? `
-                <div class="mt-4 border-t pt-3">
-                    <h4 class="text-sm font-bold text-amber-700 mb-2">Incomplete (${incompleteCount})</h4>
-                    <ul class="max-h-48 overflow-y-auto space-y-1">
-                        ${incompleteData.map(inc => `
-                            <li class="results-result-row text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1 grid grid-cols-12 gap-2 items-center hover:bg-amber-100" data-gym-type="${escapeAttr(gt.gym_type)}" data-path="${escapeAttr(inc.path || '')}" data-result-kind="incomplete">
-                                <span class="col-span-3 font-semibold">${inc.datetime || '-'}</span>
-                                <span class="col-span-4 text-gray-600 break-words" title="${inc.path || '-'}">${inc.path || '-'}</span>
-                                <span class="col-span-3 text-amber-900">${inc.reason || 'Unknown reason'}</span>
-                                <span class="col-span-2 text-right flex items-center justify-end gap-2">
-                                    <label class="result-select-toggle inline-flex items-center gap-1 text-[10px] text-gray-500 ${resultsSelectionMode ? '' : 'hidden'}">
-                                        <input type="checkbox"
-                                               class="result-select-checkbox h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                               data-path="${escapeAttr(inc.path || '')}"
-                                               data-result-kind="incomplete">
-                                        <span>Select</span>
-                                    </label>
-                                    <button
-                                        type="button"
-                                        class="delete-incomplete-result-btn text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
-                                        data-path="${escapeAttr(inc.path || '')}"
-                                        title="Delete incomplete result">
-                                        Delete
-                                    </button>
-                                </span>
-                            </li>
-                        `).join('')}
-                    </ul>
-                </div>
-            `
-            : `
-                <div class="mt-4 border-t pt-3">
-                    <h4 class="text-sm font-bold text-amber-700 mb-2">Incomplete (0)</h4>
-                    <p class="text-xs text-gray-500 italic bg-gray-50 border rounded px-2 py-1">No incomplete experiments for this scenario.</p>
-                </div>
-            `;
+            ? `<div class="mt-4 border-t pt-3">
+                <h4 class="text-sm font-bold text-amber-700 mb-2">Incomplete (${incompleteCount})</h4>
+                <ul class="max-h-48 overflow-y-auto space-y-1">
+                    ${incompleteData.map(inc => `
+                        <li class="results-result-row text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1 grid grid-cols-12 gap-2 items-center hover:bg-amber-100"
+                            data-gym-type="${escapeAttr(gt.gym_type)}" data-path="${escapeAttr(inc.path || '')}" data-result-kind="incomplete">
+                            <span class="col-span-3 font-semibold">${inc.datetime || '-'}</span>
+                            <span class="col-span-4 text-gray-600 break-words" title="${inc.path || '-'}">${inc.path || '-'}</span>
+                            <span class="col-span-3 text-amber-900">${inc.reason || 'Unknown reason'}</span>
+                            <span class="col-span-2 text-right flex items-center justify-end gap-2">
+                                <label class="result-select-toggle inline-flex items-center gap-1 text-[10px] text-gray-500 ${resultsSelectionMode ? '' : 'hidden'}">
+                                    <input type="checkbox"
+                                           class="result-select-checkbox h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                           data-path="${escapeAttr(inc.path || '')}"
+                                           data-result-kind="incomplete">
+                                    <span>Select</span>
+                                </label>
+                                <button type="button"
+                                    class="delete-incomplete-result-btn text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
+                                    data-path="${escapeAttr(inc.path || '')}"
+                                    title="Delete incomplete result">Delete</button>
+                            </span>
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>`
+            : `<div class="mt-4 border-t pt-3">
+                <h4 class="text-sm font-bold text-amber-700 mb-2">Incomplete (0)</h4>
+                <p class="text-xs text-gray-500 italic bg-gray-50 border rounded px-2 py-1">No incomplete experiments for this scenario.</p>
+               </div>`;
 
         incompleteData.forEach(inc => existingResultPaths.add(String(inc.path || '')));
 
-        const scenarioId = gt.gym_type.replace(/\s+/g, '-');
-        const dirGymTypeHtml = `
-           <details class="mb-4 border border-gray-300 rounded-lg">
-               <summary class="bg-gray-200 px-4 py-2 rounded-t-lg cursor-pointer font-semibold text-gray-800 hover:bg-gray-300">
-                   <img src="static/images/gif/earth.gif" alt="Gym Type" title="Gym Type" class="inline-block w-6 h-6 ml-2">
-                   ${gt.gym_type}
-               </summary>
-               <div class="px-4 py-2">
-                    <div class="flex gap-2 mb-2">
-                        <button class="scenario-filter-btn px-2 py-1 text-xs rounded border bg-blue-600 text-white border-blue-700" data-scenario-id="${scenarioId}" data-filter="all">All</button>
-                        <button class="scenario-filter-btn px-2 py-1 text-xs rounded border bg-white hover:bg-gray-100" data-scenario-id="${scenarioId}" data-filter="complete">Complete</button>
-                        <button class="scenario-filter-btn px-2 py-1 text-xs rounded border bg-white hover:bg-gray-100" data-scenario-id="${scenarioId}" data-filter="incomplete">Incomplete</button>
-                    </div>
-                    <div id="complete-section-${scenarioId}">
-                    <div class="overflow-x-auto">
-                    <div class="min-w-[820px]">
-                    <div class="grid grid-cols-9 font-bold border-b text-xs">
-                        <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="datetime" data-label="Date Time">Date Time <span class="sort-ind text-gray-400">⇅</span></span>
-                        <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="networkconfig" data-label="Network Config">Network Config <span class="sort-ind text-gray-400">⇅</span></span>
-                        <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="trainingepisodes" data-label="Training Eps">Training Eps <span class="sort-ind text-gray-400">⇅</span></span>
-                        <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="maxsteps" data-label="Max Steps">Max Steps <span class="sort-ind text-gray-400">⇅</span></span>
-                        <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="agents" data-label="Agents">Agents <span class="sort-ind text-gray-400">⇅</span></span>
-                        <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="accuracy" data-label="Accuracy %">Accuracy % <span class="sort-ind text-gray-400">⇅</span></span>
-                        <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="testepisodes" data-label="Test Eps">Test Eps <span class="sort-ind text-gray-400">⇅</span></span>
-                        <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="score" data-label="Score %">Score % <span class="sort-ind text-gray-400">⇅</span></span>
-                        <span class="text-right pr-2">Actions</span>
-                    </div>
-
-                    <div class="${heightScroll} gap-6">
-                        <ul id="results-list-${scenarioId}" class="results-dir-list">
-                            ${dirListDataHtml}
-                        </ul>
-                    </div>
-                    </div>
-                    </div>
-                    </div>
-                    <div id="incomplete-section-${scenarioId}">
-                        ${incompleteSectionHtml}
-                    </div>
-               </div>
-           </details>`;
-
-        dirGymTypeListEl.append(dirGymTypeHtml);
+        tabPanelsHtml += `<div class="results-tab-panel hidden" id="res-tab-${scenarioId}">
+            <div class="flex gap-2 mb-2">
+                <button class="scenario-filter-btn px-2 py-1 text-xs rounded border bg-blue-600 text-white border-blue-700" data-scenario-id="${scenarioId}" data-filter="all">All</button>
+                <button class="scenario-filter-btn px-2 py-1 text-xs rounded border bg-white hover:bg-gray-100" data-scenario-id="${scenarioId}" data-filter="complete">Complete</button>
+                <button class="scenario-filter-btn px-2 py-1 text-xs rounded border bg-white hover:bg-gray-100" data-scenario-id="${scenarioId}" data-filter="incomplete">Incomplete</button>
+            </div>
+            <div id="complete-section-${scenarioId}">
+                <div class="overflow-x-auto">
+                <div class="min-w-[820px]">
+                <div class="grid grid-cols-9 font-bold border-b text-xs">
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="datetime" data-label="Date Time">Date Time <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="networkconfig" data-label="Network Config">Network Config <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="trainingepisodes" data-label="Training Eps">Training Eps <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="maxsteps" data-label="Max Steps">Max Steps <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="agents" data-label="Agents">Agents <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="accuracy" data-label="Accuracy %">Accuracy % <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="testepisodes" data-label="Test Eps">Test Eps <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="score" data-label="Score %">Score % <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="text-right pr-2">Actions</span>
+                </div>
+                <div class="${heightScroll} gap-6">
+                    <ul id="results-list-${scenarioId}" class="results-dir-list">
+                        ${dirListDataHtml}
+                    </ul>
+                </div>
+                </div>
+                </div>
+            </div>
+            <div id="incomplete-section-${scenarioId}">
+                ${incompleteSectionHtml}
+            </div>
+        </div>`;
     });
+
+    tabBarHtml += '</div>';
+    dirGymTypeListEl.html(tabBarHtml + tabPanelsHtml);
+
+    const saved = (() => { try { return localStorage.getItem('activeResultsTab'); } catch (_) { return null; } })();
+    const validSaved = list.find(gt => gt.gym_type.replace(/\s+/g, '-') === saved);
+    switchResultsTab(validSaved ? saved : firstTabId);
 
     selectedResultItems = new Map(
         [...selectedResultItems.entries()].filter(([path]) => existingResultPaths.has(path))
     );
     syncResultsSelectionToolbar();
-
 }
+
+function switchResultsTab(tabId) {
+    $('.results-tab-panel').addClass('hidden');
+    $(`#res-tab-${tabId}`).removeClass('hidden');
+    $('.results-tab').removeClass('cfg-tab-active');
+    $(`.results-tab[data-results-tab="${tabId}"]`).addClass('cfg-tab-active');
+    try { localStorage.setItem('activeResultsTab', tabId); } catch (_) {}
+}
+
+$(document).on('click', '.results-tab', function () {
+    switchResultsTab($(this).data('results-tab'));
+});
 
 $(document).on('click', '.scenario-filter-btn', function () {
     const scenarioId = $(this).data('scenario-id');
@@ -532,11 +553,24 @@ let modalContentHtml = `
             <div class="space-y-6">
                 ${data.agents_data.map(agent => {
                     const agentScore = data.test_scores[agent.agent_name] || 0;
+                    const cs = (data.composite_scores || {})[agent.agent_name];
+                    const hasComposite = Object.keys(data.composite_scores || {}).length > 0;
+                    const isWinner = hasComposite && data.name_max_winner && data.name_max_winner === agent.agent_name;
+                    const isWorst  = hasComposite && data.name_min_winner && data.name_min_winner === agent.agent_name && data.name_min_winner !== data.name_max_winner;
+                    const headerBg = isWinner ? 'bg-emerald-700' : isWorst ? 'bg-rose-800' : 'bg-slate-700';
+                    const winnerBadge = isWinner ? '<span class="ml-2 text-yellow-300 font-black text-xs">★ WINNER</span>' : '';
+                    let csBadge = '';
+                    if (cs) {
+                        const pct = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
+                        csBadge = `<span class="text-[10px] opacity-80 ml-2" title="Composite winner score&#10;w_out=${(cs.w_out*100).toFixed(0)}%·recall_out=${pct(cs.recall_out)} + w_in=${(cs.w_in*100).toFixed(0)}%·recall_in=${pct(cs.recall_in)} + w_ncc=${(cs.w_ncc*100).toFixed(0)}%·recall_ncc=${pct(cs.recall_ncc)}">
+                            | W-score: ${pct(cs.composite)}
+                        </span>`;
+                    }
                     return `
                     <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
-                        <div class="bg-slate-700 text-white p-2 px-4 flex justify-between items-center">
-                            <span class="font-bold text-sm">${agent.agent_name}</span>
-                            <span class="text-[10px]">SCORE: ${agentScore}/${data.test_episodes}</span>
+                        <div class="${headerBg} text-white p-2 px-4 flex justify-between items-center">
+                            <span class="font-bold text-sm">${agent.agent_name}${winnerBadge}</span>
+                            <span class="text-[10px]">SCORE: ${agentScore}/${data.test_episodes}${csBadge}</span>
                         </div>
                         <div class="p-3 grid grid-cols-3 md:grid-cols-6 gap-2">
                             ${agent.charts.map(chart => `
@@ -591,16 +625,87 @@ let modalContentHtml = `
                         <p><span class="font-semibold">Test Episodes:</span> ${data.test_episodes}</p>
                         <p><span class="font-semibold">Score (min/mean/max):</span> ${data.min_score} / ${data.mean_score} / ${data.max_score}</p>
                         <p><span class="font-semibold">Score % (min/mean/max):</span> ${testMinScorePct.toFixed(2)}% / ${testMeanScorePct.toFixed(2)}% / ${testMaxScorePct.toFixed(2)}%</p>
-                        <p><span class="font-semibold">Best agent:</span> ${data.name_max_score || '-'}</p>
-                        <p><span class="font-semibold">Worst agent:</span> ${data.name_min_score || '-'}</p>
                         <p><span class="font-semibold">Test charts:</span> ${Array.isArray(data.test_charts) ? data.test_charts.length : 0}</p>
-                        ${mitigationSummary ? `
+                        ${mitigationSummary && Number(mitigationSummary.total_under_attack_count || 0) > 0 ? `
                         <p><span class="font-semibold">Mitigation episodes:</span> ${Number(mitigationSummary.episodes_with_mitigation_data || 0)}</p>
                         <p><span class="font-semibold">Under attack (total):</span> ${Number(mitigationSummary.total_under_attack_count || 0)}</p>
                         <p><span class="font-semibold">Mitigated (total):</span> ${Number(mitigationSummary.total_mitigated_under_attack_count || 0)}</p>
                         <p><span class="font-semibold">Mitigation ratio:</span> <span class="font-semibold ${mitigationRatioClass}">${mitigationRatioPct.toFixed(2)}%</span></p>
                         ` : ''}
                     </div>
+                    ${(() => {
+                        const cs = data.composite_scores || {};
+                        const hasComposite = Object.keys(cs).length > 0;
+
+                        if (hasComposite) {
+                            // Attack scenarios: weighted composite score table
+                            const agents = Object.keys(cs);
+                            const pct = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
+                            const first = cs[agents[0]];
+                            const formulaLine = `W-score = <b>${(first.w_out*100).toFixed(0)}%</b>·recall<sub>out</sub> + <b>${(first.w_in*100).toFixed(0)}%</b>·recall<sub>in</sub> + <b>${(first.w_ncc*100).toFixed(0)}%</b>·recall<sub>ncc</sub>`;
+                            const rows = agents.map(name => {
+                                const s = cs[name];
+                                const isWinner = name === data.name_max_winner;
+                                const isWorst  = name === data.name_min_winner && name !== data.name_max_winner;
+                                const rowClass = isWinner ? 'bg-emerald-100 font-semibold' : isWorst ? 'bg-rose-100' : '';
+                                const badge = isWinner ? ' ★' : isWorst ? ' ▼' : '';
+                                return `<tr class="${rowClass}">
+                                    <td class="py-1 pr-2">${escapeHtml(name)}${badge}</td>
+                                    <td class="py-1 pr-2 text-center">${pct(s.composite)}</td>
+                                    <td class="py-1 pr-2 text-center text-xs text-gray-500">${pct(s.recall_out)}</td>
+                                    <td class="py-1 pr-2 text-center text-xs text-gray-500">${pct(s.recall_in)}</td>
+                                    <td class="py-1 text-center text-xs text-gray-500">${pct(s.recall_ncc)}</td>
+                                </tr>`;
+                            }).join('');
+                            return `
+                            <div class="mt-3 pt-3 border-t border-amber-200">
+                                <p class="text-xs text-amber-900 font-semibold mb-1">Winner Score <span class="font-normal text-gray-500">(inversely weighted by class frequency)</span></p>
+                                <p class="text-xs text-gray-600 mb-2">${formulaLine}</p>
+                                <table class="w-full text-xs">
+                                    <thead><tr class="text-gray-500 border-b border-amber-200">
+                                        <th class="text-left pb-1">Agent</th>
+                                        <th class="pb-1">W-score</th>
+                                        <th class="pb-1">recall<sub>out</sub></th>
+                                        <th class="pb-1">recall<sub>in</sub></th>
+                                        <th class="pb-1">recall<sub>ncc</sub></th>
+                                    </tr></thead>
+                                    <tbody>${rows}</tbody>
+                                </table>
+                            </div>`;
+                        } else {
+                            // Classification: simple ranking by correct predictions
+                            const testScores = data.test_scores || {};
+                            const eps = Number(data.test_episodes) || 1;
+                            const agents = Object.entries(testScores)
+                                .map(([name, score]) => ({ name, score: Number(score) || 0 }))
+                                .sort((a, b) => b.score - a.score);
+                            if (agents.length === 0) return '';
+                            const rows = agents.map((a, i) => {
+                                const isWinner = i === 0;
+                                const isWorst  = i === agents.length - 1 && agents.length > 1;
+                                const rowClass = isWinner ? 'bg-emerald-100 font-semibold' : isWorst ? 'bg-rose-100' : '';
+                                const badge = isWinner ? ' ★' : isWorst ? ' ▼' : '';
+                                const pct = ((a.score / eps) * 100).toFixed(1) + '%';
+                                return `<tr class="${rowClass}">
+                                    <td class="py-1 pr-2">${escapeHtml(a.name)}${badge}</td>
+                                    <td class="py-1 pr-2 text-center">${a.score} / ${eps}</td>
+                                    <td class="py-1 text-center">${pct}</td>
+                                </tr>`;
+                            }).join('');
+                            return `
+                            <div class="mt-3 pt-3 border-t border-amber-200">
+                                <p class="text-xs text-amber-900 font-semibold mb-1">Ranking <span class="font-normal text-gray-500">(correct predictions)</span></p>
+                                <table class="w-full text-xs">
+                                    <thead><tr class="text-gray-500 border-b border-amber-200">
+                                        <th class="text-left pb-1">Agent</th>
+                                        <th class="pb-1">Correct</th>
+                                        <th class="pb-1">Score %</th>
+                                    </tr></thead>
+                                    <tbody>${rows}</tbody>
+                                </table>
+                            </div>`;
+                        }
+                    })()}
                 </div>
             </div>
         </div>`;

@@ -191,25 +191,38 @@ def _get_mac_to_name_map(net: Mininet) -> Dict[str, str]:
     return mac_to_name
 
 def _get_port_to_host_map(net: Mininet, bridge_name: str) -> Dict[str, str]:
-    """Creates a map from OVS port name to Host name."""
+    """
+    Build an OVS-port-name → host-name map by following actual link objects.
+
+    The previous heuristic (port number N → net.hosts[N-1]) broke whenever the
+    port-creation order differed from the host-list order, returning 'Unknown'
+    for every port and making per-host packet/byte counters always zero.
+    """
     port_to_host: Dict[str, str] = {}
-    if net and net.switches:
-        ovs_switch = next((s for s in net.switches if s.name == bridge_name and isinstance(s, Switch)), None)
-        if ovs_switch:
-            for intf in ovs_switch.intfList():
-                if intf.name.startswith(bridge_name + '-eth'):
-                    try:
-                        port_number = intf.name.split('eth')[-1]
-                        host_index = int(port_number) - 1
-                        
-                        if 0 <= host_index < len(net.hosts):
-                            host_name = net.hosts[host_index].name
-                            port_to_host[intf.name] = host_name
-                        else:
-                            debug(f"Port {intf.name} index {host_index} out of range for {len(net.hosts)} hosts")
-                    except (ValueError, IndexError) as e:
-                        debug(f"Failed to map port {intf.name}: {type(e).__name__}")
-                        continue
+    if not (net and net.switches):
+        return port_to_host
+
+    ovs_switch = next(
+        (s for s in net.switches if s.name == bridge_name and isinstance(s, Switch)),
+        None,
+    )
+    if ovs_switch is None:
+        debug(f"_get_port_to_host_map: switch '{bridge_name}' not found")
+        return port_to_host
+
+    for host in net.hosts:
+        for intf in host.intfList():
+            if intf.link is None:
+                continue
+            for link_intf in (intf.link.intf1, intf.link.intf2):
+                if link_intf.node is ovs_switch:
+                    port_to_host[link_intf.name] = host.name
+                    break
+
+    if port_to_host:
+        debug(f"port_to_host_map: {port_to_host}")
+    else:
+        debug(f"_get_port_to_host_map: no host ports found on '{bridge_name}'")
     return port_to_host
 
 def parse_flow_ovs_ofctl(flow_data: str, net: Mininet) -> Dict[str, Any]:
@@ -345,6 +358,9 @@ def parse_flow_ovs_ports(flow_data: str, net: Mininet, bridge_name: str) -> Dict
     """
     if not hasattr(net, 'port_to_host_map'):
         net.port_to_host_map = _get_port_to_host_map(net, bridge_name)
+        if not net.port_to_host_map:
+            error(f"port_to_host_map is EMPTY for bridge '{bridge_name}' — "
+                  f"per-host packet/byte stats will be all-zero")
     
     PORT_RX_PATTERN = re.compile(r'port\s+"?(?P<port_name>[\w\-]+)"?:\s+rx pkts=(?P<rx_pkts>\d+),\s+bytes=(?P<rx_bytes>\d+).*?')
     PORT_TX_PATTERN = re.compile(r'\s+tx pkts=(?P<tx_pkts>\d+),\s+bytes=(?P<tx_bytes>\d+).*?')

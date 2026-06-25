@@ -290,7 +290,7 @@ function updateNavigationButtons(page) {
     };
 
     const resetButton = (btn) => {
-        btn.removeClass('bg-blue-600 hover:bg-blue-700 bg-green-600 hover:bg-green-700 text-white')
+        btn.removeClass('bg-blue-600 hover:bg-blue-700 bg-green-600 hover:bg-green-700 text-white cy-nav-active')
             .addClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
     };
 
@@ -298,14 +298,14 @@ function updateNavigationButtons(page) {
     Object.values(mobile).forEach(resetButton);
 
     if (page === 'results') {
-        desktop.results.addClass('bg-green-600 hover:bg-green-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
-        mobile.results.addClass('bg-green-600 hover:bg-green-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        desktop.results.addClass('bg-green-600 hover:bg-green-700 text-white cy-nav-active').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        mobile.results.addClass('bg-green-600 hover:bg-green-700 text-white cy-nav-active').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
     } else if (page === 'training') {
-        desktop.training.addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
-        mobile.training.addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        desktop.training.addClass('bg-blue-600 hover:bg-blue-700 text-white cy-nav-active').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        mobile.training.addClass('bg-blue-600 hover:bg-blue-700 text-white cy-nav-active').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
     } else {
-        desktop.config.addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
-        mobile.config.addClass('bg-blue-600 hover:bg-blue-700 text-white').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        desktop.config.addClass('bg-blue-600 hover:bg-blue-700 text-white cy-nav-active').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
+        mobile.config.addClass('bg-blue-600 hover:bg-blue-700 text-white cy-nav-active').removeClass('bg-gray-200 hover:bg-gray-300 text-gray-600');
     }
 
     $('#mobile-nav-toast').addClass('hidden');
@@ -589,9 +589,7 @@ function createInputField(key, value, fullId, isAgent) {
                     const sectionKey = Object.keys(scenarioParams)[0]; // 'attacks' or 'classification'
                     const sectionExists = $(`#${CSS.escape('env_params.' + sectionKey)}-section`).length > 0;
                     if (!sectionExists) {
-                        // Cross-type switch: the target section was never rendered; re-render env params.
-                        // Strip UI-injected keys that only belong to specific scenario types (attacks_ho /
-                        // marl_attacks) so they don't appear as regular fields after re-render.
+                        // Cross-type switch: the target section was never rendered; re-render all env sub-sections.
                         if (!shouldShowScenarioSelector()) {
                             delete currentConfig.env_params.scenario_source;
                             delete currentConfig.env_params.scenario_file;
@@ -599,28 +597,21 @@ function createInputField(key, value, fullId, isAgent) {
                         if (!shouldShowDatasetSelector()) {
                             delete currentConfig.env_params.data_traffic_file;
                         }
-                        // Detach #env-extra-selectors first: placeExtraSelectorsBeforeEnvSection may have
-                        // moved it inside #env-params-config-list, and .html() would destroy it.
-                        const extraSelectors = $('#env-extra-selectors').detach();
-                        // Remove the listener first to avoid duplicates — createInputField will re-add it.
                         $(document).off('change', `#${CSS.escape(fullId)}`);
-                        const envHtml = renderFieldsRecursively(reorderEnvParamsForDisplay(currentConfig.env_params), 'env_params');
-                        $('#env-params-config-list').html(envHtml);
-                        // Re-attach after the list; renderDataSourceSelectors will reposition it.
-                        $('#env-params-config-list').after(extraSelectors);
+                        _renderEnvParamSections();
                     } else {
                         updateEnvParamInputs(scenarioParams, 'env_params');
+                        if (isClassificationEnv()) {
+                            $(`#${CSS.escape('env_params.attacks')}-section`).addClass('hidden');
+                            $(`#${CSS.escape('env_params.classification')}-section`).removeClass('hidden');
+                        } else {
+                            $(`#${CSS.escape('env_params.attacks')}-section`).removeClass('hidden');
+                            $(`#${CSS.escape('env_params.classification')}-section`).addClass('hidden');
+                        }
                     }
                 }
             } catch (err) {
                 console.error('Failed to load scenario env params:', err);
-            }
-            if (isClassificationEnv()) {
-                $(`#${CSS.escape('env_params.attacks')}-section`).addClass('hidden');
-                $(`#${CSS.escape('env_params.classification')}-section`).removeClass('hidden');
-            } else {
-                $(`#${CSS.escape('env_params.attacks')}-section`).removeClass('hidden');
-                $(`#${CSS.escape('env_params.classification')}-section`).addClass('hidden');
             }
             renderDataSourceSelectors();
         });
@@ -662,6 +653,7 @@ function createInputField(key, value, fullId, isAgent) {
                 } else {
                     agentCard.addClass('opacity-50');
                 }
+                updateAgentTabStyle(agentIndex, this.checked);
                 updateAgentsEnabledCount();
             });
         }        
@@ -877,10 +869,15 @@ function renderList(list) {
         return;
     }
     _applyLoadDirSort(list).forEach(dir => {
+        const binsLabel = (dir.n_bins != null) ? dir.n_bins : '—';
         const dirItemHtml = `
-            <li class="p-2 border-b cursor-pointer hover:bg-gray-100 load-dir-item grid grid-cols-2" title="${escapeHtml(dir.path)}">
+            <li class="p-2 border-b cursor-pointer hover:bg-gray-100 load-dir-item grid grid-cols-3" title="${escapeHtml(dir.path)}"
+                data-n-bins="${dir.n_bins != null ? dir.n_bins : ''}"
+                data-episodes="${dir.episodes != null ? dir.episodes : ''}"
+                data-algorithm="${escapeHtml(dir.algorithm || '')}">
                 <span>${_formatDirDatetime(dir.datetime)}</span>
                 <span>${dir.accuracy.toFixed(4)}</span>
+                <span>${binsLabel}</span>
                 <input type="hidden" value="${dir.path}">
             </li>`;
         dirListEl.append(dirItemHtml);
@@ -915,15 +912,43 @@ $(document).on('click', '.load-dir-item', function () {
     if (!selectedPath) {
         $(`#${CSS.escape(targetInputId)}`).val('');
         $(`#${CSS.escape(targetCheckId)}`).prop('checked', false);
-    }
-    else {
-        // Set the value of the original input
-        $(`#${CSS.escape(targetInputId)}`).val(selectedPath);
-        $(`#${CSS.escape(targetCheckId)}`).prop('checked', true);
+        $('#load-dir-modal').addClass('hidden');
+        return;
     }
 
-    // Optionally close the modal
+    $(`#${CSS.escape(targetInputId)}`).val(selectedPath);
+    $(`#${CSS.escape(targetCheckId)}`).prop('checked', true);
     $('#load-dir-modal').addClass('hidden');
+
+    const nBins     = $(this).data('n-bins');
+    const episodes  = $(this).data('episodes');
+    const algorithm = $(this).data('algorithm');
+
+    const rows = [
+        ['Path', escapeHtml(selectedPath)],
+        ['Algorithm', escapeHtml(algorithm || '—')],
+        ['Bins (n_bins)', nBins !== '' ? nBins : '—'],
+        ['Episodes', episodes !== '' ? episodes : '—'],
+    ];
+    const tableRows = rows.map(([k, v]) => `
+        <tr class="border-b last:border-0">
+            <td class="py-1 pr-4 font-semibold text-gray-600 whitespace-nowrap">${k}</td>
+            <td class="py-1 text-gray-800 break-all">${v}</td>
+        </tr>`).join('');
+
+    const popupHtml = `
+        <div id="agent-info-popup" class="fixed inset-0 bg-gray-900 bg-opacity-60 z-50 flex items-center justify-center">
+            <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg">
+                <h3 class="text-lg font-bold mb-4">Agent characteristics</h3>
+                <table class="w-full text-sm">${tableRows}</table>
+                <button id="close-agent-info-popup" class="mt-5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 w-full">OK</button>
+            </div>
+        </div>`;
+    $('body').append(popupHtml);
+    $('#close-agent-info-popup').on('click', () => $('#agent-info-popup').remove());
+    $('#agent-info-popup').on('click', function(e) {
+        if (e.target === this) $('#agent-info-popup').remove();
+    });
 });
 
 
@@ -1021,6 +1046,38 @@ function renderFieldsRecursively(obj, path, isAgent = false, agentIndex = null) 
     return html;
 }
 
+function _renderEnvParamSections() {
+    const UI_SELECTOR_KEYS = new Set(['data_traffic_file', 'scenario_source', 'scenario_file']);
+    const SECTION_KEYS = new Set(['attacks', 'classification', 'net_params']);
+
+    // General: flat scalar fields of env_params
+    const generalEnv = {};
+    for (const [k, v] of Object.entries(currentConfig.env_params)) {
+        if (!SECTION_KEYS.has(k) && !UI_SELECTOR_KEYS.has(k)) generalEnv[k] = v;
+    }
+    $('#env-params-config-list').html(renderFieldsRecursively(generalEnv, 'env_params'));
+
+    // Scenario: attacks / classification sections
+    const scenarioEnv = {};
+    for (const k of ['attacks', 'classification']) {
+        if (k in currentConfig.env_params) scenarioEnv[k] = currentConfig.env_params[k];
+    }
+    $('#env-scenario-list').html(renderFieldsRecursively(scenarioEnv, 'env_params'));
+    if (isClassificationEnv()) {
+        $(`#${CSS.escape('env_params.attacks')}-section`).addClass('hidden');
+        $(`#${CSS.escape('env_params.classification')}-section`).removeClass('hidden');
+    } else {
+        $(`#${CSS.escape('env_params.attacks')}-section`).removeClass('hidden');
+        $(`#${CSS.escape('env_params.classification')}-section`).addClass('hidden');
+    }
+
+    // Network: net_params section
+    const networkEnv = currentConfig.env_params.net_params ? { net_params: currentConfig.env_params.net_params } : {};
+    $('#env-network-list').html(renderFieldsRecursively(networkEnv, 'env_params'));
+
+    updateEnvScenarioTabLabel();
+}
+
 function renderConfig() {
     const render = () => {
     // 1. Render General (Root) Config
@@ -1031,9 +1088,8 @@ function renderConfig() {
     const generalHtml = renderFieldsRecursively(generalConfig, 'root');
     $('#general-config-list').html(generalHtml);
 
-    // 2. Render Environment Parameters (env_params)
-    const envHtml = renderFieldsRecursively(reorderEnvParamsForDisplay(currentConfig.env_params), 'env_params');
-    $('#env-params-config-list').html(envHtml);
+    // 2. Render Environment Parameters split into sub-tabs
+    _renderEnvParamSections();
     renderDataSourceSelectors();
 
     // 3. Render Agents
@@ -1059,7 +1115,7 @@ function shouldShowDatasetSelector() {
 
 function shouldShowScenarioSelector() {
     const gymType = String(currentConfig.env_params.gym_type || '');
-    return gymType.startsWith('attacks_ho') || gymType.startsWith('marl_attacks');
+    return gymType.startsWith('attacks_ho') || gymType.startsWith('marl_attacks') || gymType.startsWith('marl_pz');
 }
 
 function defaultDatasetPathForGymType(gymType) {
@@ -1287,35 +1343,35 @@ function renderTestScenarioPreviewPopup(response) {
             ['No-attack timeout', attacksCfg.no_attack_timeout ?? '-'],
         ];
 
-        const resultRows = [
-            ['Train attack_likely_used', training.attack_likely_used ?? summary.attack_likely_used ?? '-'],
-            ['Eval attack_likely_used', evaluation.attack_likely_used ?? '-'],
-            ['Train total steps', summary.train_steps ?? training.total_steps ?? '-'],
-            ['Eval total steps', summary.eval_steps ?? evaluation.total_steps ?? '-'],
-            ['Train attack total', trainAttack.total ?? '-'],
-            ['Eval attack total', evalAttack.total ?? '-'],
-            ['Train normal total', trainNormal.total ?? '-'],
-            ['Eval normal total', evalNormal.total ?? '-'],
+        const trainResultRows = [
+            ['attack_likely_used', training.attack_likely_used ?? summary.attack_likely_used ?? '-'],
+            ['Total steps', summary.train_steps ?? training.total_steps ?? '-'],
+            ['Attack total', trainAttack.total ?? '-'],
+            ['Normal total', trainNormal.total ?? '-'],
         ];
 
-        const cfgBody = configRows.map(([k, v]) => `
+        const evalResultRows = [
+            ['attack_likely_used', evaluation.attack_likely_used ?? '-'],
+            ['Total steps', summary.eval_steps ?? evaluation.total_steps ?? '-'],
+            ['Attack total', evalAttack.total ?? '-'],
+            ['Normal total', evalNormal.total ?? '-'],
+        ];
+
+        const makeRows = rows => rows.map(([k, v]) => `
             <tr class="border-b last:border-b-0">
                 <td class="p-1 text-left">${escapeHtml(String(k))}</td>
                 <td class="p-1 text-right font-medium">${escapeHtml(String(v))}</td>
             </tr>
         `).join('');
 
-        const resBody = resultRows.map(([k, v]) => `
-            <tr class="border-b last:border-b-0">
-                <td class="p-1 text-left">${escapeHtml(String(k))}</td>
-                <td class="p-1 text-right font-medium">${escapeHtml(String(v))}</td>
-            </tr>
-        `).join('');
+        const cfgBody = makeRows(configRows);
+        const trainResBody = makeRows(trainResultRows);
+        const evalResBody = makeRows(evalResultRows);
 
         return `
             <div class="border rounded-lg bg-white overflow-hidden">
                 <div class="px-2 py-1 bg-gray-50 border-b text-xs font-semibold text-gray-800">Config + Scenario Results</div>
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-0">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-0">
                     <div class="overflow-x-auto border-r border-gray-200">
                         <table class="w-full text-xs">
                             <thead class="bg-gray-100">
@@ -1327,15 +1383,26 @@ function renderTestScenarioPreviewPopup(response) {
                             <tbody>${cfgBody}</tbody>
                         </table>
                     </div>
-                    <div class="overflow-x-auto">
+                    <div class="overflow-x-auto border-r border-gray-200">
                         <table class="w-full text-xs">
-                            <thead class="bg-gray-100">
+                            <thead class="bg-blue-50">
                                 <tr>
-                                    <th class="p-1 text-left">Scenario result</th>
-                                    <th class="p-1 text-right">Value</th>
+                                    <th class="p-1 text-left text-blue-700">Training scenario</th>
+                                    <th class="p-1 text-right text-blue-700">Value</th>
                                 </tr>
                             </thead>
-                            <tbody>${resBody}</tbody>
+                            <tbody>${trainResBody}</tbody>
+                        </table>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs">
+                            <thead class="bg-green-50">
+                                <tr>
+                                    <th class="p-1 text-left text-green-700">Eval scenario</th>
+                                    <th class="p-1 text-right text-green-700">Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>${evalResBody}</tbody>
                         </table>
                     </div>
                 </div>
@@ -1687,63 +1754,53 @@ function renderScenarioTable(scenarioList) {
     `;
 }
 
-function placeExtraSelectorsBeforeEnvSection(container) {
-    if (!container || !container.length) return;
-
-    const preferredTargets = [
-        '#env_params.attacks-section',
-        '#env_params.classification-section',
-    ];
-
-    let target = null;
-    for (const selector of preferredTargets) {
-        const candidate = $(selector).first();
-        if (candidate.length) {
-            target = candidate;
-            break;
-        }
-    }
-
-    if (!target || !target.length) {
-        target = $('#env-params-config-list').find('[id^="env_params."][id$="-section"]').first();
-    }
-
-    if (target && target.length) {
-        container.insertBefore(target);
-    }
-}
-
 async function renderDataSourceSelectors() {
-    const container = $('#env-extra-selectors');
-    if (!container.length) return;
-
     const gymType = currentConfig.env_params.gym_type;
     const networkConfig = getCurrentNetworkConfigString();
-    let html = '';
 
-    if (shouldShowDatasetSelector()) {
+    // Dataset sub-tab
+    const datasetContainer = $('#env-dataset-selectors');
+    if (shouldShowDatasetSelector() && datasetContainer.length) {
         if (!currentConfig.env_params.data_traffic_file || currentConfig.env_params.data_traffic_file === 'None') {
             currentConfig.env_params.data_traffic_file = defaultDatasetPathForGymType(gymType);
         }
         const response = await getDatasetList(gymType, networkConfig);
-        html += renderDatasetTable(response);
+        datasetContainer.html(renderDatasetTable(response));
+    } else {
+        datasetContainer.html('');
     }
 
-    if (shouldShowScenarioSelector()) {
-        if (!currentConfig.env_params.scenario_source) {
-            currentConfig.env_params.scenario_source = 'generate';
-        }
-        if (!currentConfig.env_params.scenario_file) {
-            currentConfig.env_params.scenario_file = '';
-        }
+    // Extra sub-tab (scenario generation/loading — attacks_ho / marl only)
+    const extraContainer = $('#env-extra-selectors');
+    if (shouldShowScenarioSelector() && extraContainer.length) {
+        if (!currentConfig.env_params.scenario_source) currentConfig.env_params.scenario_source = 'generate';
+        if (!currentConfig.env_params.scenario_file) currentConfig.env_params.scenario_file = '';
         const response = await getScenarioList(gymType, networkConfig);
-        html += renderScenarioTable(response);
+        extraContainer.html(renderScenarioTable(response));
+    } else {
+        extraContainer.html('');
     }
 
-    const hasSelectors = html.trim().length > 0;
-    container.toggleClass('md:col-span-5 w-full border-gray-200', hasSelectors);
-    container.html(html);
-    placeExtraSelectorsBeforeEnvSection(container);
+    updateEnvSubTabVisibility();
+}
+
+function updateEnvScenarioTabLabel() {
+    const gymType = (currentConfig && currentConfig.env_params && currentConfig.env_params.gym_type) || '';
+    const label = gymType ? `(${gymType})` : '';
+    $('#env-scenario-tab-label').text(label);
+}
+
+function updateEnvSubTabVisibility() {
+    updateEnvScenarioTabLabel();
+    const showExtra = shouldShowScenarioSelector();
+    const showDataset = shouldShowDatasetSelector();
+    $('.env-subtab-extra').toggleClass('hidden', !showExtra);
+    $('.env-subtab-dataset').toggleClass('hidden', !showDataset);
+    // If the active sub-tab became hidden, fall back to general
+    const activeTab = (() => { try { return localStorage.getItem('activeEnvSubTab'); } catch (_) { return null; } })();
+    if ((activeTab === 'extra' && !showExtra) || (activeTab === 'dataset' && !showDataset)) {
+        switchEnvSubTab('general');
+    }
 }
 
 $(document).on('click', 'th.sort-th', function () {
@@ -1870,6 +1927,35 @@ $(document).on('click', '.scenario-row', function () {
     $('#scenario-source-hidden').val('load');
     $('.scenario-row').removeClass('bg-yellow-500');
     $(this).addClass('bg-yellow-500');
+
+    // Sync env params from scenario statistics
+    const _training = statistics.training || {};
+    const _evaluation = statistics.evaluation || {};
+    const _toFinite = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+    const _syncedEpisodes    = _toFinite(_training.episodes);
+    const _syncedMaxSteps    = _toFinite(_training.max_steps);
+    const _syncedTestEp      = _toFinite(_evaluation.episodes);
+    const _syncedLikelyConf  = _toFinite(_training.attack_likely_config);
+    const _syncedLikelyTrain = _toFinite(_training.attack_likely_used);
+    const _syncedLikelyEval  = _toFinite(_evaluation.attack_likely_used);
+
+    if (_syncedEpisodes !== null) { currentConfig.env_params.episodes = _syncedEpisodes; $('[data-path="env_params.episodes"]').val(_syncedEpisodes); }
+    if (_syncedMaxSteps !== null) { currentConfig.env_params.max_steps = _syncedMaxSteps; $('[data-path="env_params.max_steps"]').val(_syncedMaxSteps); }
+    if (_syncedTestEp !== null)   { currentConfig.env_params.test_episodes = _syncedTestEp; $('[data-path="env_params.test_episodes"]').val(_syncedTestEp); }
+    if (!currentConfig.env_params.attacks) currentConfig.env_params.attacks = {};
+    if (_syncedLikelyConf !== null && $('[data-path="env_params.attacks.likely"]').length) {
+        currentConfig.env_params.attacks.likely = _syncedLikelyConf;
+        $('[data-path="env_params.attacks.likely"]').val(_syncedLikelyConf);
+    }
+    if (_syncedLikelyTrain !== null && $('[data-path="env_params.attacks.likely_train"]').length) {
+        currentConfig.env_params.attacks.likely_train = _syncedLikelyTrain;
+        $('[data-path="env_params.attacks.likely_train"]').val(_syncedLikelyTrain);
+    }
+    if (_syncedLikelyEval !== null && $('[data-path="env_params.attacks.likely_eval"]').length) {
+        currentConfig.env_params.attacks.likely_eval = _syncedLikelyEval;
+        $('[data-path="env_params.attacks.likely_eval"]').val(_syncedLikelyEval);
+    }
+
     updateConfigurationInMemory();
     renderDataSourceSelectors();
     inspectLoadedScenario(selectedPath);
@@ -1877,6 +1963,31 @@ $(document).on('click', '.scenario-row', function () {
 
 $(document).on('change', '#scenario-file-input', function () {
     currentConfig.env_params.scenario_file = $(this).val();
+});
+
+// When user manually edits any of the env params synced from a loaded scenario,
+// reset scenario_source back to 'generate' so a new scenario will be generated.
+const _SCENARIO_SYNCED_PATHS = new Set([
+    'env_params.episodes',
+    'env_params.max_steps',
+    'env_params.test_episodes',
+    'env_params.attacks.likely',
+    'env_params.attacks.likely_train',
+    'env_params.attacks.likely_eval',
+]);
+
+$(document).on('change', '.config-input', function () {
+    const path = $(this).data('path');
+    if (!_SCENARIO_SYNCED_PATHS.has(path)) return;
+    if (!currentConfig.env_params || currentConfig.env_params.scenario_source !== 'load') return;
+    currentConfig.env_params.scenario_source = 'generate';
+    currentConfig.env_params.scenario_file = '';
+    // Sync DOM before collectConfigFromUI() reads it inside updateConfigurationInMemory()
+    $('input[name="scenario-source"][value="generate"]').prop('checked', true);
+    $('#scenario-source-hidden').val('generate');
+    updateConfigurationInMemory();
+    renderDataSourceSelectors();
+    showStatus('Scenario source reset to "Generate new" after parameter change.', 'info');
 });
 
 function reorderEnvParamsForDisplay(envParams) {
@@ -2062,32 +2173,76 @@ function loadSelectedSavedConfig() {
 
 function renderAgents() {
     const agentsListEl = $('#agents-list');
+    const tabBarEl = $('#agents-tab-bar');
     agentsListEl.empty();
+    tabBarEl.empty();
+
+    if (!currentConfig.agents.length) {
+        agentsListEl.html('<p class="text-sm text-gray-400 italic p-2">No agents configured. Add one above.</p>');
+        updateAgentsEnabledCount();
+        return;
+    }
+
+    let tabBarHtml = '';
+    let panelsHtml = '';
 
     currentConfig.agents.forEach((agent, index) => {
-        const agentHtml = `
-                    <div id="agent-card-${index}" class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-md ${agent.enabled ? '' : 'opacity-50'} mb-6">
-                        <div class="flex justify-between items-start mb-3 border-b pb-2">
-                            <h4 id="agents.${index}.title" class="text-lg font-semibold text-gray-800">${agent.name}</h4>
-                            <div class="flex items-center gap-2">
-                                <button data-agent-name="${agent.name}" class="duplicate-agent-btn text-blue-400 hover:text-blue-600 transition duration-150" title="Duplicate agent">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                                </button>
-                                <button data-agent-name="${agent.name}" class="remove-agent-btn text-red-500 hover:text-red-700 transition duration-150" title="Remove agent">
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-4">
-                            ${renderFieldsRecursively(agent, `agents.${index}`, true, index)}
-                        </div>
+        const enabled = agent.enabled !== false;
+        const dotClass = enabled ? 'agent-dot-on' : 'agent-dot-off';
+        const tabDisabled = enabled ? '' : 'agent-tab-disabled';
+
+        tabBarHtml += `<button class="agent-tab ${tabDisabled}" data-agent-tab="${index}">
+            <span class="agent-dot ${dotClass}"></span>
+            <span id="agent-tab-label-${index}">${escapeHtml(agent.name || `Agent ${index}`)}</span>
+        </button>`;
+
+        panelsHtml += `<div class="agent-tab-panel hidden" id="agent-panel-${index}">
+            <div id="agent-card-${index}" class="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-md ${enabled ? '' : 'opacity-50'}">
+                <div class="flex justify-between items-start mb-3 border-b pb-2">
+                    <h4 id="agents.${index}.title" class="text-lg font-semibold text-gray-800">${escapeHtml(agent.name || '')}</h4>
+                    <div class="flex items-center gap-2">
+                        <button data-agent-name="${escapeAttr(agent.name)}" class="duplicate-agent-btn text-blue-400 hover:text-blue-600 transition duration-150" title="Duplicate agent">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                        </button>
+                        <button data-agent-name="${escapeAttr(agent.name)}" class="remove-agent-btn text-red-500 hover:text-red-700 transition duration-150" title="Remove agent">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
                     </div>
-                `;
-        agentsListEl.append(agentHtml);
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-4">
+                    ${renderFieldsRecursively(agent, `agents.${index}`, true, index)}
+                </div>
+            </div>
+        </div>`;
     });
+
+    tabBarEl.html(tabBarHtml);
+    agentsListEl.html(panelsHtml);
+
+    const saved = (() => { try { return parseInt(localStorage.getItem('activeAgentTab') || '0'); } catch (_) { return 0; } })();
+    const validIdx = (saved >= 0 && saved < currentConfig.agents.length) ? saved : 0;
+    switchAgentTab(validIdx);
 
     updateAgentsEnabledCount();
 }
+
+function switchAgentTab(index) {
+    $('.agent-tab-panel').addClass('hidden');
+    $(`#agent-panel-${index}`).removeClass('hidden');
+    $('.agent-tab').removeClass('agent-tab-active');
+    $(`.agent-tab[data-agent-tab="${index}"]`).addClass('agent-tab-active');
+    try { localStorage.setItem('activeAgentTab', String(index)); } catch (_) {}
+}
+
+function updateAgentTabStyle(index, enabled) {
+    const tab = $(`.agent-tab[data-agent-tab="${index}"]`);
+    tab.toggleClass('agent-tab-disabled', !enabled);
+    tab.find('.agent-dot').toggleClass('agent-dot-on', enabled).toggleClass('agent-dot-off', !enabled);
+}
+
+$(document).on('click', '.agent-tab', function () {
+    switchAgentTab(parseInt($(this).data('agent-tab')));
+});
 
 function updateAgentsEnabledCount() {
     const counterEl = $('#agents_enabled');
@@ -2449,3 +2604,74 @@ function saveConfiguration() {
 }
 
 
+// ── Config tab switching ──────────────────────────────────────────────────────
+
+function switchConfigTab(tabName) {
+    $('.config-tab-panel').addClass('hidden');
+    $(`#tab-${tabName}`).removeClass('hidden');
+    $('.config-tab').removeClass('cfg-tab-active');
+    $(`.config-tab[data-tab="${tabName}"]`).addClass('cfg-tab-active');
+    try { localStorage.setItem('activeConfigTab', tabName); } catch (_) {}
+}
+
+function initConfigTabs() {
+    const saved = (() => { try { return localStorage.getItem('activeConfigTab'); } catch (_) { return null; } })();
+    switchConfigTab(saved || 'env');
+}
+
+$(document).on('click', '.config-tab', function () {
+    switchConfigTab($(this).data('tab'));
+});
+
+// ── Env sub-tab switching ─────────────────────────────────────────────────────
+
+function switchEnvSubTab(tabName) {
+    $('.env-sub-panel').addClass('hidden');
+    $(`#env-sub-${tabName}`).removeClass('hidden');
+    $('.env-sub-tab').removeClass('env-subtab-active');
+    $(`.env-sub-tab[data-env-tab="${tabName}"]`).addClass('env-subtab-active');
+    try { localStorage.setItem('activeEnvSubTab', tabName); } catch (_) {}
+}
+
+function initEnvSubTabs() {
+    const saved = (() => { try { return localStorage.getItem('activeEnvSubTab'); } catch (_) { return null; } })();
+    switchEnvSubTab(saved || 'general');
+}
+
+$(document).on('click', '.env-sub-tab', function () {
+    switchEnvSubTab($(this).data('env-tab'));
+});
+
+// ── Theme toggle ──────────────────────────────────────────────────────────────
+
+function toggleTheme() {
+    const isDark = document.documentElement.hasAttribute('data-theme');
+    if (isDark) {
+        document.documentElement.removeAttribute('data-theme');
+        try { localStorage.setItem('theme', 'light'); } catch (_) {}
+        $('#theme-icon').html(_sunIcon());
+    } else {
+        document.documentElement.setAttribute('data-theme', 'cyber');
+        try { localStorage.setItem('theme', 'cyber'); } catch (_) {}
+        $('#theme-icon').html(_moonIcon());
+    }
+}
+
+function initTheme() {
+    const saved = (() => { try { return localStorage.getItem('theme'); } catch (_) { return null; } })();
+    if (saved === 'light') {
+        document.documentElement.removeAttribute('data-theme');
+        $('#theme-icon').html(_sunIcon());
+    } else {
+        document.documentElement.setAttribute('data-theme', 'cyber');
+        $('#theme-icon').html(_moonIcon());
+    }
+}
+
+function _moonIcon() {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3a7 7 0 109.79 9.79z"/></svg>`;
+}
+
+function _sunIcon() {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+}

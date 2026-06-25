@@ -1,6 +1,18 @@
 // Constant to define the maximum size of the rolling window for the line chart
 const MAX_DATA_POINTS = 60;
 
+/**
+ * Returns true when the current tick contains at least one host under attack
+ * or attacking.  Works with both scalar id (legacy) and list id (attacks_ho,
+ * where each host has its own status id in an array).
+ */
+function _isAttackTick(id) {
+    if (Array.isArray(id)) {
+        return id.some(v => v > 0);
+    }
+    return id === 1;
+}
+
 // ===================================================================
 //  LINE CHART: Total Traffic (Last 60 points)
 // ===================================================================
@@ -287,7 +299,7 @@ function updateLineChartPackets(newData) {
 
 
     // 1. Determine the new point style, color, and size based on nd.id
-    const isEvent = nd.id === 1 && !isClassificationEnv();
+    const isEvent = _isAttackTick(nd.id) && !isClassificationEnv();
 
     // Point style (shape): 'crossRot' for the event, 'circle' for normal.
     const newPointStyle = isEvent ? 'crossRot' : 'circle';
@@ -450,7 +462,7 @@ function updateLineChartBytes(newData) {
 
 
     // 1. Determine the new point style, color, and size based on nd.id
-    const isEvent = nd.id === 1 && !isClassificationEnv();
+    const isEvent = _isAttackTick(nd.id) && !isClassificationEnv();
 
     // Point style (shape): 'crossRot' for the event, 'circle' for normal.
     const newPointStyle = isEvent ? 'crossRot' : 'circle';
@@ -739,12 +751,20 @@ function updateBarChartPackets(newData) {
     const transmittedBorderColors = [];
 
     // Define colors
-    const defaultReceivedColor = 'rgba(75, 192, 192, 1)';   // Default border color for received
-    const defaultTransmittedColor = 'rgba(255, 159, 64, 1)'; // Default border color for transmitted
-    const eventIncomingHighlightColor = 'red';
-    const eventOutcomingHighlightColor = 'blu';
-    const eventBorderWidth = 3; // Wider border for emphasis
+    const defaultReceivedColor  = 'rgba(75, 192, 192, 1)';
+    const defaultTransmittedColor = 'rgba(54, 162, 235, 1)';
+    const defaultReceivedBg     = 'rgba(75, 192, 192, 0.7)';
+    const defaultTransmittedBg  = 'rgba(54, 162, 235, 0.7)';
+    const victimBorderColor     = 'rgba(220, 30, 30, 1)';
+    const victimRxBg            = 'rgba(255, 50, 50, 0.85)';   // victim RX → red
+    const attackerBorderColor   = 'rgba(200, 80, 0, 1)';
+    const attackerTxBg          = 'rgba(255, 130, 0, 0.85)';   // attacker TX → amber
+    const eventBorderWidth = 3;
     const defaultBorderWidth = 1;
+
+    // Per-bar background and border color arrays
+    const receivedBgColors      = [];
+    const transmittedBgColors   = [];
 
     // Prepare data and styling for all agents/hosts
     var isAttack = false;
@@ -762,40 +782,37 @@ function updateBarChartPackets(newData) {
         if (isClassificationEnv()) {
             receivedBorderColors.push(defaultReceivedColor);
             transmittedBorderColors.push(defaultTransmittedColor);
-            if (status.id === 1)
-                trafficType = "PING";
-            else if (status.id === 2)
-                trafficType = "UDP";
-            else if (status.id === 3)
-                trafficType = "TCP";
-        }
-        else {
+            receivedBgColors.push(defaultReceivedBg);
+            transmittedBgColors.push(defaultTransmittedBg);
+            if (status.id === 1)      trafficType = "PING";
+            else if (status.id === 2) trafficType = "UDP";
+            else if (status.id === 3) trafficType = "TCP";
+        } else {
+            const isVictim    = status.id === 1;
+            const isAttacker  = status.id === 2;
 
-            const isEventIncoming = status.id === 1;
-            const isEventOutcoming = status.id === 2;
-
-            // Received Packets Styling
-            if (isEventIncoming) {
+            if (isVictim) {
                 victimHost = hostId;
-                isAttack = true;
-                receivedBorderColors.push(eventIncomingHighlightColor);
-                transmittedBorderColors.push(eventIncomingHighlightColor);
-            }
-            else if (isEventOutcoming) {
+                isAttack   = true;
+                receivedBorderColors.push(victimBorderColor);
+                transmittedBorderColors.push(victimBorderColor);
+                receivedBgColors.push(victimRxBg);          // flood arrives → red RX
+                transmittedBgColors.push(defaultTransmittedBg);
+            } else if (isAttacker) {
                 attackingHost = hostId;
-                isAttack = true;
-                receivedBorderColors.push(eventOutcomingHighlightColor);
-                transmittedBorderColors.push(eventOutcomingHighlightColor);
-            }
-            else {
-                // Use the dataset's default border color
+                isAttack      = true;
+                receivedBorderColors.push(attackerBorderColor);
+                transmittedBorderColors.push(attackerBorderColor);
+                receivedBgColors.push(defaultReceivedBg);
+                transmittedBgColors.push(attackerTxBg);    // flood sent → amber TX
+            } else {
                 receivedBorderColors.push(defaultReceivedColor);
                 transmittedBorderColors.push(defaultTransmittedColor);
+                receivedBgColors.push(defaultReceivedBg);
+                transmittedBgColors.push(defaultTransmittedBg);
             }
         }
-
     });
-
 
     lucide.createIcons();
 
@@ -804,25 +821,23 @@ function updateBarChartPackets(newData) {
 
     // --- Update Dataset 0 (Received Packets) ---
     const receivedDataset = barChartPackets.data.datasets[0];
-    receivedDataset.data = receivedPacketsData;
-
-    // Apply conditional border colors and width
-    receivedDataset.borderColor = receivedBorderColors;
-    // Set borderWidth as an array if needed for individual control, or globally if only the event bar changes
-    // Since we only want to change width for the event bar, we need to pass an array of widths.
-    receivedDataset.borderWidth = hostLabels.map(hostId =>
-        agentStatuses[hostId].id === 1 ? eventBorderWidth : defaultBorderWidth
-    );
+    receivedDataset.data            = receivedPacketsData;
+    receivedDataset.backgroundColor = receivedBgColors;
+    receivedDataset.borderColor     = receivedBorderColors;
+    receivedDataset.borderWidth     = hostLabels.map(hostId => {
+        const sid = agentStatuses[hostId].id;
+        return (sid === 1 || sid === 2) ? eventBorderWidth : defaultBorderWidth;
+    });
 
     // --- Update Dataset 1 (Transmitted Packets) ---
     const transmittedDataset = barChartPackets.data.datasets[1];
-    transmittedDataset.data = transmittedPacketsData;
-
-    // Apply conditional border colors and width
-    transmittedDataset.borderColor = transmittedBorderColors;
-    transmittedDataset.borderWidth = hostLabels.map(hostId =>
-        agentStatuses[hostId].id === 1 ? eventBorderWidth : defaultBorderWidth
-    );
+    transmittedDataset.data            = transmittedPacketsData;
+    transmittedDataset.backgroundColor = transmittedBgColors;
+    transmittedDataset.borderColor     = transmittedBorderColors;
+    transmittedDataset.borderWidth     = hostLabels.map(hostId => {
+        const sid = agentStatuses[hostId].id;
+        return (sid === 1 || sid === 2) ? eventBorderWidth : defaultBorderWidth;
+    });
 
     // Update the chart to reflect the changes
     barChartPackets.update('none');
@@ -847,16 +862,22 @@ function updateBarChartBytes(newData) {
     const receivedBytesData = [];
     const transmittedBytesData = [];
 
-    // Arrays to store conditional styling (Border Color) for each bar
-    const receivedBorderColors = [];
+    // Arrays to store conditional styling for each bar
+    const receivedBorderColors  = [];
     const transmittedBorderColors = [];
+    const receivedBgColors      = [];
+    const transmittedBgColors   = [];
 
-    // Define colors
-    const defaultReceivedColor = 'rgba(75, 192, 192, 1)';   // Default border color for received
-    const defaultTransmittedColor = 'rgba(255, 159, 64, 1)'; // Default border color for transmitted
-    const eventIncomingHighlightColor = 'red';
-    const eventOutcomingHighlightColor = 'blu';
-    const eventBorderWidth = 3; // Wider border for emphasis
+    // Define colors (bytes chart uses pink/orange as defaults)
+    const defaultReceivedColor    = 'rgba(255, 99, 132, 1)';
+    const defaultTransmittedColor = 'rgba(255, 159, 64, 1)';
+    const defaultReceivedBg       = 'rgba(255, 99, 132, 0.7)';
+    const defaultTransmittedBg    = 'rgba(255, 159, 64, 0.7)';
+    const victimBorderColor       = 'rgba(220, 30, 30, 1)';
+    const victimRxBg              = 'rgba(255, 50, 50, 0.85)';   // victim RX → red
+    const attackerBorderColor     = 'rgba(200, 80, 0, 1)';
+    const attackerTxBg            = 'rgba(255, 130, 0, 0.85)';   // attacker TX → amber
+    const eventBorderWidth = 3;
     const defaultBorderWidth = 1;
 
     // Prepare data and styling for all agents/hosts
@@ -870,63 +891,53 @@ function updateBarChartBytes(newData) {
         if (isClassificationEnv()) {
             receivedBorderColors.push(defaultReceivedColor);
             transmittedBorderColors.push(defaultTransmittedColor);
-        }
-        else {
+            receivedBgColors.push(defaultReceivedBg);
+            transmittedBgColors.push(defaultTransmittedBg);
+        } else {
+            const isVictim   = status.id === 1;
+            const isAttacker = status.id === 2;
 
-            // 2. Determine Styling based on status.id
-            const isEventIncoming = status.id === 1;
-            const isEventOutcoming = status.id === 2;
-
-            // Received Packets Styling
-            if (isEventIncoming) {
-                receivedBorderColors.push(eventIncomingHighlightColor);
-            }
-            else if (isEventOutcoming) {
-                receivedBorderColors.push(eventOutcomingHighlightColor);
-            }
-            else {
-                // Use the dataset's default border color
-                receivedBorderColors.push(defaultReceivedColor);
-            }
-
-            // Transmitted Packets Styling
-            if (isEventOutcoming) {
-                transmittedBorderColors.push(eventIncomingHighlightColor);
-            }
-            else if (isEventIncoming) {
-                transmittedBorderColors.push(eventOutcomingHighlightColor);
+            if (isVictim) {
+                receivedBorderColors.push(victimBorderColor);
+                transmittedBorderColors.push(victimBorderColor);
+                receivedBgColors.push(victimRxBg);
+                transmittedBgColors.push(defaultTransmittedBg);
+            } else if (isAttacker) {
+                receivedBorderColors.push(attackerBorderColor);
+                transmittedBorderColors.push(attackerBorderColor);
+                receivedBgColors.push(defaultReceivedBg);
+                transmittedBgColors.push(attackerTxBg);
             } else {
-                // Use the dataset's default border color
+                receivedBorderColors.push(defaultReceivedColor);
                 transmittedBorderColors.push(defaultTransmittedColor);
+                receivedBgColors.push(defaultReceivedBg);
+                transmittedBgColors.push(defaultTransmittedBg);
             }
         }
-
     });
 
     // Update host labels
     barChartBytes.data.labels = hostLabels;
 
-    // --- Update Dataset 0 (Received Packets) ---
+    // --- Update Dataset 0 (Received Bytes) ---
     const receivedDataset = barChartBytes.data.datasets[0];
-    receivedDataset.data = receivedBytesData;
+    receivedDataset.data            = receivedBytesData;
+    receivedDataset.backgroundColor = receivedBgColors;
+    receivedDataset.borderColor     = receivedBorderColors;
+    receivedDataset.borderWidth     = hostLabels.map(hostId => {
+        const sid = agentStatuses[hostId].id;
+        return (sid === 1 || sid === 2) ? eventBorderWidth : defaultBorderWidth;
+    });
 
-    // Apply conditional border colors and width
-    receivedDataset.borderColor = receivedBorderColors;
-    // Set borderWidth as an array if needed for individual control, or globally if only the event bar changes
-    // Since we only want to change width for the event bar, we need to pass an array of widths.
-    receivedDataset.borderWidth = hostLabels.map(hostId =>
-        agentStatuses[hostId].id === 1 ? eventBorderWidth : defaultBorderWidth
-    );
-
-    // --- Update Dataset 1 (Transmitted Packets) ---
+    // --- Update Dataset 1 (Transmitted Bytes) ---
     const transmittedDataset = barChartBytes.data.datasets[1];
-    transmittedDataset.data = transmittedBytesData;
-
-    // Apply conditional border colors and width
-    transmittedDataset.borderColor = transmittedBorderColors;
-    transmittedDataset.borderWidth = hostLabels.map(hostId =>
-        agentStatuses[hostId].id === 1 ? eventBorderWidth : defaultBorderWidth
-    );
+    transmittedDataset.data            = transmittedBytesData;
+    transmittedDataset.backgroundColor = transmittedBgColors;
+    transmittedDataset.borderColor     = transmittedBorderColors;
+    transmittedDataset.borderWidth     = hostLabels.map(hostId => {
+        const sid = agentStatuses[hostId].id;
+        return (sid === 1 || sid === 2) ? eventBorderWidth : defaultBorderWidth;
+    });
 
     barChartBytes.update('none');
 }

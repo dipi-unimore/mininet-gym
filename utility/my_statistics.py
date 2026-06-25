@@ -371,8 +371,8 @@ def plot_agent_cumulative_rewards(indicators, dir_name, title=''):
     correct_predictions = [item['correct_predictions'] for item in indicators]
     reward = [item['cumulative_reward'] for item in indicators]
 
-    x = 10 + 3 * int(len(episodes) / 70)
-    y = 10 + int(len(episodes) / 70)
+    x = min(60, 10 + 3 * int(len(episodes) / 70))
+    y = min(30, 10 + int(len(episodes) / 70))
     fig, ax1 = plt.subplots(figsize=(x, y))
     ax2 = ax1.twinx()
 
@@ -451,28 +451,38 @@ def plot_agent_execution_statuses(indicators, dir_name, title=''):
         dir_name (_type_): Directory name to save the plot.
         title (str, optional): Title of the plot. Defaults to ''.
     """
-    # Extracting indicators to plot
-    all_steps_status =  []
+    steps = []
+    bytes = []
+    packets = []
+    predictions = []
+    types = []
     n_steps = 0
+
     for item in indicators:
         for step_status in item['episode_statuses']:
             n_steps += 1
-            step_status["step"] = n_steps 
-            all_steps_status.append(step_status)
+            steps.append(n_steps)
+            predictions.append(step_status['action_choosen'])
+            packets.append(step_status['packets'])
+            bytes.append(step_status['bytes'])
+            if 'traffic_type' in step_status:
+                types.append(step_status['traffic_type'])
+            else:
+                types.append(step_status['id'])
 
-    steps = [item['step'] for item in all_steps_status]
-    bytes = [item['bytes'] for item in all_steps_status]
-    packets = [item['packets'] for item in all_steps_status]
-    predictions = [item['action_choosen'] for item in all_steps_status]
-    if 'traffic_type' in all_steps_status[0]:
-        # If 'traffic_type' exists, use it as ground truth, eg classification
-        types = [item['traffic_type'] for item in all_steps_status]
-    else:
-        types = [item['id'] for item in all_steps_status]
-    
-    # Create subplots for different indicators
-    x=10+3*int(n_steps/200)
-    y=10+int(n_steps/200)
+    max_points = 10000
+    if n_steps > max_points:
+        stride = max(1, n_steps // max_points)
+        steps = steps[::stride]
+        bytes = bytes[::stride]
+        packets = packets[::stride]
+        predictions = predictions[::stride]
+        types = types[::stride]
+
+    # Use display point count (after striding) for figure size to avoid OOM
+    n_display = len(steps)
+    x = min(60, 10 + 3 * int(n_display / 200))
+    y = min(30, 10 + int(n_display / 200))
     fig, axs = plt.subplots(3, 1, figsize=(x, y))
 
     axs[0].set_yscale("log")
@@ -671,8 +681,8 @@ def plot_enviroment_execution_statutes(statutes, dir_name, title=''):
         ids = [item['id'] for item in statutes] #*100 to view the line
 
     # Create subplots for different indicators
-    x=10+3*int(len(statutes)/200)
-    y=15+int(len(statutes)/200)
+    x = min(80, 10 + 3 * int(len(statutes) / 200))
+    y = min(40, 15 + int(len(statutes) / 200))
     fig, axs = plt.subplots(4, 1, figsize=(x, y))
     
     axs[0].set_yscale("log")

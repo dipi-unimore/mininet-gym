@@ -36,6 +36,7 @@ class HostAgentEnv(gym.Env):
         # first four for undestanding if there is an attack outgoing, sent by this host 
         # last five for understanding if there is an attack incoming, received by this host
         self.global_state = global_state
+        self.use_communication = getattr(params.attacks, 'use_communication', True)
         self.set_link_status(True)
         
         self.low = np.array([0,
@@ -59,7 +60,7 @@ class HostAgentEnv(gym.Env):
                               self.threshold_bytes,
                               self.threshold_var_bytes,
                               len(self.net.hosts)])
-        self.observation_space = spaces.Box(low=0, high=self.high, shape=(len(self.low),), dtype=np.float32)
+        self.observation_space = spaces.Box(low=self.low, high=self.high, shape=(len(self.low),), dtype=np.float32)
         
         # Define the number of discrete bins for each observation dimension
         self.n_bins = params.n_bins
@@ -172,12 +173,11 @@ class HostAgentEnv(gym.Env):
             if apply_drop_rules and self.is_link_on and block_flow_drop(self.net, self.host_name):
                 time.sleep(0.2)
                 self.set_link_status(False)
-        agent_name=get_agent_name(host_name = self.host_name)                  
-        #TODO verify if 0,1,2 is it good as message or 
-        # if is enough 0 [0 and 1 actions] and 1 [action 2]
-        self.global_state.set_message(agent_name, self.host_name, action)
+        agent_name = get_agent_name(host_name=self.host_name)
+        if self.use_communication:
+            self.global_state.set_message(agent_name, self.host_name, action)
         if show_action:
-            information(f"{self.host_name} {msg} R: {reward}\n", agent_name) 
+            information(f"{self.host_name} {msg} R: {reward}\n", agent_name)
     
     def calculate_reward(self, action: int) -> float:
         """
@@ -250,11 +250,13 @@ class HostAgentEnv(gym.Env):
     ############# STATE RELATED FUNCTIONS #####################        
     def get_current_state(self, is_discretized_state = False, is_real_state = False):
         state = self.global_state.get_host_state(self.host_name)
-        #message customized by agent variant
-        agent_name = get_agent_name(host_name = self.host_name)        
-        agent_messages = self.global_state.get_messages(agent_name)
-        message_state = sum(1 for k, v in agent_messages.items() if v > 0 and k != self.host_name) # 8: Message
-        state = np.append(state, message_state) 
+        if self.use_communication:
+            agent_name = get_agent_name(host_name = self.host_name)
+            agent_messages = self.global_state.get_messages(agent_name)
+            message_state = sum(1 for k, v in agent_messages.items() if v > 0 and k != self.host_name)
+        else:
+            message_state = 0
+        state = np.append(state, message_state)
         self.status = self.global_state.get_host_status(self.host_name) #update status
         if is_real_state:
             return state

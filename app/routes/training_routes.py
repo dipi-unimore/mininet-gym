@@ -3,7 +3,7 @@ from threading import Thread
 from flask import Blueprint, jsonify
 
 from utility.constants import SystemStatus
-from utility.my_log import set_drop_rule_message_visibility
+from utility.my_log import set_drop_rule_message_visibility, get_agent_summaries
 
 
 def create_training_blueprint(state):
@@ -104,19 +104,11 @@ def create_training_blueprint(state):
                             'accuracy': metrics['accuracy'] if metrics and 'accuracy' in metrics else None,
                             'reward': [indicator['cumulative_reward'] for indicator in indicators] if indicators else None
                         }
-                        # Button state: summary available?
-                        training_summary = None
-                        evaluation_summary = None
-                        try:
-                            if hasattr(agent_param, 'training_summary'):
-                                training_summary = agent_param.training_summary
-                            if hasattr(agent_param, 'evaluation_summary'):
-                                evaluation_summary = agent_param.evaluation_summary
-                        except Exception:
-                            pass
+                        # Button state: actual summary data for reconnect recovery
+                        cached = get_agent_summaries().get(agent_name, {})
                         agent_button_state[agent_name] = {
-                            'training_summary': training_summary is not None,
-                            'evaluation_summary': evaluation_summary is not None
+                            'training_summary': cached.get('training'),
+                            'evaluation_summary': cached.get('evaluation'),
                         }
             except Exception as e:
                 print(f"[get_training_status] Could not extract agent chart/button data: {e}")

@@ -34,14 +34,21 @@ def _is_drop_rule_message(message, author=None):
 
 def set_log_file(log_path: str = "log.txt"):
     global logger
-    logging.basicConfig(
-        filename=log_path,
-        filemode='a',
-        format='%(asctime)s,%(msecs)03d %(levelname)s %(message)s',
+    logger = logging.getLogger('marl_app')
+    logger.propagate = False  # isolate from root logger to avoid interference with other libs
+
+    # Close and remove stale handlers from previous runs
+    for h in logger.handlers[:]:
+        h.close()
+        logger.removeHandler(h)
+
+    handler = logging.FileHandler(log_path, mode='a')
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s,%(msecs)03d %(levelname)s %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        level=logging.WARNING
-    )
-    logger = logging.getLogger('app')
+    ))
+    logger.setLevel(logging.WARNING)
+    logger.addHandler(handler)
 
 def set_log_level(level):
     mininet_setLogLevel(level)
@@ -69,7 +76,7 @@ def log_message(level, message, author=None):
     
     #logging message on file
     if logger is not None:
-        log_func = getattr(logging, level)
+        log_func = getattr(logger, level, logger.warning)
         log_func(remove_colors(message).replace("\n", " "))
 
     message = add_timestamp_to_message(message)
@@ -100,9 +107,8 @@ def debug_essential(message):
     if not message.endswith("\n") and not message.endswith("\n"+Fore.WHITE):
         message += "\n"
 
-    # Log to file at INFO level (so it passes WARNING threshold)
     if logger is not None:
-        logger.info(remove_colors(message).replace("\n", " "))
+        logger.warning(remove_colors(message).replace("\n", " "))
 
     message = add_timestamp_to_message(message)
 
@@ -115,9 +121,19 @@ def debug_essential(message):
 def error(message):
     log_message("error", message)
 
-_client_data_notifier_func = None 
+_client_data_notifier_func = None
 _client_status_notifier_func = None
 _is_from_dataset = False
+
+# Cached summaries for reconnect recovery — keyed by agent_name
+_agent_summaries: dict = {}
+
+def clear_agent_summaries():
+    global _agent_summaries
+    _agent_summaries = {}
+
+def get_agent_summaries() -> dict:
+    return _agent_summaries
 
 def set_is_from_dataset(value: bool):
     """
@@ -247,8 +263,14 @@ def notify_client(level=None, agent_name=None, message=None,
     
     global _client_status_notifier_func
     global _client_data_notifier_func
-    global _message_buffer, _buffer_lock
-    
+    global _message_buffer, _buffer_lock, _agent_summaries
+
+    # Cache summaries for reconnect recovery (transparent to callers)
+    if agent_name and agent_training_summary is not None:
+        _agent_summaries.setdefault(agent_name, {})['training'] = agent_training_summary
+    if agent_name and agent_evaluation_summary is not None:
+        _agent_summaries.setdefault(agent_name, {})['evaluation'] = agent_evaluation_summary
+
     # I messaggi di STATUS vengono sempre inviati immediatamente
     if level == SystemLevels.STATUS and mode is not None and _client_status_notifier_func: 
         try:

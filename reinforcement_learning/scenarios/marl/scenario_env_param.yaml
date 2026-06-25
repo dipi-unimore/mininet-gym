@@ -1,4 +1,5 @@
 attacks:
+  use_communication: false
   likely: 0.45
   likely_train: 0.9
   likely_eval: 0.3

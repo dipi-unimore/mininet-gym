@@ -69,7 +69,7 @@ Always False for intermediate micro-steps.
 Propagated from the base env only at the end of a full round (after host N-1).
 """
 
-from datetime import time
+import time
 
 import numpy as np
 import gymnasium as gym
@@ -118,11 +118,16 @@ class PerHostScanWrapper(gym.Wrapper):
             - raw
     """
 
+    # Internal storage always uses 8 features per host (raw from OVS/global_state).
+    # The output observation may be 4 or 8 depending on include_percentage_variations.
+    _INTERNAL_FEATURES = 8
+    _COUNTER_INDICES   = np.array([0, 2, 4, 6], dtype=np.intp)
+
     def __init__(self, env: NetworkEnvAttackDetectPerHostObservable):
         super().__init__(env)
 
         self._num_hosts         = env.num_hosts
-        self._per_host_features = 8
+        self._per_host_features = env._per_host_features  # 4 or 8
         self.deep_state_mode    = NORMALIZED
 
         self._set_observation_space()
@@ -130,8 +135,9 @@ class PerHostScanWrapper(gym.Wrapper):
 
         # Internal pointer and counters
         self._current_host_idx:   int = 0
+        # _full_obs always stores N*8 (all raw features from global_state)
         self._full_obs: np.ndarray    = np.zeros(
-            self._num_hosts * self._per_host_features, dtype=np.float32
+            self._num_hosts * self._INTERNAL_FEATURES, dtype=np.float32
         )
         self._current_micro_step: int = 0
         self._current_round_step: int = 0
@@ -280,11 +286,15 @@ class PerHostScanWrapper(gym.Wrapper):
 
     def _raw_slice(self, host_idx: int) -> np.ndarray:
         """
-        Return the RAW (8,) slice for the given host.
-        Blocked hosts now expose live counters instead of a frozen snapshot.
+        Return the RAW observation slice for the given host.
+        _full_obs always stores N*8; when include_percentage_variations is False
+        the 4 variation columns are stripped to return a (4,) counter-only slice.
         """
-        start = host_idx * self._per_host_features
-        return self._full_obs[start: start + self._per_host_features].copy()
+        start = host_idx * self._INTERNAL_FEATURES
+        raw8  = self._full_obs[start: start + self._INTERNAL_FEATURES]
+        if not self.env._include_pct_var:
+            return raw8[self._COUNTER_INDICES].copy()
+        return raw8.copy()
 
     def _normalized_slice(self, host_idx: int) -> np.ndarray:
         raw_slice = self._raw_slice(host_idx)
@@ -336,7 +346,10 @@ class PerHostScanWrapper(gym.Wrapper):
 
         if action == AGENT_ACTIONS.NORMAL_TRAFFIC:
             if g_t == HostStatus.NORMAL:
-                reward += REWARDS.CORRECT_NORMAL_TRAFFIC * scale
+                # Not scaled: reward for normal stays constant regardless of host count
+                # so that "always predict normal" does not become more attractive
+                # with larger networks.
+                reward += REWARDS.CORRECT_NORMAL_TRAFFIC
             else:
                 reward += REWARDS.FALSE_NEGATIVE * scale
 
@@ -346,7 +359,9 @@ class PerHostScanWrapper(gym.Wrapper):
             elif g_t == HostStatus.UNDER_ATTACK:
                 reward += REWARDS.CORRECT_ATTACK_DETECTION * scale
             elif g_t == HostStatus.ATTACKING:
-                reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED
+                # Also scaled so that wrong-direction stays costlier than FP
+                # even when attack_reward_scale > 1 (more than 3 hosts).
+                reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
 
         elif action == AGENT_ACTIONS.ATTACK_OUT:
             if g_t == HostStatus.NORMAL:
@@ -354,7 +369,7 @@ class PerHostScanWrapper(gym.Wrapper):
             elif g_t == HostStatus.ATTACKING:
                 reward += REWARDS.CORRECT_ATTACK_DETECTION * scale
             elif g_t == HostStatus.UNDER_ATTACK:
-                reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED
+                reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
 
         return reward
 
@@ -377,6 +392,10 @@ class PerHostScanWrapper(gym.Wrapper):
         from utility.my_log import information as _info, debug as _debug
         from reinforcement_learning.network_env import get_agent_name
 
+        apply_drop_rules = getattr(
+            getattr(self.env.params, 'attacks', None), 'apply_drop_rules', True
+        )
+
         host      = self.env.hosts[host_idx]
         link_up   = self.env.status_links[host_idx]
 
@@ -386,13 +405,13 @@ class PerHostScanWrapper(gym.Wrapper):
                 self._normal_streak_while_blocked[host_idx] = self._normal_streak_while_blocked.get(host_idx, 0) + 1
                 held_rounds = self._current_round_step - self._block_started_round.get(host_idx, self._current_round_step)
                 if (held_rounds >= self._unblock_min_hold_rounds
-                        and self._normal_streak_while_blocked.get(host_idx, 0) >= self._unblock_required_normal_streak
-                        and unblock_flow_delete(self.env.net, host.name)):
-                    import time as _t; _t.sleep(0.02)
-                    self.env.status_links[host_idx] = True
-                    self._frozen_obs.pop(host_idx, None)
-                    self._normal_streak_while_blocked.pop(host_idx, None)
-                    self._block_started_round.pop(host_idx, None)
+                        and self._normal_streak_while_blocked.get(host_idx, 0) >= self._unblock_required_normal_streak):
+                    if apply_drop_rules and unblock_flow_delete(self.env.net, host.name):
+                        import time as _t; _t.sleep(0.02)
+                        self.env.status_links[host_idx] = True
+                        self._frozen_obs.pop(host_idx, None)
+                        self._normal_streak_while_blocked.pop(host_idx, None)
+                        self._block_started_round.pop(host_idx, None)
 
         elif action == AGENT_ACTIONS.ATTACK_IN:
             # ATTACK_IN alone is not enough evidence to unblock.
@@ -400,8 +419,8 @@ class PerHostScanWrapper(gym.Wrapper):
                 self._normal_streak_while_blocked[host_idx] = 0
 
         elif action == AGENT_ACTIONS.ATTACK_OUT:
-            # Attacker — block its outgoing traffic
-            if link_up and block_flow_drop(self.env.net, host.name):
+            # Attacker — block its outgoing traffic (OVS drop rule only when enabled)
+            if link_up and apply_drop_rules and block_flow_drop(self.env.net, host.name):
                 import time as _t; _t.sleep(0.02)
                 self.env.status_links[host_idx] = False
                 self._block_started_round[host_idx] = self._current_round_step
@@ -486,7 +505,9 @@ class PerHostScanWrapper(gym.Wrapper):
         # block timestamp so held_rounds always evaluates to 0, making the
         # unblock condition (held_rounds >= _unblock_min_hold_rounds) permanently
         # unsatisfiable and leaving the drop rule active for the entire next episode.
-        apply_drop_rules = getattr(self.env.params, 'apply_drop_rules', True)
+        apply_drop_rules = getattr(
+            getattr(self.env.params, 'attacks', None), 'apply_drop_rules', True
+        )
         if apply_drop_rules:
             from utility.network_configurator import unblock_flow_delete
             for host_idx in range(self._num_hosts):
@@ -591,13 +612,18 @@ class PerHostScanWrapper(gym.Wrapper):
         next_host_idx = host_idx + 1
 
         if next_host_idx >= self._num_hosts:
-            self.env.update_state()
-            self._refresh_full_obs()
             self._current_round_step += 1
 
             done, truncated = self.env.check_if_done_or_truncated(
                 self._current_round_step, percentage_correct
             )
+            # Only advance the scenario when the episode continues.
+            # If done/truncated, the next reset() will call update_state() to
+            # load the next step — calling it here too would waste one df entry
+            # and cause every episode to consume two scenario steps instead of one.
+            if not done and not truncated:
+                self.env.update_state()
+                self._refresh_full_obs()
             self._current_host_idx = 0
             next_host_idx          = 0
         else:

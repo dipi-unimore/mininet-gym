@@ -12,7 +12,7 @@ from PIL import Image as PILImage
 from flask import send_file
 
 from reinforcement_learning.scenarios.marl.constants import COORDINATOR
-from utility.constants import ALGO_A2C, ALGO_DQN, ALGO_PPO, ALGO_Q_LEARNING, ALGO_SARSA, ALGO_SUPERVISED, ATTACKS, ATTACKS_FROM_DATASET, ATTACKS_HO, CLASSIFICATION, CLASSIFICATION_FROM_DATASET, FROM_DATASET, MARL_ATTACKS, MARL_ATTACKS_FROM_DATASET
+from utility.constants import ALGO_A2C, ALGO_DQN, ALGO_PPO, ALGO_Q_LEARNING, ALGO_SARSA, ALGO_SUPERVISED, ATTACKS, ATTACKS_FROM_DATASET, ATTACKS_HO, CLASSIFICATION, CLASSIFICATION_FROM_DATASET, FROM_DATASET, MARL_ATTACKS, MARL_ATTACKS_FROM_DATASET, MARL_PZ, MARL_PZ_FROM_DATASET
 from utility.my_files import read_data_file
 from utility.network_configurator import get_host_agents_by_network_config
 from utility.params import read_config_file
@@ -26,6 +26,114 @@ from test_tools.qtable_coverage import plot_qtable_coverage_dynamic_actions_from
 
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _extract_flat_classes(gt, pred_for_agent, is_marl):
+    """
+    Convert gt/pred from test.json to flat integer class lists (0=NORMAL, 1=ATTACK_IN, 2=ATTACK_OUT).
+
+    attacks_ho: gt=list[int], pred_for_agent=list[int]
+    marl_attacks: gt={host: [[onehot],...]}, pred_for_agent=[step_dict,...] where step_dict={host:[onehot]}
+                  Coordinator (2-class) is excluded; only host agents contribute.
+    """
+    gt_flat, pred_flat = [], []
+    if is_marl:
+        if not isinstance(gt, dict) or not isinstance(pred_for_agent, list):
+            return gt_flat, pred_flat
+        hosts = [h for h in gt.keys() if h != COORDINATOR]
+        for host in hosts:
+            gt_host = gt.get(host, [])
+            for step_idx, gt_onehot in enumerate(gt_host):
+                if not isinstance(gt_onehot, list) or not gt_onehot:
+                    continue
+                gt_class = int(np.argmax(gt_onehot))
+                if step_idx < len(pred_for_agent):
+                    step_pred = pred_for_agent[step_idx]
+                    if isinstance(step_pred, dict) and host in step_pred:
+                        pred_onehot = step_pred[host]
+                        if isinstance(pred_onehot, list) and pred_onehot:
+                            pred_class = int(np.argmax(pred_onehot))
+                            gt_flat.append(gt_class)
+                            pred_flat.append(pred_class)
+    else:
+        if isinstance(gt, list) and isinstance(pred_for_agent, list):
+            def _to_int(x):
+                if isinstance(x, list):
+                    return int(np.argmax(x))
+                return int(x)
+            gt_flat = [_to_int(x) for x in gt]
+            pred_flat = [_to_int(x) for x in pred_for_agent]
+    return gt_flat, pred_flat
+
+
+def _compute_composite_winner_score(gt_flat, pred_flat):
+    """
+    Compute composite winner score with weights inversely proportional to class frequency.
+
+    Each class weight = (1/freq_c) / sum(1/freq_c).
+    Classes absent from gt are excluded and their weight redistributed.
+    Returns a dict with composite, per-class recalls, and effective weights.
+    """
+    gt = np.array(gt_flat, dtype=int)
+    pred = np.array(pred_flat, dtype=int)
+    n_total = len(gt)
+    if n_total == 0:
+        return None
+
+    n_out = int(np.sum(gt == 2))
+    n_in  = int(np.sum(gt == 1))
+    n_ncc = int(np.sum(gt == 0))
+
+    recall_out = float(np.sum((gt == 2) & (pred == 2)) / n_out) if n_out > 0 else None
+    recall_in  = float(np.sum((gt == 1) & (pred == 1)) / n_in)  if n_in  > 0 else None
+    recall_ncc = float(np.sum((gt == 0) & (pred == 0)) / n_ncc) if n_ncc > 0 else None
+
+    # Inverse-frequency weights (only for classes present in gt)
+    raw = {}
+    if n_out > 0: raw['out'] = n_total / n_out
+    if n_in  > 0: raw['in']  = n_total / n_in
+    if n_ncc > 0: raw['ncc'] = n_total / n_ncc
+    total_raw = sum(raw.values()) or 1.0
+
+    w_out = raw.get('out', 0.0) / total_raw
+    w_in  = raw.get('in',  0.0) / total_raw
+    w_ncc = raw.get('ncc', 0.0) / total_raw
+
+    composite = (
+        w_out * (recall_out or 0.0) +
+        w_in  * (recall_in  or 0.0) +
+        w_ncc * (recall_ncc or 0.0)
+    )
+
+    return {
+        "composite": round(composite, 4),
+        "recall_out": round(recall_out, 4) if recall_out is not None else None,
+        "recall_in":  round(recall_in,  4) if recall_in  is not None else None,
+        "recall_ncc": round(recall_ncc, 4) if recall_ncc is not None else None,
+        "w_out": round(w_out, 4),
+        "w_in":  round(w_in,  4),
+        "w_ncc": round(w_ncc, 4),
+        "n_out": n_out,
+        "n_in":  n_in,
+        "n_ncc": n_ncc,
+    }
+
+
+def _compute_winner_stats(composite_scores):
+    """Find best/worst agent by composite score. Returns (max_name, min_name, scores_dict)."""
+    if not composite_scores:
+        return "", ""
+    best_name, worst_name = "", ""
+    best_val, worst_val = -1.0, 2.0
+    for agent_name, cs in composite_scores.items():
+        if cs is None:
+            continue
+        v = cs.get("composite", 0.0)
+        if v > best_val:
+            best_val, best_name = v, agent_name
+        if v < worst_val:
+            worst_val, worst_name = v, agent_name
+    return best_name, worst_name
 
 
 def _get_net_param(net_params_dict, key_new, key_old, default=''):
@@ -70,6 +178,11 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
     test_charts = []
     detected_test_episodes = []
     mitigation_entries = []
+    is_marl = gym_type_in_config.startswith(MARL_ATTACKS)
+    is_classification = gym_type_in_config.startswith(CLASSIFICATION)
+
+    # Composite winner scoring only for attack-detection scenarios (not classification)
+    gt_pred_accum = {}  # {agent_name: (gt_flat_list, pred_flat_list)}
 
     for test_dir_path in candidate_test_dirs:
         test_file_path = os.path.join(test_dir_path, "test.json")
@@ -77,15 +190,16 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
             continue
 
         test_data = read_data_file(test_file_path)
-        if "ground_truth" in test_data:
-            gt = test_data.get("ground_truth")
-            if gym_type_in_config.startswith(MARL_ATTACKS):
+        gt = test_data.get("ground_truth")
+        if gt is not None:
+            if is_marl:
                 if isinstance(gt, dict):
                     detected_test_episodes.append(len(gt.get(COORDINATOR, [])))
             elif isinstance(gt, (list, dict)):
                 detected_test_episodes.append(len(gt))
 
         score_dict = test_data.get("score", None)
+        predicted = test_data.get("predicted", {})
         if isinstance(score_dict, dict):
             merged_test_scores.update(score_dict)
         else:
@@ -93,7 +207,6 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
             score_value = metrics.get("score", score_dict)
             if score_value is not None:
                 test_agent_name = ""
-                predicted = test_data.get("predicted", {})
                 if isinstance(predicted, dict) and predicted:
                     test_agent_name = next(iter(predicted.keys()))
                 if not test_agent_name:
@@ -104,6 +217,16 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
                     test_agent_name = agent_names[0]
                 if test_agent_name:
                     merged_test_scores[test_agent_name] = score_value
+
+        # Accumulate gt/pred for composite winner scoring (attack scenarios only)
+        if not is_classification and gt is not None and isinstance(predicted, dict):
+            for agent_name, pred_for_agent in predicted.items():
+                gt_flat, pred_flat = _extract_flat_classes(gt, pred_for_agent, is_marl)
+                if gt_flat:
+                    if agent_name not in gt_pred_accum:
+                        gt_pred_accum[agent_name] = ([], [])
+                    gt_pred_accum[agent_name][0].extend(gt_flat)
+                    gt_pred_accum[agent_name][1].extend(pred_flat)
 
         history = test_data.get("mitigation_history", [])
         if isinstance(history, list):
@@ -119,8 +242,15 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
                 else:
                     test_charts.append(f"{test_folder_rel}/{file_name}")
 
+    # Compute composite winner scores per agent
+    merged_composite_scores = {}
+    for agent_name, (gt_flat, pred_flat) in gt_pred_accum.items():
+        cs = _compute_composite_winner_score(gt_flat, pred_flat)
+        if cs is not None:
+            merged_composite_scores[agent_name] = cs
+
     mitigation_summary = _summarize_mitigation_entries(mitigation_entries)
-    return merged_test_scores, test_charts, detected_test_episodes, mitigation_summary
+    return merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores
 
 
 def _summarize_mitigation_entries(mitigation_entries):
@@ -155,7 +285,7 @@ def _summarize_mitigation_entries(mitigation_entries):
 
 
 def _compute_test_score_stats(test_scores, gym_type_in_config, test_episodes):
-    min_score = test_episodes
+    min_score = float('inf')
     name_min_score = ""
     max_score = 0
     name_max_score = ""
@@ -178,7 +308,10 @@ def _compute_test_score_stats(test_scores, gym_type_in_config, test_episodes):
             name_max_score = agent_name
         mean_scores.append(mean_agent_score)
 
-    mean_score = float(np.mean(mean_scores)) if mean_scores else 0
+    if not mean_scores:
+        return 0, "", 0, "", 0
+    min_score = min_score if min_score != float('inf') else 0
+    mean_score = float(np.mean(mean_scores))
     return min_score, name_min_score, max_score, name_max_score, mean_score
 
 
@@ -201,7 +334,7 @@ def _collect_agents_data(
 ):
     agents_data = []
     all_accuracies = []
-    min_accuracy = 0
+    min_accuracy = float('inf')
     name_min_accuracy = ""
     max_accuracy = 0
     name_max_accuracy = ""
@@ -248,10 +381,10 @@ def _collect_agents_data(
             "print_training_chart": print_training_chart,
         })
 
-        if accuracy > min_accuracy:
+        if accuracy < min_accuracy:
             min_accuracy = accuracy
             name_min_accuracy = agent_name
-        if accuracy < max_accuracy:
+        if accuracy > max_accuracy:
             max_accuracy = accuracy
             name_max_accuracy = agent_name
         all_accuracies.append(accuracy)
@@ -597,14 +730,14 @@ def build_result_pdf_response(current_config, gym_type, result_path, data):
     )
 
 
-RESULT_GYM_TYPES = [MARL_ATTACKS, ATTACKS, ATTACKS_HO, CLASSIFICATION, MARL_ATTACKS_FROM_DATASET, ATTACKS_FROM_DATASET, CLASSIFICATION_FROM_DATASET]
+RESULT_GYM_TYPES = [MARL_PZ, MARL_ATTACKS, ATTACKS, ATTACKS_HO, CLASSIFICATION, MARL_PZ_FROM_DATASET, MARL_ATTACKS_FROM_DATASET, ATTACKS_FROM_DATASET, CLASSIFICATION_FROM_DATASET]
 
 
 def build_results_dir_list(current_config):
     from utility.my_log import information, debug, error as log_error
     
     results_dir_list = []
-    expected_files = ["log.txt", "metrics_comparison.png", "radar_chart.png", "statuses.json"]
+    expected_files = ["metrics_comparison.png", "radar_chart.png", "statuses.json"]
     data_file_in_agent_folder = "data.json"
     test_dir = "TEST"
     expected_files_in_agent_folder_print_training_chart_enabled = ["matrix.png", "metrics.png", "metrics_combined.png", "rewards.png"]
@@ -710,7 +843,7 @@ def build_results_dir_list(current_config):
                     _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "Missing test directory: expected TEST or TEST_<algorithm>")
                     continue
 
-                merged_test_scores, test_charts, detected_test_episodes, mitigation_summary = _collect_test_results(
+                merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores = _collect_test_results(
                     candidate_test_dirs=candidate_test_dirs,
                     dir_path=dir_path,
                     test_dir=test_dir,
@@ -721,13 +854,15 @@ def build_results_dir_list(current_config):
                     _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "No valid test scores found in test.json files")
                     continue
 
+                if detected_test_episodes:
+                    test_episodes = max(detected_test_episodes)
                 min_score, name_min_score, max_score, name_max_score, mean_score = _compute_test_score_stats(
                     test_scores=merged_test_scores,
                     gym_type_in_config=gym_type_in_config,
                     test_episodes=test_episodes,
                 )
-                if detected_test_episodes:
-                    test_episodes = max(detected_test_episodes)
+
+                name_max_winner, name_min_winner = _compute_winner_stats(merged_composite_scores)
 
                 data_gym_type["test_scores"] = merged_test_scores
                 data_gym_type["test_episodes"] = test_episodes
@@ -738,6 +873,9 @@ def build_results_dir_list(current_config):
                 data_gym_type["max_score"] = max_score
                 data_gym_type["test_charts"] = test_charts
                 data_gym_type["mitigation_summary"] = mitigation_summary
+                data_gym_type["composite_scores"] = merged_composite_scores
+                data_gym_type["name_max_winner"] = name_max_winner
+                data_gym_type["name_min_winner"] = name_min_winner
 
                 missing_expected_file = _find_missing_expected_file(dir_path, expected_files)
                 if missing_expected_file is not None:
@@ -759,6 +897,20 @@ def build_results_dir_list(current_config):
 
     information(f"[BUILD_RESULTS] Found {len(results_dir_list)} gym types with {sum(len(item['data']) for item in results_dir_list)} complete results")
     return results_dir_list
+
+
+def _read_run_config_yaml(run_dir):
+    """Return env_params dict from config.yaml one level above the agent dir, or {}."""
+    try:
+        cfg_path = os.path.join(run_dir, "..", "config.yaml")
+        cfg_path = os.path.normpath(cfg_path)
+        if os.path.isfile(cfg_path):
+            with open(cfg_path) as f:
+                raw = yaml.safe_load(f) or {}
+            return raw.get("env_params", {}), raw.get("agents", [])
+    except Exception:
+        pass
+    return {}, []
 
 
 def build_load_dir_list(current_config, gym_type, network_config, agent_name):
@@ -808,10 +960,15 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                     for _, metrics in data.get("train_metrics", {}).items():
                         accuracy.append(float(np.mean(metrics.get("accuracy", 0))))
 
+                    env_p, agents_cfg = _read_run_config_yaml(path)
+                    agent_cfg = next((a for a in agents_cfg if a.get("name") == agent_name), {})
                     load_dir_list.append({
                         "accuracy": float(np.mean(accuracy)) if accuracy else 0,
                         "datetime": path.split('/')[2].split('_')[0],
                         "path": complete_path,
+                        "n_bins": env_p.get("n_bins"),
+                        "episodes": env_p.get("episodes"),
+                        "algorithm": agent_cfg.get("algorithm"),
                     })
                 else:
                     if not os.path.isfile(f"{path}/{agent_name}.{extension}") or not os.path.isfile(f"{path}/data.json"):
@@ -823,10 +980,15 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                         acc_val = float(np.mean(raw_accuracy)) if raw_accuracy else 0.0
                         if np.isnan(acc_val) or np.isinf(acc_val):
                             acc_val = 0.0
+                        env_p, agents_cfg = _read_run_config_yaml(path)
+                        agent_cfg = next((a for a in agents_cfg if a.get("name") == agent_name), {})
                         load_dir_list.append({
                             "accuracy": acc_val,
                             "datetime": path.split('/')[2].split('_')[0],
                             "path": complete_path,
+                            "n_bins": env_p.get("n_bins"),
+                            "episodes": env_p.get("episodes"),
+                            "algorithm": agent_cfg.get("algorithm"),
                         })
                     except Exception as exc:
                         error(f"Error reading data.json for {path}: {exc}")

@@ -42,13 +42,13 @@ def _get_training_status():
     
     if is_training:
         if pause_set:
-            return SystemStatus.PAUSED, 'PAUSED', 'Training is paused'
+            return SystemStatus.PAUSED, SystemModes.TRAINING, 'Training is paused'
         elif stop_set:
-            return SystemStatus.STOPPED, 'STOPPED', 'Training is stopping'
+            return SystemStatus.STOPPED, SystemModes.TRAINING, 'Training is stopping'
         else:
-            return SystemStatus.RUNNING, 'RUNNING', 'Training is running'
+            return SystemStatus.RUNNING, SystemModes.TRAINING, 'Training is running'
     else:
-        return SystemStatus.IDLE, 'IDLE', 'No active training'
+        return SystemStatus.IDLE, SystemModes.TRAINING, 'No active training'
 
 def register_handlers(socketio_instance):
     """Register handler SocketIO like connect, disconnect, message, ecc."""

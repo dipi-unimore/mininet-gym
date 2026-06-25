@@ -170,19 +170,26 @@ def plot_ho_agent_execution_confusion_matrix(indicators, dir_name,
     Returns:
         np.ndarray: The 3x3 confusion matrix, or None on error.
     """
-    all_steps = []
+    ground_truth = []
+    predicted = []
     for item in indicators:
-        all_steps.extend(item['episode_statuses'])
+        ep_data = item['episode_statuses']
+        if isinstance(ep_data, np.ndarray):
+            ground_truth.extend(map_ho_status_id_to_class(int(v)) for v in ep_data[:, 0])
+            predicted.extend(int(v) for v in ep_data[:, 1])
+        else:
+            for s in ep_data:
+                if isinstance(s, (list, tuple)):
+                    ground_truth.append(map_ho_status_id_to_class(int(s[0])))
+                    predicted.append(int(s[1]))
+                else:
+                    ground_truth.append(map_ho_status_id_to_class(s['traffic_type']))
+                    predicted.append(int(s['action_choosen']))
 
-    if not all_steps:
+    if not ground_truth:
         error(Fore.RED + "plot_ho_agent_execution_confusion_matrix: "
               "no step data found in indicators.\n" + Fore.WHITE)
         return None
-
-    # traffic_type is the ground truth int scalar (0/1/2)
-    # action_choosen is the predicted int scalar (0/1/2)
-    ground_truth = [map_ho_status_id_to_class(s['traffic_type']) for s in all_steps]
-    predicted    = [int(s['action_choosen']) for s in all_steps]
 
     try:
         cm = sk_metrics.confusion_matrix(
@@ -208,90 +215,128 @@ def plot_ho_agent_execution_confusion_matrix(indicators, dir_name,
 
 def plot_ho_agent_execution_statuses(indicators, dir_name, title=''):
     """
-    Plot per-microstep traffic counters, ground truth host status, and
-    prediction correctness across all training episodes.
+    Plot per-episode aggregate training metrics across all episodes.
+
+    Each episode is summarised by a single data point (mean traffic,
+    attack ratio, accuracy), which gives a faithful view of the learning
+    curve without needing to store or render tens of thousands of micro-steps.
 
     Layout (2 columns × 2 rows):
-      [0,0] RX/TX packets over micro-steps (log scale)
-      [0,1] RX/TX bytes over micro-steps   (log scale)
-      [1,0] Ground truth host status per micro-step (colour coded)
-      [1,1] Correct / wrong predictions per micro-step (green / red)
+      [0,0] Mean RX/TX packets per episode (log scale)
+      [0,1] Mean RX/TX bytes per episode   (log scale)
+      [1,0] Attack ratio per episode (% micro-steps with label > 0)
+      [1,1] Prediction accuracy per episode (% correct micro-steps)
 
     Args:
         indicators: List of per-episode dicts produced by CustomCallback.
         dir_name:   Directory where the PNG is saved.
         title:      Optional title prefix.
     """
-    all_steps = []
-    n = 0
-    for item in indicators:
-        for s in item['episode_statuses']:
-            n += 1
-            s = dict(s)  # shallow copy — avoid mutating stored data
-            s["step"] = n
-            all_steps.append(s)
+    episodes      = []
+    mean_rx_pkt   = []
+    mean_rx_bytes = []
+    mean_tx_pkt   = []
+    mean_tx_bytes = []
+    attack_ratio  = []
+    accuracy      = []
 
-    if not all_steps:
+    for item in indicators:
+        ep_data = item.get('episode_statuses')
+        if ep_data is None:
+            continue
+
+        # numpy array (live training): cols traffic_type(0) action_choosen(1)
+        #   rx_pkt(2) rx_pkt_pct(3) rx_bytes(4) rx_bytes_pct(5)
+        #   tx_pkt(6) tx_pkt_pct(7) tx_bytes(8) tx_bytes_pct(9)
+        if isinstance(ep_data, np.ndarray):
+            if ep_data.ndim != 2 or len(ep_data) == 0:
+                continue
+            gt_arr   = np.vectorize(map_ho_status_id_to_class)(ep_data[:, 0].astype(int))
+            pred_arr = ep_data[:, 1].astype(int)
+            rx_pkt   = ep_data[:, 2]
+            rx_byt   = ep_data[:, 4]
+            tx_pkt   = ep_data[:, 6]
+            tx_byt   = ep_data[:, 8]
+        elif ep_data:
+            gt_l, pred_l, rxp_l, rxb_l, txp_l, txb_l = [], [], [], [], [], []
+            for s in ep_data:
+                if isinstance(s, (list, tuple)):
+                    gt_l.append(map_ho_status_id_to_class(int(s[0])))
+                    pred_l.append(int(s[1]))
+                    rxp_l.append(float(s[2]));  rxb_l.append(float(s[4]))
+                    txp_l.append(float(s[6]));  txb_l.append(float(s[8]))
+                else:
+                    gt_l.append(map_ho_status_id_to_class(s['traffic_type']))
+                    pred_l.append(int(s['action_choosen']))
+                    rxp_l.append(_safe_scalar(s.get('received_packets', 0)))
+                    rxb_l.append(_safe_scalar(s.get('received_bytes', 0)))
+                    txp_l.append(_safe_scalar(s.get('transmitted_packets', 0)))
+                    txb_l.append(_safe_scalar(s.get('transmitted_bytes', 0)))
+            gt_arr   = np.array(gt_l, dtype=int)
+            pred_arr = np.array(pred_l, dtype=int)
+            rx_pkt   = np.array(rxp_l); rx_byt = np.array(rxb_l)
+            tx_pkt   = np.array(txp_l); tx_byt = np.array(txb_l)
+        else:
+            continue
+
+        episodes.append(item.get('episode', len(episodes) + 1))
+        mean_rx_pkt.append(float(np.mean(rx_pkt)))
+        mean_rx_bytes.append(float(np.mean(rx_byt)))
+        mean_tx_pkt.append(float(np.mean(tx_pkt)))
+        mean_tx_bytes.append(float(np.mean(tx_byt)))
+        attack_ratio.append(float(np.mean(gt_arr > 0)) * 100)
+        accuracy.append(float(np.mean(pred_arr == gt_arr)) * 100)
+
+    if not episodes:
         error(Fore.RED + "plot_ho_agent_execution_statuses: "
               "no step data found in indicators.\n" + Fore.WHITE)
         return
 
-    steps = [s['step'] for s in all_steps]
+    ep = np.array(episodes)
+    fig, axs = plt.subplots(2, 2, figsize=(14, 8))
 
-    # Traffic counters — _safe_scalar handles numpy types and single-element lists
-    rx_packets = [_safe_scalar(s.get('received_packets', 0))    for s in all_steps]
-    tx_packets = [_safe_scalar(s.get('transmitted_packets', 0)) for s in all_steps]
-    rx_bytes   = [_safe_scalar(s.get('received_bytes', 0))      for s in all_steps]
-    tx_bytes   = [_safe_scalar(s.get('transmitted_bytes', 0))   for s in all_steps]
-
-    # Ground truth (0/1/2) and action chosen (0/1/2) — both int scalars
-    ground_truths = [map_ho_status_id_to_class(s['traffic_type']) for s in all_steps]
-    predictions   = [int(s['action_choosen']) for s in all_steps]
-
-    x = 10 + 5 * int(n / 200)
-    y = 10 + int(n / 200)
-    fig, axs = plt.subplots(2, 2, figsize=(x, y))
-
-    # ── [0,0] Packets ──────────────────────────────────────────────
+    # ── [0,0] Mean packets per episode ────────────────────────────
     axs[0][0].set_yscale("log")
-    axs[0][0].plot(steps, tx_packets, label='TX packets', color='purple')
-    axs[0][0].plot(steps, rx_packets, label='RX packets', color='cyan')
-    axs[0][0].set_title(f'{title} TX/RX Packets')
-    axs[0][0].set_xlabel('Micro-steps')
-    axs[0][0].set_ylabel('Packets (log scale)')
+    axs[0][0].plot(ep, mean_tx_pkt,   label='Mean TX packets', color='purple',   linewidth=1.5)
+    axs[0][0].plot(ep, mean_rx_pkt,   label='Mean RX packets', color='cyan',     linewidth=1.5)
+    axs[0][0].set_title(f'{title} Mean TX/RX Packets per Episode')
+    axs[0][0].set_xlabel('Episode')
+    axs[0][0].set_ylabel('Mean packets (log scale)')
     axs[0][0].legend()
+    axs[0][0].grid(True, alpha=0.3)
 
-    # ── [0,1] Bytes ────────────────────────────────────────────────
+    # ── [0,1] Mean bytes per episode ──────────────────────────────
     axs[0][1].set_yscale("log")
-    axs[0][1].plot(steps, tx_bytes, label='TX bytes', color='royalblue')
-    axs[0][1].plot(steps, rx_bytes, label='RX bytes', color='green')
-    axs[0][1].set_title(f'{title} TX/RX Bytes')
-    axs[0][1].set_xlabel('Micro-steps')
-    axs[0][1].set_ylabel('Bytes (log scale)')
+    axs[0][1].plot(ep, mean_tx_bytes, label='Mean TX bytes',   color='royalblue', linewidth=1.5)
+    axs[0][1].plot(ep, mean_rx_bytes, label='Mean RX bytes',   color='green',     linewidth=1.5)
+    axs[0][1].set_title(f'{title} Mean TX/RX Bytes per Episode')
+    axs[0][1].set_xlabel('Episode')
+    axs[0][1].set_ylabel('Mean bytes (log scale)')
     axs[0][1].legend()
+    axs[0][1].grid(True, alpha=0.3)
 
-    # ── [1,0] Ground truth host status ────────────────────────────
-    colors_types = _get_colors_for_ho_types(ground_truths)
-    axs[1][0].scatter(steps, ground_truths, c=colors_types, s=3)
-    axs[1][0].set_yticks([0, 1, 2])
-    axs[1][0].set_yticklabels(["Normal", "Under Attack", "Attacking"])
-    axs[1][0].set_title(f'{title} Ground Truth Host Status')
-    axs[1][0].set_xlabel('Micro-steps')
-    axs[1][0].set_ylabel('Status')
-    axs[1][0].legend(handles=_get_legend_for_ho_types(), loc='lower left')
+    # ── [1,0] Attack ratio per episode ────────────────────────────
+    axs[1][0].plot(ep, attack_ratio, color='orange', linewidth=1.5, label='% attack micro-steps')
+    axs[1][0].fill_between(ep, attack_ratio, alpha=0.15, color='orange')
+    axs[1][0].set_ylim(0, 105)
+    axs[1][0].set_title(f'{title} Attack Ratio per Episode')
+    axs[1][0].set_xlabel('Episode')
+    axs[1][0].set_ylabel('% micro-steps with attack label')
+    axs[1][0].legend()
+    axs[1][0].grid(True, alpha=0.3)
 
-    # ── [1,1] Prediction correctness ──────────────────────────────
-    colors_pred = _get_colors_for_ho_predictions(predictions, ground_truths)
-    axs[1][1].scatter(steps, predictions, c=colors_pred, s=3)
-    axs[1][1].set_yticks([0, 1, 2])
-    axs[1][1].set_yticklabels(["Normal", "Under Attack", "Attacking"])
-    axs[1][1].set_title(f'{title} Predictions (green=correct, red=wrong)')
-    axs[1][1].set_xlabel('Micro-steps')
-    axs[1][1].set_ylabel('Predicted action')
-    axs[1][1].legend(handles=_get_legend_for_ho_predictions(), loc='lower left')
+    # ── [1,1] Prediction accuracy per episode ─────────────────────
+    axs[1][1].plot(ep, accuracy, color='green', linewidth=1.5, label='Accuracy %')
+    axs[1][1].fill_between(ep, accuracy, alpha=0.15, color='green')
+    axs[1][1].set_ylim(0, 105)
+    axs[1][1].set_title(f'{title} Prediction Accuracy per Episode')
+    axs[1][1].set_xlabel('Episode')
+    axs[1][1].set_ylabel('Accuracy (%)')
+    axs[1][1].legend()
+    axs[1][1].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(f"{dir_name}/episode_statuses.png")
+    plt.savefig(f"{dir_name}/episode_statuses.png", dpi=100)
     plt.close()
 
 
@@ -379,10 +424,13 @@ def plot_ho_enviroment_execution_statutes(statutes, dir_name, title=''):
     # 'id' is a list per tick — reduce to one scalar per tick
     ids = [_id_list_to_scalar(item['id']) for item in statutes]
 
-    x = 10 + 3 * int(len(statutes) / 200)
-    y = 15 + int(len(statutes) / 200)
+    x = min(80, 10 + 3 * int(len(statutes) / 200))
+    y = min(40, 15 + int(len(statutes) / 200))
     fig, axs = plt.subplots(4, 1, figsize=(x, y))
     ep = list(episodes)
+
+    # Precompute attack tick positions (status 1=under_attack, 2=attacking)
+    attack_idx = [i for i, s in enumerate(ids) if s > 0]
 
     # ── [0] Packets ────────────────────────────────────────────────
     axs[0].set_yscale("log")
@@ -392,6 +440,12 @@ def plot_ho_enviroment_execution_statutes(statutes, dir_name, title=''):
         l_tx, = axs[0].plot(ep, tx_packets, label='TX Packets', color='red',    linewidth=1, linestyle='--')
         l_rx, = axs[0].plot(ep, rx_packets, label='RX Packets', color='#00AAFF', linewidth=1, linestyle='--')
         pkt_lines += [l_tx, l_rx]
+    if attack_idx:
+        atk_x = [ep[i] for i in attack_idx]
+        atk_y = [packets_total[i] for i in attack_idx]
+        l_atk_pkt = axs[0].scatter(atk_x, atk_y, color='red', marker='x',
+                                    s=20, linewidths=1, zorder=5, label='Attack')
+        pkt_lines.append(l_atk_pkt)
     axs[0].set_title(f'{title} Packets Count')
     axs[0].legend()
     _make_legend_toggle(fig, axs[0], pkt_lines)
@@ -404,6 +458,11 @@ def plot_ho_enviroment_execution_statutes(statutes, dir_name, title=''):
         l_btx, = axs[1].plot(ep, tx_bytes, label='TX Bytes', color='darkred',  linewidth=1, linestyle='--')
         l_brx, = axs[1].plot(ep, rx_bytes, label='RX Bytes', color='steelblue', linewidth=1, linestyle='--')
         byte_lines += [l_btx, l_brx]
+    if attack_idx:
+        atk_yb = [bytes_total[i] for i in attack_idx]
+        l_atk_byt = axs[1].scatter(atk_x, atk_yb, color='red', marker='x',
+                                    s=20, linewidths=1, zorder=5, label='Attack')
+        byte_lines.append(l_atk_byt)
     axs[1].set_title(f'{title} Bytes Count')
     axs[1].legend()
     _make_legend_toggle(fig, axs[1], byte_lines)
@@ -723,22 +782,48 @@ def plot_discrete_feature_bin_coverage(indicators, dir_name, agent_name='', n_bi
         except Exception:
             return str(v)
 
+    # Column order in compact numpy arrays (must match CustomCallback._ho_step_buf layout)
+    _FEAT_COL = {
+        "received_packets":                      2,
+        "received_packets_percentage_change":    3,
+        "received_bytes":                        4,
+        "received_bytes_percentage_change":      5,
+        "transmitted_packets":                   6,
+        "transmitted_packets_percentage_change": 7,
+        "transmitted_bytes":                     8,
+        "transmitted_bytes_percentage_change":   9,
+    }
+
     rows = []
     for episode in indicators:
-        for s in episode.get("episode_statuses", []):
-            action = _action_label(s.get("traffic_type", "unknown"))
-            for feature in features:
-                if feature not in s:
-                    continue
-                try:
-                    value = float(s.get(feature, 0))
-                except Exception:
-                    continue
-                rows.append({
-                    "feature": feature,
-                    "value": value,
-                    "action": action,
-                })
+        ep_data = episode.get("episode_statuses", [])
+        if isinstance(ep_data, np.ndarray):
+            for row in ep_data:
+                action = _action_label(int(row[0]))
+                for feature in features:
+                    col = _FEAT_COL.get(feature)
+                    if col is None:
+                        continue
+                    rows.append({"feature": feature, "value": float(row[col]), "action": action})
+        else:
+            for s in ep_data:
+                if isinstance(s, (list, tuple)):
+                    action = _action_label(int(s[0]))
+                    for feature in features:
+                        col = _FEAT_COL.get(feature)
+                        if col is None:
+                            continue
+                        rows.append({"feature": feature, "value": float(s[col]), "action": action})
+                else:
+                    action = _action_label(s.get("traffic_type", "unknown"))
+                    for feature in features:
+                        if feature not in s:
+                            continue
+                        try:
+                            value = float(s.get(feature, 0))
+                        except Exception:
+                            continue
+                        rows.append({"feature": feature, "value": value, "action": action})
 
     if not rows:
         return

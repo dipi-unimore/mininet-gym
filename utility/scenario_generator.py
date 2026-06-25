@@ -77,10 +77,12 @@ from utility.my_log import information
 # Available attack subtypes — mirrors adversarial_agent.py
 _ATTACK_SUBTYPES = ["udp_flood", "syn_flood", "icmp_flood"]
 
-# Default attack likelihood used by ATTACKS_HO scenario generation.
-# These values are intentionally fixed to keep reproducible scenario density.
-DEFAULT_ATTACK_LIKELY_TRAIN = 0.9
-DEFAULT_ATTACK_LIKELY_EVAL = 0.3
+# Default target fraction of steps that should be attacks for ATTACKS_HO.
+# These are FRACTIONS (not per-decision probabilities); _generate_sequence
+# converts them to per-decision probabilities via the Markov steady-state
+# inverse so the actual fraction of attack steps matches these values.
+DEFAULT_ATTACK_LIKELY_TRAIN = 0.5   # 50 % attack steps: balanced training
+DEFAULT_ATTACK_LIKELY_EVAL = 0.3    # 30 % attack episodes during evaluation
 DEFAULT_NO_ATTACK_TIMEOUT = 15
 
 _DEFAULT_DURATION_STEPS = {
@@ -227,60 +229,109 @@ def _generate_sequence(hosts,
     """
     Generate n_episodes * max_steps synthetic task assignments.
 
-    Uses a synthetic clock (global_step) for cooldown tracking so that
-    cooldowns are correctly honoured even though the entire sequence is
-    generated in a tight loop without wall-clock time advancing.
+    At most ONE host attacks at a time, targeting ONE victim, for the full
+    duration of the attack (_DURATION_STEPS: 5 steps for SHORT_ATTACK,
+    30 for LONG_ATTACK by default).  After the attack ends a cooldown of
+    _NO_ATTACK_TIMEOUT steps is enforced before a new attack can start.
+
+    _choose_task_type() uses a synthetic clock (global_step) for cooldown
+    comparisons so all cooldowns are correctly honoured even though the
+    entire sequence is generated in a tight loop without wall-clock time.
 
     Each entry in the returned list is a step dict with keys:
       "step", "episode", "episode_step", and one key per host name.
     """
     host_names = [h.name for h in hosts]
-    attack_likely = max(0.0, min(float(attack_likely_init), max_attack_percentage))
+    pct_short  = 0.66
+
+    # Interpret attack_likely_init as the TARGET FRACTION of steps that should
+    # be attacks rather than a raw per-decision probability.  When multi-step
+    # attacks are possible (max_steps > 1), the effective attack fraction in
+    # steady-state is p*E/(1+p*(E-1)) where p is the per-decision probability
+    # and E is the mean attack duration.  We invert that formula so that the
+    # user-facing parameter directly controls the fraction of attack steps:
+    #   p = fraction / (E - fraction*(E-1))
+    # For max_steps==1 every episode is a fresh decision so fraction==p.
+    target_fraction = max(0.0, min(float(attack_likely_init), max_attack_percentage))
+    if max_steps > 1:
+        mean_duration = (pct_short * _DURATION_STEPS[SHORT_ATTACK] +
+                         (1.0 - pct_short) * _DURATION_STEPS[LONG_ATTACK])
+        if mean_duration > 1.0 and target_fraction < 1.0:
+            denom = mean_duration - target_fraction * (mean_duration - 1.0)
+            attack_likely = min(1.0, target_fraction / denom) if denom > 0.0 else 1.0
+        else:
+            attack_likely = target_fraction
+        attack_likely = max(0.0, attack_likely)
+    else:
+        attack_likely = target_fraction
 
     steps = []
     global_step = 0
-    pct_short = 0.66
+
+    # Global attack state — at most one attacker and one victim at a time.
+    # No cooldown between attacks: attack_likely directly controls the
+    # probability of starting a new attack at each non-attack decision step,
+    # so the parameter is honoured as configured.
+    g_attacker  = None   # name of the host currently attacking
+    g_victim    = None   # name of the host being attacked
+    g_task_type = None   # SHORT_ATTACK or LONG_ATTACK
+    g_subtype   = None   # udp_flood / syn_flood / icmp_flood
+    g_remaining = 0      # steps still left in the current attack
 
     for episode in range(n_episodes):
+        # Stop any in-progress attack at each episode boundary so multi-step
+        # attacks do not bleed across episodes.
+        g_attacker  = None
+        g_victim    = None
+        g_task_type = None
+        g_subtype   = None
+        g_remaining = 0
+
         for episode_step in range(max_steps):
-            step = {
-                "step": global_step,
-                "episode": episode,
+            step_entry = {
+                "step":         global_step,
+                "episode":      episode,
                 "episode_step": episode_step,
             }
 
-            attacker_name = None
-            attacker_task_type = None
-            attacker_subtype = None
-            if host_names and random.random() < attack_likely:
-                attacker_name = random.choice(host_names)
-                if random.random() < pct_short:
-                    attacker_task_type = SHORT_ATTACK
-                else:
-                    attacker_task_type = LONG_ATTACK
-                attacker_subtype = random.choice(_ATTACK_SUBTYPES)
+            if g_remaining > 0:
+                # Ongoing attack — continue for one more step.
+                g_remaining -= 1
+            else:
+                # No active attack — start a new one with probability attack_likely.
+                g_attacker  = None
+                g_victim    = None
+                g_task_type = None
+                g_subtype   = None
 
+                if random.random() < attack_likely:
+                    g_attacker = random.choice(host_names)
+                    others     = [n for n in host_names if n != g_attacker]
+                    g_victim   = random.choice(others) if others else g_attacker
+                    g_task_type = (SHORT_ATTACK if random.random() < pct_short
+                                   else LONG_ATTACK)
+                    g_subtype   = random.choice(_ATTACK_SUBTYPES)
+                    # -1 because the current step already counts as step 1.
+                    g_remaining = _DURATION_STEPS[g_task_type] - 1
+
+            # Build per-host entries for this step.
             for name in host_names:
-                other_hosts = [n for n in host_names if n != name]
-                destination = random.choice(other_hosts) if other_hosts else None
-
-                if name == attacker_name:
-                    host_status = {
-                        "task_type": attacker_task_type,
-                        "traffic_type": "attack",
-                        "destination": destination,
-                        "attack_subtype": attacker_subtype,
+                others = [n for n in host_names if n != name]
+                if name == g_attacker:
+                    step_entry[name] = {
+                        "task_type":      g_task_type,
+                        "traffic_type":   "attack",
+                        "destination":    g_victim,
+                        "attack_subtype": g_subtype,
                     }
                 else:
-                    host_status = {
-                        "task_type": NORMAL,
+                    step_entry[name] = {
+                        "task_type":    NORMAL,
                         "traffic_type": random.choice(traffic_types),
-                        "destination": destination,
+                        "destination":  random.choice(others) if others else None,
                     }
 
-                step[name] = host_status
-
-            steps.append(step)
+            steps.append(step_entry)
             global_step += 1
 
     return steps
@@ -492,6 +543,9 @@ def generate_and_save_scenario(base_env,
     eval_stats["attack_likely_used"]  = attack_likely_eval
     train_stats["attack_likely_config"] = attack_likely_init
     eval_stats["attack_likely_config"]  = attack_likely_init
+    # Step-level attack series needed by the UI chart in the saved scenario popup
+    train_stats["attack_step_series"] = _build_attack_step_series(training_seq, host_names)
+    eval_stats["attack_step_series"]  = _build_attack_step_series(evaluation_seq, host_names)
 
     scenario = {
         "training":   training_seq,

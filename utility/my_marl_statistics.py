@@ -65,90 +65,118 @@ def plot_agent_cumulative_rewards(indicators, dir_name, title='', host=''):
 
 
 def plot_agent_execution_statuses(indicators, dir_name, title='', host=''):
-    """print all registered traffic normal or attack
+    """Plot per-episode aggregate traffic and prediction metrics.
+
+    Aggregates each episode into a single data point (mean traffic, attack
+    ratio, accuracy) instead of plotting every step, keeping memory usage
+    constant regardless of episode count or step count.
 
     Args:
-        indicators (_type_): List of dictionaries containing episode statuses.
-        dir_name (_type_): Directory name to save the plot.
-        title (str, optional): Title of the plot. Defaults to ''.
+        indicators: List of per-episode dicts with 'episode_statuses' lists.
+        dir_name:   Directory where the PNG is saved.
+        title:      Optional title prefix.
+        host:       'coordinator' uses packets/bytes keys; others use
+                    received_*/transmitted_* keys.
     """
-    # Extracting indicators to plot
-    all_steps_status =  []
-    n_steps = 0
+    episodes      = []
+    mean_pkt_a    = []   # TX packets (coordinator) or mean TX packets (host)
+    mean_pkt_b    = []   # — (coordinator) or mean RX packets (host)
+    mean_byt_a    = []
+    mean_byt_b    = []
+    attack_ratio  = []
+    accuracy      = []
+
+    def _scalar(v):
+        return float(v.item()) if hasattr(v, 'item') else float(v)
+
     for item in indicators:
-        for step_status in item['episode_statuses']:
-            n_steps += 1
-            step_status["step"] = n_steps 
-            all_steps_status.append(step_status)
+        ep_data = item.get('episode_statuses') or []
+        if not ep_data:
+            continue
 
-    steps = [item['step'] for item in all_steps_status]
-    if host=='coordinator':
-        packets = [item['packets'] for item in all_steps_status]
-        bytes = [item['bytes'] for item in all_steps_status]        
+        pkt_a_l, pkt_b_l, byt_a_l, byt_b_l, type_l, pred_l = [], [], [], [], [], []
+        for s in ep_data:
+            if host == 'coordinator':
+                pkt_a_l.append(_scalar(s.get('packets', 0)))
+                pkt_b_l.append(_scalar(s.get('packets', 0)))   # single series
+                byt_a_l.append(_scalar(s.get('bytes', 0)))
+                byt_b_l.append(_scalar(s.get('bytes', 0)))
+            else:
+                pkt_a_l.append(_scalar(s.get('transmitted_packets', 0)))
+                pkt_b_l.append(_scalar(s.get('received_packets',    0)))
+                byt_a_l.append(_scalar(s.get('transmitted_bytes',   0)))
+                byt_b_l.append(_scalar(s.get('received_bytes',      0)))
+            raw_id = s.get('id', 0)
+            type_l.append(int(raw_id[0]) if isinstance(raw_id, (list, tuple)) else int(raw_id))
+            pred_l.append(int(s.get('action_choosen', 0)))
+
+        types_arr = np.array(type_l, dtype=int)
+        pred_arr  = np.array(pred_l, dtype=int)
+
+        episodes.append(item.get('episode', len(episodes) + 1))
+        mean_pkt_a.append(float(np.mean(pkt_a_l)))
+        mean_pkt_b.append(float(np.mean(pkt_b_l)))
+        mean_byt_a.append(float(np.mean(byt_a_l)))
+        mean_byt_b.append(float(np.mean(byt_b_l)))
+        attack_ratio.append(float(np.mean(types_arr > 0)) * 100)
+        # action_choosen: 1 = correct action for MARL basic scenarios
+        accuracy.append(float(np.mean(pred_arr == 1)) * 100)
+
+    if not episodes:
+        return
+
+    ep = np.array(episodes)
+    fig, axs = plt.subplots(2, 2, figsize=(14, 8))
+
+    # ── [0,0] Packets per episode ──────────────────────────────────
+    axs[0][0].set_yscale("log")
+    if host == 'coordinator':
+        axs[0][0].plot(ep, mean_pkt_a, label='Mean Packets', color='purple', linewidth=1.5)
     else:
-        received_bytes = [item['received_bytes'].item() for item in all_steps_status]
-        received_packets = [item['received_packets'].item() for item in all_steps_status]
-        transmitted_bytes = [item['transmitted_bytes'].item() for item in all_steps_status]
-        transmitted_packets = [item['transmitted_packets'].item() for item in all_steps_status]
-    #message = [item['message'] for item in all_steps_status]
-    predictions = [item['action_choosen'] for item in all_steps_status]
-    types = [item['id'] for item in all_steps_status]
-    
-    # Create subplots for different indicators
-    x=10+5*int(n_steps/200)
-    y=10+int(n_steps/200)
-    fig, axs = plt.subplots(2, 2, figsize=(x, y))
+        axs[0][0].plot(ep, mean_pkt_a, label='Mean TX packets', color='purple', linewidth=1.5)
+        axs[0][0].plot(ep, mean_pkt_b, label='Mean RX packets', color='cyan',   linewidth=1.5)
+    axs[0][0].set_title(f'{title} Mean Packets per Episode')
+    axs[0][0].set_xlabel('Episode')
+    axs[0][0].set_ylabel('Mean packets (log scale)')
+    axs[0][0].legend()
+    axs[0][0].grid(True, alpha=0.3)
 
-    if host=='coordinator':
-        axs[0][0].set_yscale("log")
-        axs[0][0].plot(steps, packets, label='Packets', color='purple')
-        axs[0][0].set_title(f'{title} Packets')
-        axs[0][0].set_xlabel('Steps')
-        axs[0][0].set_ylabel('Log Scale Packet Traffic')    
-        axs[0][0].legend()  
-        
-        axs[0][1].set_yscale("log")
-        axs[0][1].plot(steps, bytes, label='Bytes', color='royalblue')
-        axs[0][1].set_title(f'{title} Bytes')
-        axs[0][1].set_xlabel('Steps')
-        axs[0][1].set_ylabel('Log Scale Bytes Traffic')    
-        axs[0][1].legend()        
+    # ── [0,1] Bytes per episode ────────────────────────────────────
+    axs[0][1].set_yscale("log")
+    if host == 'coordinator':
+        axs[0][1].plot(ep, mean_byt_a, label='Mean Bytes', color='royalblue', linewidth=1.5)
     else:
-        axs[0][0].set_yscale("log")
-        axs[0][0].plot(steps, transmitted_packets, label='TX packets', color='purple')
-        axs[0][0].plot(steps, received_packets, label='RX packets', color='cyan')
-        axs[0][0].set_title(f'{title} TX-RX Packets')
-        axs[0][0].set_xlabel('Steps')
-        axs[0][0].set_ylabel('Log Scale Packet Traffic')    
-        axs[0][0].legend()  
-        
-        axs[0][1].set_yscale("log")
-        axs[0][1].plot(steps, transmitted_bytes, label='TX bytes', color='royalblue')
-        axs[0][1].plot(steps, received_bytes, label='RX bytes', color='green')
-        axs[0][1].set_title(f'{title} TX-RX Bytes')
-        axs[0][1].set_xlabel('Steps')
-        axs[0][1].set_ylabel('Log Scale Bytes Traffic')    
-        axs[0][1].legend()   
+        axs[0][1].plot(ep, mean_byt_a, label='Mean TX bytes', color='royalblue', linewidth=1.5)
+        axs[0][1].plot(ep, mean_byt_b, label='Mean RX bytes', color='green',     linewidth=1.5)
+    axs[0][1].set_title(f'{title} Mean Bytes per Episode')
+    axs[0][1].set_xlabel('Episode')
+    axs[0][1].set_ylabel('Mean bytes (log scale)')
+    axs[0][1].legend()
+    axs[0][1].grid(True, alpha=0.3)
 
-    colors = get_colors_for_types(types)    
-    legend_patches_types = get_legend_labels_for_types()
-    axs[1][0].scatter(steps, types, label='Types', c=colors, s=3)
-    axs[1][0].set_title(f'{title} - Event Types')
-    axs[1][0].set_xlabel('Steps')
-    axs[1][0].set_ylabel('Type')      
-    axs[1][0].legend(handles=legend_patches_types, loc='lower left')     
-    
-    colors = get_colors_for_predictions(predictions) 
-    legend_patches_predictions = get_legend_labels_for_predictions()
-    axs[1][1].scatter(steps, predictions, label='Predictions', c=colors, s=3)
-    axs[1][1].legend(handles=legend_patches_predictions, loc='center')
-    axs[1][1].set_title(f'{title} - Correct/Wrong Predictions')
-    axs[1][1].set_xlabel('Steps')
-    axs[1][1].set_ylabel('Prediction')
-    
-    # Save figure
-    plt.savefig(f"{dir_name}/episode_statuses_{host}.png")
-    plt.close()   
+    # ── [1,0] Attack ratio per episode ────────────────────────────
+    axs[1][0].plot(ep, attack_ratio, color='orange', linewidth=1.5, label='% attack steps')
+    axs[1][0].fill_between(ep, attack_ratio, alpha=0.15, color='orange')
+    axs[1][0].set_ylim(0, 105)
+    axs[1][0].set_title(f'{title} Attack Ratio per Episode')
+    axs[1][0].set_xlabel('Episode')
+    axs[1][0].set_ylabel('% steps with attack label')
+    axs[1][0].legend()
+    axs[1][0].grid(True, alpha=0.3)
+
+    # ── [1,1] Prediction accuracy per episode ─────────────────────
+    axs[1][1].plot(ep, accuracy, color='green', linewidth=1.5, label='Accuracy %')
+    axs[1][1].fill_between(ep, accuracy, alpha=0.15, color='green')
+    axs[1][1].set_ylim(0, 105)
+    axs[1][1].set_title(f'{title} Prediction Accuracy per Episode')
+    axs[1][1].set_xlabel('Episode')
+    axs[1][1].set_ylabel('Accuracy (%)')
+    axs[1][1].legend()
+    axs[1][1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/episode_statuses_{host}.png", dpi=100)
+    plt.close()
     
 def plot_agent_execution_traffic_types(indicators, dir_name, title=''):
     """print all registered traffic types for classification
@@ -174,8 +202,8 @@ def plot_agent_execution_traffic_types(indicators, dir_name, title=''):
     #types = [item['id'] for item in all_steps_status]
     
     # Create subplots for different indicators
-    x=10+3*int(n_steps/200)
-    y=10+int(n_steps/200)
+    x = min(60, 10 + 3 * int(n_steps / 200))
+    y = min(30, 10 + int(n_steps / 200))
     fig, axs = plt.subplots(3, 1, figsize=(x, y))
 
     axs[0].set_yscale("log")

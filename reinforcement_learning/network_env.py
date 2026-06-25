@@ -9,7 +9,7 @@ from utility.my_log import notify_client, set_log_level, information, debug, err
 from utility.params import Params
 from utility.constants import LONG_ATTACK, NORMAL, SHORT_ATTACK, HostStatus, GYM_TYPE, ATTACKS, SystemLevels
 from colorama import Fore
-import json as jsonlib, time, gymnasium as gym, numpy as np
+import json as jsonlib, time, threading, gymnasium as gym, numpy as np
 from gymnasium import spaces
 from abc import ABC, abstractmethod
 
@@ -26,18 +26,19 @@ class NetworkEnv(gym.Env, ABC):
                 
         self.data_traffic_file = params.data_traffic_file
         self.set_gym_type(params.gym_type)
-        self.stop_update_event = None
+        self.stop_update_event = threading.Event()
         
         # Network creation
         self.net = existing_net
         
         # New conditional logic
-        if self.net is None:  
+        if self.net is None:
             from_dataset = [constants.GYM_TYPE[constants.CLASSIFICATION_FROM_DATASET],
                             constants.GYM_TYPE[constants.ATTACKS_FROM_DATASET],
-                            constants.GYM_TYPE[constants.MARL_ATTACKS_FROM_DATASET]]      
+                            constants.GYM_TYPE[constants.MARL_ATTACKS_FROM_DATASET],
+                            constants.GYM_TYPE[constants.MARL_PZ_FROM_DATASET]]
             self.net = create_network(params.net_params, server_user) if self.gym_type not in from_dataset else self.create_empty(params.net_params)
-            self.n_hosts = len(self.net.hosts) 
+        self.n_hosts = len(self.net.hosts)
         self.generated_traffic_type = -1
         
         # Define action and observation space, gym.spaces objects

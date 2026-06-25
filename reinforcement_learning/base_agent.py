@@ -301,24 +301,37 @@ class BaseAgent(ABC):
                     'bytesPercentageChange':   float(status['bytes_percentage_change']),
                 })
         elif self.env.gym_type == GYM_TYPE[ATTACKS_HO]:
+            ho_st = infos.get('status', {})
             step_data['host'] = infos.get('host_name', 'unknown')
             step_data.update({
                 'receivedPackets':
-                    int(infos['status'].get('received_packets', 0)),
+                    int(ho_st.get('received_packets', 0)),
                 'receivedPacketsPercentageChange':
-                    float(infos['status'].get('received_packets_percentage_change', 0)),
+                    float(ho_st.get('received_packets_percentage_change', 0)),
                 'receivedBytes':
-                    int(infos['status'].get('received_bytes', 0)),
+                    int(ho_st.get('received_bytes', 0)),
                 'receivedBytesPercentageChange':
-                    float(infos['status'].get('received_bytes_percentage_change', 0)),
+                    float(ho_st.get('received_bytes_percentage_change', 0)),
                 'transmittedPackets':
-                    int(infos['status'].get('transmitted_packets', 0)),
+                    int(ho_st.get('transmitted_packets', 0)),
                 'transmittedPacketsPercentageChange':
-                    float(infos['status'].get('transmitted_packets_percentage_change', 0)),
+                    float(ho_st.get('transmitted_packets_percentage_change', 0)),
                 'transmittedBytes':
-                    int(infos['status'].get('transmitted_bytes', 0)),
+                    int(ho_st.get('transmitted_bytes', 0)),
                 'transmittedBytesPercentageChange':
-                    float(infos['status'].get('transmitted_bytes_percentage_change', 0)),
+                    float(ho_st.get('transmitted_bytes_percentage_change', 0)),
+            })
+            status.update({
+                'id':     ho_st.get('id', status.get('id')),
+                'status': ho_st.get('status', status.get('status')),
+                'received_packets':                    ho_st.get('received_packets', 0),
+                'received_bytes':                      ho_st.get('received_bytes', 0),
+                'received_packets_percentage_change':  ho_st.get('received_packets_percentage_change', 0),
+                'received_bytes_percentage_change':    ho_st.get('received_bytes_percentage_change', 0),
+                'transmitted_packets':                 ho_st.get('transmitted_packets', 0),
+                'transmitted_bytes':                   ho_st.get('transmitted_bytes', 0),
+                'transmitted_packets_percentage_change': ho_st.get('transmitted_packets_percentage_change', 0),
+                'transmitted_bytes_percentage_change':   ho_st.get('transmitted_bytes_percentage_change', 0),
             })
         else:
             step_data['host'] = "single_agent"

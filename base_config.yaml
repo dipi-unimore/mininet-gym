@@ -19,36 +19,10 @@ env_params:
   max_steps: 120  #Max number of steps per episode
   test_episodes: 180 #Number of episodes to test the agent
   wait_after_read: 1  
-  #attack environment
-  attacks:
-    likely: 0.35 #likelihood that one host attacks (0-max_attack_percentage). necessary only with gym_type=attacks
-    likely_train: 0.9 #(For ATTACKS_HO only) likelihood of attack during training episodes. Range: 0.0-1.0 (default 0.9). High value = frequent attacks during training for agent learning
-    likely_eval: 0.3 #(For ATTACKS_HO only) likelihood of attack during evaluation/test episodes. Range: 0.0-1.0 (default 0.3). Lower value = sparse attacks for realistic testing
-    max_attack_percentage: 0.9 #max probability cap for attack_likely (range 0.0-1.0, default 0.5). Set to 0.9 for 90% attack frequency
-    # NOTE: For ATTACKS_HO (per-host scenario), these timings control attack distribution:
-    # - short_attack_duration: steps that a SHORT_ATTACK lasts (default 5)
-    # - long_attack_duration: steps that a LONG_ATTACK lasts (default 30)
-    # - no_attack_timeout: delay (steps) between any two attacks on a host (default 15)
-    # Reduce timeouts to increase attack frequency; adjust durations for more/less sustained attacks
-    short_attack_duration: 5  # null = use default (5). Range: 2-10 for short spikes
-    long_attack_duration: 25   # null = use default (30). Range: 10-60 for sustained attacks
-    no_attack_timeout: 5      # null = use default (15). Range: 5-30 to control attack density
-    # Link unblock policy (ATTACKS_HO):
-    # - unblock_min_hold_rounds: minimum full rounds to keep link blocked
-    # - unblock_required_normal_streak: consecutive NORMAL decisions required while blocked
-    unblock_min_hold_rounds: 2
-    unblock_required_normal_streak: 2
-    thresholds:      
-      packets: 22000 #200000 packets are an UDP an attack. This is multiply for number of hosts to obtain the high value of bins
-      var_packets: 50 #percentage packet variation 
-      bytes: 423000000 #4230000 # the bytes are not important to determinate an attack (only packets with hping3 --flood --udp) this is abnormal traffic. This is multiply for number of hosts to obtain the high value of bins
-      var_bytes: 30 #percentage byte variation 
-  classification:
-    thresholds:
-      packets: 200 
-      bytes: 1000000
-      var_packets: 100
-      var_bytes: 100
+
+  #scenario parameters
+  #from the corrispondent scenario_en_params.yaml
+
   #network environment
   net_params:
     start_cli: False

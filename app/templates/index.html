@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="cyber">
 
 <head>
     <meta charset="UTF-8">
@@ -9,74 +9,63 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Use Inter font -->
     <link href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet">
+    <script>(function(){try{if(localStorage.getItem('theme')==='light')document.documentElement.removeAttribute('data-theme');}catch(_){}})()</script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 
 <body class="min-h-screen p-1 md:p-2">
     <!-- Header -->
-    <header class="bg-gray-500 shadow-xl rounded-xl p-1 mb-2 sticky top-0 z-10">
-        <div class="grid grid-cols-[1fr_auto_1fr] items-center md:flex md:flex-row md:justify-between">
-            <h1 class="text-1xl font-extrabold text-red-700 justify-self-start"><span
-                    class="text-white text-3xl"><a href="{{ url_for('static', filename='video.html') }}" target="_blank">MininetGym</a></span> UI
-                Manager</h1>
-            <div class="my-1 md:my-0 justify-self-center">
-                <div class="text-white text-xl font-bold">
-                    <a href="{{ url_for('static', filename='screensaver.html') }}" target="_blank" class="flex items-center gap-2">
-                        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="MininetGym Logo" width="90">
-                    </a>
-                </div>
-            </div>
+    <header class="cy-header sticky top-0 z-10 mb-2 px-4 py-2 rounded-xl">
+        <div class="flex items-center justify-between gap-3">
+
+            <a href="{{ url_for('static', filename='video.html') }}" target="_blank" class="cy-logo-link flex items-center gap-2 shrink-0">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="MininetGym" class="h-9 w-auto">
+                <span class="cy-title hidden sm:block">
+                    <span class="cy-title-main">MininetGym</span>
+                    <span class="cy-title-sub">UI Manager</span>
+                </span>
+            </a>
 
             <button id="mobile-nav-toggle" type="button"
-                class="md:hidden justify-self-end px-3 py-2 rounded-lg bg-gray-200 text-white font-semibold shadow-md hover:bg-blue-700 transition duration-200"
+                class="md:hidden p-2 rounded-lg cy-btn-ghost"
                 aria-controls="mobile-nav-toast" aria-expanded="false">
-                <img src="{{ url_for('static', filename='images/icon/menu.png') }}" alt="Menu" title="Menu"
-                    class="inline-block w-6 h-6">
+                <img src="{{ url_for('static', filename='images/icon/menu.png') }}" alt="Menu" class="w-6 h-6 invert opacity-80">
             </button>
 
             <!-- Navigation Links (desktop) -->
-            <nav class="hidden md:flex space-x-4 mt-3 md:mt-0 md:mr-3" id="main-nav">
-                <button id="nav-config" onclick="navigateTo('config')" title="Configuration Setup"
-                    class="font-semibold text-white px-4 py-2 rounded-lg transition duration-200 bg-blue-600 hover:bg-blue-700 shadow-md">
-                    Configuration Setup
+            <nav class="hidden md:flex items-center gap-1" id="main-nav">
+                <button id="nav-config" onclick="navigateTo('config')" class="cy-nav-btn" data-nav="config">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    Config
                 </button>
-                <button id="nav-training" onclick="navigateTo('training')" title="Training Dashboard"
-                    class="font-semibold px-4 py-2 rounded-lg transition duration-200 text-gray-600 bg-gray-200 hover:bg-gray-300 shadow-md">
-                    Training Dashboard
+                <button id="nav-training" onclick="navigateTo('training')" class="cy-nav-btn" data-nav="training">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2"></path></svg>
+                    Training
                 </button>
-                <button id="nav-results" onclick="navigateTo('results')" title="Results Panel"
-                    class="font-semibold px-4 py-2 rounded-lg transition duration-200 text-green-600 bg-gray-200 hover:bg-gray-300 shadow-md">
-                    Results Panel
+                <button id="nav-results" onclick="navigateTo('results')" class="cy-nav-btn" data-nav="results">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    Results
                 </button>
-                <button id="nav-manual" onclick="openManual()" title="User Manual"
-                    class="font-semibold px-4 py-2 rounded-lg transition duration-200 text-orange-700 bg-orange-200 hover:bg-orange-300 shadow-md border border-orange-200 inline-flex items-center gap-2">
-                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full border-2 border-orange-600 font-bold text-xs flex-shrink-0">?</span>
+                <div class="w-px h-5 bg-white/10 mx-1"></div>
+                <button id="theme-toggle-btn" onclick="toggleTheme()" class="cy-theme-toggle" title="Toggle light/dark theme">
+                    <span id="theme-icon"></span>
+                </button>
+                <button id="nav-manual" onclick="openManual()" class="cy-nav-btn cy-nav-help">
+                    <span class="font-bold text-xs">?</span>
+                    Manual
                 </button>
             </nav>
         </div>
     </header>
 
     <div id="mobile-nav-toast"
-        class="hidden md:hidden fixed top-20 left-2 right-2 z-30 bg-white border border-gray-200 rounded-xl shadow-2xl p-2">
-        <div class="grid grid-cols-1 gap-2">
-            <button id="nav-config-mobile" data-page="config" type="button"
-                class="w-full text-left px-3 py-2 rounded-lg transition duration-200 bg-blue-600 text-white font-semibold">
-                Configuration Setup
-            </button>
-            <button id="nav-training-mobile" data-page="training" type="button"
-                class="w-full text-left px-3 py-2 rounded-lg transition duration-200 bg-gray-200 text-gray-600 font-semibold">
-                Training Dashboard
-            </button>
-            <button id="nav-results-mobile" data-page="results" type="button"
-                class="w-full text-left px-3 py-2 rounded-lg transition duration-200 bg-gray-200 text-gray-600 font-semibold">
-                Results Panel
-            </button>
-            <button type="button" onclick="openManual()"
-                class="w-full text-left px-3 py-2 rounded-lg transition duration-200 bg-orange-200 text-orange-700 font-semibold border border-orange-200 flex items-center gap-2">
-                <span class="inline-flex items-center justify-center w-5 h-5 rounded-full border-2 border-orange-600 font-bold text-xs flex-shrink-0">?</span>
-                User Manual
-            </button>
+        class="hidden md:hidden fixed top-16 left-2 right-2 z-30 cy-card rounded-xl shadow-2xl p-3">
+        <div class="grid grid-cols-1 gap-1.5">
+            <button id="nav-config-mobile" data-page="config" type="button" class="cy-nav-btn w-full text-left">Configuration Setup</button>
+            <button id="nav-training-mobile" data-page="training" type="button" class="cy-nav-btn w-full text-left">Training Dashboard</button>
+            <button id="nav-results-mobile" data-page="results" type="button" class="cy-nav-btn w-full text-left">Results Panel</button>
+            <button type="button" onclick="openManual()" class="cy-nav-btn cy-nav-help w-full text-left">User Manual</button>
         </div>
     </div>
 
@@ -97,128 +86,149 @@
         <!-- ============================================== -->
         <!-- 1. CONFIGURATION PAGE -->
         <!-- ============================================== -->
-        <div id="config-page" class="space-y-2">
-            <!-- Management Buttons -->
-            <div
-                class="bg-white p-1 rounded-xl shadow-xl flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0 sm:space-x-4">
-                <h2 class="text-2xl font-bold text-gray-800">Configuration<img
-                        src="{{ url_for('static', filename='images/gif/web-settings.gif') }}" alt="Configuration page"
-                        title="Configuration page" class="inline-block w-6 h-6 ml-2"></h2>
-                <div class="flex space-x-3">
+        <div id="config-page" class="space-y-3">
+
+            <!-- Header bar -->
+            <div class="bg-white px-4 py-2 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-center gap-3 border border-gray-100">
+                <h2 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <img src="{{ url_for('static', filename='images/gif/web-settings.gif') }}" alt="Configuration" class="w-6 h-6">
+                    Configuration
+                </h2>
+                <div class="flex gap-2">
                     <button id="save-config-btn"
-                        class="px-3 py-1 bg-green-500 text-white font-bold rounded-lg hover:bg-green-600 transition duration-150 shadow-lg">
-                        <!-- <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                            xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M8 7H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4">
-                            </path>
-                        </svg> -->
-                        <img src="{{ url_for('static', filename='images/gif/floppy-disc.gif') }}" alt="Configuration"
-                            title="Configuration" class="inline-block w-6 h-6  rounded">
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors">
+                        <img src="{{ url_for('static', filename='images/gif/floppy-disc.gif') }}" class="w-5 h-5 rounded">
                         Save
                     </button>
                     <button id="load-configs-btn"
-                        class="px-3 py-1 bg-indigo-500 text-white font-bold rounded-lg hover:bg-indigo-600 transition duration-150 shadow-lg">
-                        <img src="{{ url_for('static', filename='images/gif/work-in-progress.gif') }}"
-                            alt="Load Configurations (Future)" title="Load Configurations (Future)"
-                            class="inline-block w-6 h-6  rounded">
-                        <!-- <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                            xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 0020 12a8 8 0 00-15.356-2m15.356 2H20v-5"></path>
-                        </svg> -->
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors">
+                        <img src="{{ url_for('static', filename='images/gif/work-in-progress.gif') }}" class="w-5 h-5 rounded">
                         Load
                     </button>
                 </div>
             </div>
 
-            <!-- Configuration Sections -->
-            <div class="grid grid-cols-1 lg:grid-cols-1 gap-1">
+            <!-- Tabbed config card -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
 
-                <!-- General (Root) Parameters -->
-                <details close class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
-                    <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4 cursor-pointer">
-                        <img src="{{ url_for('static', filename='images/gif/settings.gif') }}" alt="Parameters (Root)"
-                            title="Parameters (Root)" class="inline-block w-6 h-6 ml-2">General
-                    </summary>
-                    <div id="general-config-list" class="grid grid-cols-1 md:grid-cols-5 gap-2">
-                        <!-- Dynamic inputs for root keys will be rendered here -->
-                    </div>
-                </details>
+                <!-- Tab bar -->
+                <div class="flex border-b border-gray-200 bg-gray-50/70">
+                    <button class="config-tab" data-tab="general">
+                        <img src="{{ url_for('static', filename='images/gif/settings.gif') }}" class="w-4 h-4">
+                        General
+                    </button>
+                    <button class="config-tab" data-tab="env">
+                        <img src="{{ url_for('static', filename='images/gif/earth.gif') }}" class="w-4 h-4">
+                        Environment
+                    </button>
+                    <button class="config-tab" data-tab="agents">
+                        <img src="{{ url_for('static', filename='images/gif/manager.gif') }}" class="w-4 h-4">
+                        Agents
+                        <span class="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full leading-none"><span id="agents_enabled">0</span></span>
+                    </button>
+                </div>
 
-                <!-- Environment Parameters -->
-                <details open class="lg:col-span-2 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
-                    <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4  cursor-pointer">
-                        <img src="{{ url_for('static', filename='images/gif/earth.gif') }}"
-                            alt="Parameters (`env_params`)" title="Parameters (`env_params`)"
-                            class="inline-block w-6 h-6 ml-2">Environment
-                    </summary>
-                    <div id="env-params-config-list" class="grid grid-cols-1 md:grid-cols-5 gap-2">
-                        <!-- Dynamic inputs for env_params will be rendered here -->
-                    </div>
-                    <div id="env-extra-selectors"></div>
-                </details>
+                <!-- Tab panels -->
+                <div class="p-4">
 
-            </div>
-
-            <!-- Agents Configuration -->
-            <div class="bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
-                <details>
-                    <summary class="text-xl font-bold text-gray-700 border-b pb-2 mb-4 cursor-pointer">
-                        <div class="flex items-center flex-wrap gap-y-1">
-                            <img src="{{ url_for('static', filename='images/gif/manager.gif') }}"
-                                alt="Parameters (`agents`)" title="Parameters (`agents`)"
-                                class="inline-block w-6 h-6 ml-2">
-                            Agents <small class="whitespace-nowrap">(<span id="agents_enabled">0</span> enabled)</small>
-                            <div id="agents-management-buttons" class="flex flex-wrap gap-1 items-center ml-auto text-sm">
-                                <select id="add-agent-algo-select"
-                                    class="px-2 py-1 bg-white border border-blue-300 text-gray-700 rounded-lg text-sm shadow-md focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                    title="Algorithm for new agent">
-                                    <option value="DQN">DQN</option>
-                                    <option value="PPO">PPO</option>
-                                    <option value="A2C">A2C</option>
-                                    <option value="Q-Learning">Q-Learning</option>
-                                    <option value="SARSA">SARSA</option>
-                                    <option value="Supervised">Supervised</option>
-                                </select>
-                                <button id="add-agent-btn"
-                                    class="px-2 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition duration-150 flex items-center shadow-md"
-                                    title="Add New Agent">
-                                    <svg class="w-4 h-4 sm:mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                                        xmlns="http://www.w3.org/2000/svg">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                    <span class="hidden sm:inline">Add Agent</span>
-                                </button>
-                                <button id="select-all-agents-btn"
-                                    class="px-2 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition duration-150 flex items-center shadow-md"
-                                    title="Select All Agents">
-                                    <svg class="w-4 h-4 sm:mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                                        xmlns="http://www.w3.org/2000/svg">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M5 13l4 4L19 7"></path>
-                                    </svg>
-                                    <span class="hidden sm:inline">Select All</span>
-                                </button>
-                                <button id="deselect-all-agents-btn"
-                                    class="px-2 py-1 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition duration-150 flex items-center shadow-md"
-                                    title="Deselect All Agents">
-                                    <svg class="w-4 h-4 sm:mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                                        xmlns="http://www.w3.org/2000/svg">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"></path>
-                                    </svg>
-                                    <span class="hidden sm:inline">Deselect All</span>
-                                </button>
-                            </div>
+                    <!-- General tab -->
+                    <div id="tab-general" class="config-tab-panel">
+                        <div id="general-config-list" class="grid grid-cols-1 md:grid-cols-5 gap-3">
                         </div>
-                    </summary>
-                    <div id="agents-list" class="space-y-4">
-                        <!-- Dynamic agent cards will be rendered here -->
                     </div>
-                </details>
 
+                    <!-- Environment tab -->
+                    <div id="tab-env" class="config-tab-panel hidden">
+                        <!-- Env sub-tab bar -->
+                        <div class="env-sub-tab-bar flex flex-wrap border-b border-gray-200 mb-3">
+                            <button class="env-sub-tab" data-env-tab="general">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+                                General
+                            </button>
+                            <button class="env-sub-tab" data-env-tab="scenario">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                                Scenario <span id="env-scenario-tab-label" class="env-sub-tab-note"></span>
+                            </button>
+                            <button class="env-sub-tab" data-env-tab="network">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                Network
+                            </button>
+                            <button class="env-sub-tab env-subtab-extra hidden" data-env-tab="extra">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                                Extra
+                            </button>
+                            <button class="env-sub-tab env-subtab-dataset hidden" data-env-tab="dataset">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+                                Dataset
+                            </button>
+                        </div>
+                        <!-- General: flat scalar env fields -->
+                        <div id="env-sub-general" class="env-sub-panel">
+                            <div id="env-params-config-list" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
+                        </div>
+                        <!-- Scenario: attacks / classification -->
+                        <div id="env-sub-scenario" class="env-sub-panel hidden">
+                            <div id="env-scenario-list" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
+                        </div>
+                        <!-- Network: net_params -->
+                        <div id="env-sub-network" class="env-sub-panel hidden">
+                            <div id="env-network-list" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
+                        </div>
+                        <!-- Extra: scenario generation/loading (attacks_ho / marl) -->
+                        <div id="env-sub-extra" class="env-sub-panel hidden">
+                            <div id="env-extra-selectors"></div>
+                        </div>
+                        <!-- Dataset: from_dataset scenarios -->
+                        <div id="env-sub-dataset" class="env-sub-panel hidden">
+                            <div id="env-dataset-selectors"></div>
+                        </div>
+                    </div>
+
+                    <!-- Agents tab -->
+                    <div id="tab-agents" class="config-tab-panel hidden">
+                        <div id="agents-management-buttons" class="flex flex-wrap gap-2 items-center mb-4 pb-3 border-b border-gray-100">
+                            <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-1">Add:</span>
+                            <select id="add-agent-algo-select"
+                                class="px-2 py-1 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                                title="Algorithm for new agent">
+                                <option value="DQN">DQN</option>
+                                <option value="PPO">PPO</option>
+                                <option value="A2C">A2C</option>
+                                <option value="Q-Learning">Q-Learning</option>
+                                <option value="SARSA">SARSA</option>
+                                <option value="Supervised">Supervised</option>
+                            </select>
+                            <button id="add-agent-btn"
+                                class="inline-flex items-center gap-1 px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg transition-colors shadow-sm"
+                                title="Add New Agent">
+                                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <span class="hidden sm:inline">Add Agent</span>
+                            </button>
+                            <div class="w-px h-5 bg-gray-200 mx-1"></div>
+                            <button id="select-all-agents-btn"
+                                class="inline-flex items-center gap-1 px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white text-sm rounded-lg transition-colors shadow-sm"
+                                title="Select All Agents">
+                                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                <span class="hidden sm:inline">Select All</span>
+                            </button>
+                            <button id="deselect-all-agents-btn"
+                                class="inline-flex items-center gap-1 px-3 py-1 bg-gray-400 hover:bg-gray-500 text-white text-sm rounded-lg transition-colors shadow-sm"
+                                title="Deselect All Agents">
+                                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                <span class="hidden sm:inline">Deselect All</span>
+                            </button>
+                        </div>
+                        <div id="agents-tab-bar" class="flex flex-wrap border-b border-gray-200 mb-3 min-h-[2px]"></div>
+                        <div id="agents-list"></div>
+                    </div>
+
+                </div>
             </div>
         </div>
 
@@ -486,9 +496,10 @@
             <h3 class="text-xl font-bold mb-4">Choose Model Directory</h3>
             <input type="hidden" id="model-dir-id">
 
-            <div class="grid grid-cols-2 font-bold border-b">
+            <div class="grid grid-cols-3 font-bold border-b">
                 <span id="sort-date" class="cursor-pointer hover:text-blue-500">Date</span>
                 <span id="sort-accuracy" class="cursor-pointer hover:text-blue-500">Accuracy</span>
+                <span>Bins</span>
             </div>
 
             <div class="h-96 overflow-y-scroll gap-6">

@@ -29,12 +29,17 @@ from utility.network_configurator import (
 )
 from utility.params import Params
 
-from .constants import AGENT_ACTIONS, REWARDS
+from .constants import AGENT_ACTIONS, REWARDS, HOST_STATUS_ID_MAPPING
 from .instant_state import InstantState
 
 
 def discretize_attack_detect_ho_state(state, low, high, n_bins):
-    """Discretize one per-host ATTACKS_HO state slice using env rules."""
+    """Discretize one per-host ATTACKS_HO state slice using env rules.
+
+    Handles both the full 8-feature state (counters + percentage variations)
+    and the compact 4-feature state (counters only: RX pkts, RX bytes,
+    TX pkts, TX bytes) produced when include_percentage_variations=False.
+    """
     if state is None:
         return tuple()
 
@@ -45,10 +50,17 @@ def discretize_attack_detect_ho_state(state, low, high, n_bins):
     high = np.asarray(high, dtype=np.float32)
     n_bins = max(2, int(n_bins))
 
-    discrete_state = []
-    counter_indices = {0, 2, 4, 6}
-    variation_indices = {1, 3, 5, 7}
+    n_features = len(state)
+    if n_features == 4:
+        # Compact mode: all features are counters (log-bin)
+        counter_indices = {0, 1, 2, 3}
+        variation_indices: set = set()
+    else:
+        # Full 8-feature mode
+        counter_indices = {0, 2, 4, 6}
+        variation_indices = {1, 3, 5, 7}
 
+    discrete_state = []
     for i, val in enumerate(state):
         if i in variation_indices:
             bin_index = get_linear_bin_index(val, low[i], high[i], n_bins - 1) + 1
@@ -87,6 +99,7 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
         _pool_size = (getattr(params.net_params, 'num_hosts', 5)
                       + getattr(params.net_params, 'num_iots', 0) + 2)
         self._traffic_executor = ThreadPoolExecutor(max_workers=_pool_size, thread_name_prefix="traffic")
+        self._host_futures: dict = {}   # last submitted Future per host name
         self.hosts = self.net.hosts  # Access hosts from the parent class's network
         self.status_links = [True for _ in self.hosts]  # Initially, all links are up
         # Network params
@@ -97,37 +110,39 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
         # Observation includes per-host statistics
         self.num_hosts = len(self.net.hosts)
 
-        # Per-host features: [RX_packets, ΔRX_packets, RX_bytes, ΔRX_bytes,
-        #                      TX_packets, ΔTX_packets, TX_bytes, ΔTX_bytes]
-        per_host_features = 8  # 4 base + 4 deltas
-        single_host_low = np.array([
-            0, -self.threshold_var_packets,
-            0, -self.threshold_var_bytes,
-            0, -self.threshold_var_packets,
-            0, -self.threshold_var_bytes,
-        ])
-        single_host_high = np.array([
-            self.threshold_packets,
-            self.threshold_var_packets,
-            self.threshold_bytes,
-            self.threshold_var_bytes,
-            self.threshold_packets,
-            self.threshold_var_packets,
-            self.threshold_bytes,
-            self.threshold_var_bytes,
-        ])
+        # Whether to include percentage-variation features in the observation.
+        # True  → shape (8,): [RX_pkts, ΔRX_pkts%, RX_bytes, ΔRX_bytes%,
+        #                       TX_pkts, ΔTX_pkts%, TX_bytes, ΔTX_bytes%]
+        # False → shape (4,): [RX_pkts, RX_bytes, TX_pkts, TX_bytes]
+        self._include_pct_var = bool(
+            getattr(params.attacks, 'include_percentage_variations', True)
+        )
 
-        # ── Modified: low/high are single-host shape (8,) ─────────────────
-        # The PerHostScanWrapper uses env.low/env.high to build its
-        # observation_space and to normalise slices — they must be (8,).
-        # The full N*8 flat state is still available via global_state.state.
-        self.low  = single_host_low   # shape (8,)
-        self.high = single_host_high  # shape (8,)
+        if self._include_pct_var:
+            per_host_features = 8
+            self.low = np.array([
+                0, -self.threshold_var_packets,
+                0, -self.threshold_var_bytes,
+                0, -self.threshold_var_packets,
+                0, -self.threshold_var_bytes,
+            ], dtype=np.float32)
+            self.high = np.array([
+                self.threshold_packets, self.threshold_var_packets,
+                self.threshold_bytes,   self.threshold_var_bytes,
+                self.threshold_packets, self.threshold_var_packets,
+                self.threshold_bytes,   self.threshold_var_bytes,
+            ], dtype=np.float32)
+        else:
+            per_host_features = 4
+            self.low = np.array([0, 0, 0, 0], dtype=np.float32)
+            self.high = np.array([
+                self.threshold_packets, self.threshold_bytes,
+                self.threshold_packets, self.threshold_bytes,
+            ], dtype=np.float32)
 
-        # Define action and observation space
-        # ── Modified: single-host spaces ──────────────────────────────────
-        # The PerHostScanWrapper overrides these with the same values, but
-        # setting them here keeps the base env self-consistent.
+        # Define action and observation space (single-host).
+        # PerHostScanWrapper overrides these, but keeping them here
+        # makes the base env self-consistent.
         self.observation_space = spaces.Box(
             low=self.low,
             high=self.high,
@@ -321,9 +336,17 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
             if destination is None or traffic_type == "none":
                 continue
 
-            # Submit to bounded pool — reuses worker threads, no OS thread explosion
+            # Skip if the previous task for this host is still running or queued.
+            # For normal traffic (iperf 1-5 s) this avoids stacking multiple iperf
+            # runs; the existing traffic keeps flowing so the OVS counter is correct.
+            # For attacks (future completes in ~0.6 s) the check almost never fires,
+            # so each step still submits a fresh 1 s hping3 burst.
+            prev = self._host_futures.get(host.name)
+            if prev is not None and not prev.done():
+                continue
+
             if task_type == NORMAL:
-                self._traffic_executor.submit(
+                self._host_futures[host.name] = self._traffic_executor.submit(
                     _generate_normal_traffic_once,
                     host, destination, traffic_type, 1.0,
                 )
@@ -332,7 +355,7 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
                 attack_type = _name_to_attack_type(
                     plan.get("attack_subtype", "udp_flood")
                 )
-                self._traffic_executor.submit(
+                self._host_futures[host.name] = self._traffic_executor.submit(
                     _launch_attack_once,
                     host, destination, attack_type, 1.0,
                 )
@@ -356,9 +379,16 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
 
     def evaluate_traffic(self):
         statuses, _ = self.update_hosts_status()
-        for host_index, host in enumerate(self.hosts):
-            if not self.status_links[host_index] and statuses.get(host.name) == HostStatus.ATTACKING:
-                statuses[host.name] = HostStatus.OUT_ATTACK_BLOCKED
+        # Only remap ATTACKING→OUT_ATTACK_BLOCKED when drop rules are actually
+        # being applied.  With apply_drop_rules=False the link is not really
+        # blocked in the network, so the ground-truth label stays ATTACKING.
+        apply_drop_rules = getattr(
+            getattr(self.params, 'attacks', None), 'apply_drop_rules', True
+        )
+        if apply_drop_rules:
+            for host_index, host in enumerate(self.hosts):
+                if not self.status_links[host_index] and statuses.get(host.name) == HostStatus.ATTACKING:
+                    statuses[host.name] = HostStatus.OUT_ATTACK_BLOCKED
         self.global_state.update_statuses(statuses)
         # Sync status_links to global_state so network_env can expose linkStatus to the dashboard
         if not hasattr(self.global_state, 'links_status'):
@@ -423,12 +453,14 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
             if host_status is None or host_state is None:
                 continue
 
-            raw = np.array(host_state, dtype=np.float32)
+            raw = np.array(host_state, dtype=np.float32)  # always 8 features
             s   = host_status['status']
+            # For discretize/normalize, filter to the configured obs size
+            obs_raw = raw if self._include_pct_var else raw[[0, 2, 4, 6]]
 
             if s in (HostStatus.ATTACKING, HostStatus.OUT_ATTACK_BLOCKED, HostStatus.WAR):
-                disc = self.get_discretized_state(raw)
-                norm = get_normalized_state(raw, self.low, self.high)
+                disc = self.get_discretized_state(obs_raw)
+                norm = get_normalized_state(obs_raw, self.low, self.high)
                 disc_str = " ".join(str(int(v)) for v in disc)
                 norm_str = " ".join(f"{float(v):.3f}" for v in norm)
                 information(
@@ -445,8 +477,8 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
                     + Fore.WHITE
                 )
             elif s == HostStatus.UNDER_ATTACK:
-                disc = self.get_discretized_state(raw)
-                norm = get_normalized_state(raw, self.low, self.high)
+                disc = self.get_discretized_state(obs_raw)
+                norm = get_normalized_state(obs_raw, self.low, self.high)
                 disc_str = " ".join(str(int(v)) for v in disc)
                 norm_str = " ".join(f"{float(v):.3f}" for v in norm)
                 information(
@@ -596,10 +628,6 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
                 continue
             elif per_host_actions[host_index] == AGENT_ACTIONS.ATTACK_IN:
                 victimized_hosts.append(host)
-                if apply_drop_rules and not self.status_links[host_index] \
-                        and unblock_flow_delete(self.net, host.name):
-                    time.sleep(0.02)
-                    self.status_links[host_index] = True
             elif per_host_actions[host_index] == AGENT_ACTIONS.ATTACK_OUT:
                 attacking_hosts.append(host)
                 if apply_drop_rules and self.status_links[host_index] \
@@ -643,15 +671,23 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
         ]
 
     def get_attacking_hosts_index(self, status):
+        _ids = (
+            HOST_STATUS_ID_MAPPING[HostStatus.ATTACKING],
+            HOST_STATUS_ID_MAPPING[HostStatus.OUT_ATTACK_BLOCKED],
+        )
         return [
             index for index, value in enumerate(status["id"])
-            if value == HostStatus.ATTACKING
+            if value in _ids
         ]
 
     def get_victims_index(self, status):
+        _ids = (
+            HOST_STATUS_ID_MAPPING[HostStatus.UNDER_ATTACK],
+            HOST_STATUS_ID_MAPPING.get(HostStatus.INCOMING_BLOCKED_ATTACK, 3),
+        )
         return [
             index for index, value in enumerate(status["id"])
-            if value == HostStatus.UNDER_ATTACK
+            if value in _ids
         ]
 
     # ------------------------------------------------------------------
@@ -720,11 +756,17 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
         if isinstance(state, tuple):
             state = state[0]
 
+        if self._include_pct_var:
+            counter_indices   = {0, 2, 4, 6}
+            variation_indices = {1, 3, 5, 7}
+        else:
+            # Compact mode: all 4 features are counters (log-bin)
+            counter_indices   = {0, 1, 2, 3}
+            variation_indices = set()
+
         discrete_state = []
-        counter_indices = {0, 2, 4, 6}   # packets/bytes RX/TX
-        variation_indices = {1, 3, 5, 7} # percentage-change fields
         for i, val in enumerate(state):
-            if i in variation_indices:  # variation packet / byte
+            if i in variation_indices:
                 bin_index = get_linear_bin_index(val, low[i], high[i],
                                                   n_bins - 1) + 1
             elif i in counter_indices:
@@ -735,7 +777,6 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
                     bin_index = 0
                 else:
                     high_safe = max(float(high[i]), 1.0)
-                    # Reserve bin 0 for zero, distribute positives on 1..n_bins-1
                     bin_index = get_log_bin_index(val, 1.0, high_safe, n_bins - 1) + 1
             else:
                 bin_index = get_linear_bin_index(val, low[i], high[i], n_bins)
@@ -752,18 +793,18 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
         """
         Override of NetworkEnv.get_current_state.
 
-        global_state.state is the full N*8 flat list.
-        We always return only the first 8 values (host 0 slice) because
-        the PerHostScanWrapper manages host iteration externally and calls
-        _normalized_slice() directly.  Returning shape (8,) here keeps
-        the base env self-consistent when called during reset().
+        global_state.state is always a flat N*8 list.
+        We return only the first host's slice.  When include_percentage_variations
+        is False the 4 variation features are stripped, yielding shape (4,);
+        otherwise shape (8,) as usual.
+        The PerHostScanWrapper manages host iteration externally and reads
+        slices directly via _raw_slice() / _normalized_slice().
         """
         full_state = self.global_state.state  # N*8 list
         self.real_state = self.state = full_state
 
-        slice_state = np.array(
-            full_state[:self._per_host_features], dtype=np.float32
-        )
+        raw8 = np.array(full_state[:8], dtype=np.float32)
+        slice_state = raw8 if self._include_pct_var else raw8[[0, 2, 4, 6]]
 
         if is_real_state:
             return slice_state
@@ -773,7 +814,7 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
 
     @property
     def _per_host_features(self):
-        return 8
+        return 8 if self._include_pct_var else 4
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -124,20 +124,19 @@ async function checkAndRecoverTrainingState() {
                 chartDataRestored = restoreChartDataFromSession(response.agent_chart_data);
             }
 
-            // If server provides agent_button_state, populate placeholders so
+            // Populate summaries from server (actual data, not placeholders) so
             // restoreTrainingResultsButtonStates / restoreEvaluationResultsButtonStates
-            // can enable the appropriate buttons.
+            // can enable the appropriate buttons with working popup data.
             if (response.agent_button_state) {
                 window.lastAgentTrainingSummaries = window.lastAgentTrainingSummaries || {};
                 window.lastAgentEvaluationSummaries = window.lastAgentEvaluationSummaries || {};
                 Object.keys(response.agent_button_state).forEach(agent => {
                     const st = response.agent_button_state[agent] || {};
-                    if (st.training_summary) {
-                        // placeholder object indicates presence
-                        window.lastAgentTrainingSummaries[agent] = window.lastAgentTrainingSummaries[agent] || {};
+                    if (st.training_summary && !window.lastAgentTrainingSummaries[agent]) {
+                        window.lastAgentTrainingSummaries[agent] = st.training_summary;
                     }
-                    if (st.evaluation_summary) {
-                        window.lastAgentEvaluationSummaries[agent] = window.lastAgentEvaluationSummaries[agent] || {};
+                    if (st.evaluation_summary && !window.lastAgentEvaluationSummaries[agent]) {
+                        window.lastAgentEvaluationSummaries[agent] = st.evaluation_summary;
                     }
                 });
             }
@@ -192,6 +191,9 @@ $(document).ready(async function () {
 
     // Initial render of the configuration
     renderConfig();
+    initConfigTabs();
+    initEnvSubTabs();
+    initTheme();
     
     // Navigate to appropriate page (training if recovered, otherwise config)
     if (!wasRecovered) {
@@ -217,10 +219,12 @@ $(document).ready(async function () {
 
     $('#download-result-btn').click(downloadResults);
 
-    // Sync agent card title when name field is edited
+    // Sync agent card title and tab label when name field is edited
     $('#agents-list').on('input', 'input[id^="agents."][id$=".name"]', function () {
         const agentIndex = $(this).attr('id').split('.')[1];
-        $(`#${CSS.escape('agents.' + agentIndex + '.title')}`).text($(this).val());
+        const name = $(this).val();
+        $(`#${CSS.escape('agents.' + agentIndex + '.title')}`).text(name);
+        $(`#agent-tab-label-${agentIndex}`).text(name);
     });
 
     // Listener for the remove agent buttons (uses event delegation)

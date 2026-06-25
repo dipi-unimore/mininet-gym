@@ -70,7 +70,8 @@ class CustomCallback(BaseCallback):
         self.cumulative_reward = 0
         self.episode_rewards   = []
         self.episode           = 0
-        self.episode_statuses  = []
+        self.episode_statuses  = []   # non-HO path: list of status dicts
+        self._ho_step_buf      = []   # HO path: list of float10 tuples (compact)
         self.correct_predictions = 0
 
         # Exploration metric history — list of dicts, recorded every N steps
@@ -253,11 +254,23 @@ class CustomCallback(BaseCallback):
             action_correct           = infos['action_correct']
             status['action_choosen'] = int(action)
             status['traffic_type']   = action_correct
+            # Compact float32 tuple — avoids per-step Python dict overhead
+            self._ho_step_buf.append((
+                float(action_correct),
+                float(int(action)),
+                float(status.get('received_packets', 0)),
+                float(status.get('received_packets_percentage_change', 0)),
+                float(status.get('received_bytes', 0)),
+                float(status.get('received_bytes_percentage_change', 0)),
+                float(status.get('transmitted_packets', 0)),
+                float(status.get('transmitted_packets_percentage_change', 0)),
+                float(status.get('transmitted_bytes', 0)),
+                float(status.get('transmitted_bytes_percentage_change', 0)),
+            ))
         else:
             status['action_choosen'] = action
             status['traffic_type']   = infos['action_correct']
-
-        self.episode_statuses.append(status)
+            self.episode_statuses.append(status)
         self.rewards.append(reward)
         self.ground_truth.append(infos['Ground_truth_step'])
         self.predicted.append(infos['Predicted_step'])
@@ -364,11 +377,20 @@ class CustomCallback(BaseCallback):
         expl_metric = self._get_latest_exploration_metric()
 
         if self.episode > 0:
+            # HO path: pack compact tuple buffer into a float32 array
+            # Columns: traffic_type(0), action_choosen(1), rx_pkt(2), rx_pkt_pct(3),
+            #          rx_bytes(4), rx_bytes_pct(5), tx_pkt(6), tx_pkt_pct(7),
+            #          tx_bytes(8), tx_bytes_pct(9)
+            if self._ho_step_buf:
+                episode_statuses = np.array(self._ho_step_buf, dtype=np.float32)
+            else:
+                episode_statuses = self.episode_statuses
+
             indicator = {
                 'episode':            self.episode,
                 'steps':              self.current_step,
                 'correct_predictions': self.correct_predictions,
-                'episode_statuses':   self.episode_statuses,
+                'episode_statuses':   episode_statuses,
                 'cumulative_reward':  float(self.cumulative_reward),
             }
             # Add exploration metric fields if available
@@ -429,6 +451,7 @@ class CustomCallback(BaseCallback):
         self.done = self.truncated = False
         self.count_actions_by_type = {i: 0 for i in range(self.env.action_space.n)}
         self.episode_statuses      = []
+        self._ho_step_buf          = []
         self.exploration_count, self.exploitation_count = 0, 0
 
     def get_metrics(self):

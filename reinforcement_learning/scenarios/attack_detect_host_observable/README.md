@@ -50,20 +50,35 @@ Comparative table and plots are saved to the experiment directory.
 
 ## Observation Space
 
-**Space type:** `Box(shape=(8,), dtype=float32)`
+The observation is always a **fixed-size vector for a single host**, regardless of how many hosts are in the network. The `PerHostScanWrapper` slices the full N×8 internal network state and delivers one host slice at a time.
 
-The observation is always a fixed-size **8-feature vector for a single host**, regardless of how many hosts are in the network. The `PerHostScanWrapper` slices the full N×8 network state and delivers one host slice at a time.
+The shape depends on `include_percentage_variations` in `scenario_env_param.yaml`:
+
+### `include_percentage_variations: true` → `Box(shape=(8,), dtype=float32)`
 
 | Index | Feature | Bounds |
 |-------|---------|--------|
-| 0 | RX packets (received) | `[0, threshold_packets × num_hosts]` |
+| 0 | RX packets (received) | `[0, threshold_packets]` |
 | 1 | ΔRX packets (% change) | `[-threshold_var_packets, +threshold_var_packets]` |
-| 2 | RX bytes (received) | `[0, threshold_bytes × num_hosts]` |
+| 2 | RX bytes (received) | `[0, threshold_bytes]` |
 | 3 | ΔRX bytes (% change) | `[-threshold_var_bytes, +threshold_var_bytes]` |
-| 4 | TX packets (transmitted) | `[0, threshold_packets × num_hosts]` |
+| 4 | TX packets (transmitted) | `[0, threshold_packets]` |
 | 5 | ΔTX packets (% change) | `[-threshold_var_packets, +threshold_var_packets]` |
-| 6 | TX bytes (transmitted) | `[0, threshold_bytes × num_hosts]` |
+| 6 | TX bytes (transmitted) | `[0, threshold_bytes]` |
 | 7 | ΔTX bytes (% change) | `[-threshold_var_bytes, +threshold_var_bytes]` |
+
+### `include_percentage_variations: false` → `Box(shape=(4,), dtype=float32)` *(default)*
+
+| Index | Feature | Bounds |
+|-------|---------|--------|
+| 0 | RX packets (received) | `[0, threshold_packets]` |
+| 1 | RX bytes (received) | `[0, threshold_bytes]` |
+| 2 | TX packets (transmitted) | `[0, threshold_packets]` |
+| 3 | TX bytes (transmitted) | `[0, threshold_bytes]` |
+
+The compact 4-feature mode removes the four percentage-variation columns. In practice these deltas add noise without consistent signal (their magnitude is unstable in short 1-second windows), so the agent typically learns faster on the 4-counter observation.
+
+> **Note:** The internal global state always stores N×8 features. The wrapper filters variation columns at observation time; no data is discarded from the environment's internal representation.
 
 **Default thresholds** (`scenario_env_param.yaml`):
 
@@ -169,6 +184,7 @@ The wrapper always returns **raw** observations. Returning normalised values was
 Default values in `scenario_env_param.yaml`:
 
 ```yaml
+include_percentage_variations: false  # true → obs shape (8,); false → obs shape (4,)
 attacks:
   likely: 0.45                       # General attack probability
   likely_train: 0.9                  # Attack rate during training (high, to expose rare class)

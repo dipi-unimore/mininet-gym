@@ -6,6 +6,8 @@
 
 // Opzioni per il menu a tendina gym_type (costante globale)
 const GYM_TYPE_OPTIONS = [
+    "marl_pz",
+    "marl_pz_from_dataset",
     "marl_attacks",
     "marl_attacks_from_dataset",
     "classification",

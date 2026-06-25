@@ -526,7 +526,7 @@ function renderExtraMetrics(summary) {
         .filter(metricKey => latestMetrics[metricKey] !== undefined && latestMetrics[metricKey] !== null)
         .map(metricKey => `
             <div class="flex items-center justify-between text-sm border-b border-slate-100 py-1.5">
-                <span class="text-slate-600 font-medium">${escapeAgentSummaryHtml(metricLabels[metricKey])}</span>
+                <span class="text-slate-300 font-medium">${escapeAgentSummaryHtml(metricLabels[metricKey])}</span>
                 <span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(formatTrainingMetricValue(metricKey, latestMetrics[metricKey]))}</span>
             </div>
         `)
@@ -655,10 +655,10 @@ function renderEvaluationMitigation(summary) {
         <div class="bg-white border border-amber-200 rounded-xl p-4">
             <div class="text-xs font-bold uppercase text-amber-700 mb-2">Attack Mitigation</div>
             <div class="space-y-1 text-sm">
-                <div class="flex items-center justify-between"><span class="text-slate-600">Episodes with data</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.episodes_with_mitigation_data || 0)}</span></div>
-                <div class="flex items-center justify-between"><span class="text-slate-600">Under attack total</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.total_under_attack_count || 0)}</span></div>
-                <div class="flex items-center justify-between"><span class="text-slate-600">Mitigated total</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.total_mitigated_under_attack_count || 0)}</span></div>
-                <div class="flex items-center justify-between"><span class="text-slate-600">Mitigation ratio</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(`${ratioPct.toFixed(2)}%`)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-400">Episodes with data</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.episodes_with_mitigation_data || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-400">Under attack total</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.total_under_attack_count || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-400">Mitigated total</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.total_mitigated_under_attack_count || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-400">Mitigation ratio</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(`${ratioPct.toFixed(2)}%`)}</span></div>
             </div>
         </div>
     `;

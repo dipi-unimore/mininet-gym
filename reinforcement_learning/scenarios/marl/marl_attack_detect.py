@@ -423,7 +423,8 @@ def evaluate_attack_detect_agent(am: AgentManager):
                 for i in agent.instances:
                     model = i['agent'].instance
                     name = i['name']
-                    prediction = predict(env, model, states[name])
+                    host_env = env.coordinator_env if name == COORDINATOR else env.host_envs[name]
+                    prediction = predict(host_env, model, states[name])
                     
                     color = Fore.RED         
                     if prediction == is_attack[name]:
@@ -446,14 +447,14 @@ def evaluate_attack_detect_agent(am: AgentManager):
         return score, ground_truth, predicted
 
 def predict(env, model, state):
-    if model is None:        
-        raise("The model can't be None. Create configuration")
+    if model is None:
+        raise Exception("The model can't be None. Create configuration")
     if isinstance(model, SupervisedAgent):
-        prediction = model.predict(state)                    
-    elif isinstance(model, QLearningAgent) or isinstance(model,SARSAAgent):
+        prediction = model.predict(state)
+    elif isinstance(model, QLearningAgent) or isinstance(model, SARSAAgent):
         prediction = model.predict(state)
     else:
-        normalized_state = get_normalized_state(state, env.low_to_normalize, env.env.high_to_normalize) 
+        normalized_state = get_normalized_state(state, env.low, env.high)
         prediction, _states = model.predict(normalized_state, deterministic=True)
     env.execute_action(prediction)
     return prediction

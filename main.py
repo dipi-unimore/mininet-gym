@@ -10,14 +10,16 @@ from reinforcement_learning.scenarios.attack_detect_host_observable.per_host_sca
 from reinforcement_learning.scenarios.classification.network_env_classification import NetworkEnvClassification
 from reinforcement_learning.scenarios.attack_detect.network_env_attack_detect import NetworkEnvAttackDetect
 from reinforcement_learning.scenarios.marl.network_env_marl_attack_detect import NetworkEnvMarlAttackDetect
+from reinforcement_learning.scenarios.marl_pz.marl_pz_env import MarlPzEnv
 from reinforcement_learning.scenarios.classification.traffic_classification import traffic_classification_main
 from reinforcement_learning.scenarios.attack_detect.attack_detect import attack_detect_main
 from reinforcement_learning.scenarios.marl.marl_attack_detect import marl_attack_detect_main
-from utility.constants import ATTACKS, ATTACKS_HO, CLASSIFICATION, FROM_DATASET, GYM_TYPE, MARL_ATTACKS, SystemLevels
+from reinforcement_learning.scenarios.marl_pz.marl_pz_main import marl_pz_main
+from utility.constants import ATTACKS, ATTACKS_HO, CLASSIFICATION, FROM_DATASET, GYM_TYPE, MARL_ATTACKS, MARL_PZ, SystemLevels
 from utility.config_sanitizer import clean_load_dir
 from utility.my_files import copy_config_file_to_training_dir, create_directory_training_execution, drop_privileges, regain_root, resolve_data_file_path
 from utility.params import Params, read_config_file
-from utility.my_log import initialize_client_notifier, notify_client, set_is_from_dataset, set_log_level, set_log_file, information, error
+from utility.my_log import initialize_client_notifier, notify_client, set_is_from_dataset, set_log_level, set_log_file, information, error, clear_agent_summaries
 from app.socket_handler import get_socketio_instance, register_handlers, send_live_data, send_status
 import random, threading
 from app.app_api import start_api
@@ -62,6 +64,7 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
     )
     config_dict["net_config_filter"] = config.net_config_filter
 
+    clear_agent_summaries()
     drop_privileges(server_user)  # create dirs without root privileges
     training_execution_directory = create_directory_training_execution(config)
     set_log_file(f"{training_execution_directory}/log.txt")
@@ -94,6 +97,9 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
         env = NetworkEnvAttackDetectPerHostObservable(config.env_params, server_user)
     elif config.env_params.gym_type.startswith(ATTACKS):
         env = NetworkEnvAttackDetect(config.env_params, server_user)
+    elif config.env_params.gym_type.startswith(MARL_PZ):
+        env = MarlPzEnv(config.env_params, server_user)
+        isMultiAgent = True
     elif config.env_params.gym_type.startswith(MARL_ATTACKS):
         env = NetworkEnvMarlAttackDetect(config.env_params, server_user)
         isMultiAgent = True
@@ -139,7 +145,8 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
     # drives traffic directly, one step at a time, without background threads)
     if (not config.env_params.gym_type.endswith(FROM_DATASET)
             and not config.env_params.gym_type.startswith(CLASSIFICATION)
-            and not config.env_params.gym_type.startswith(ATTACKS_HO)):
+            and not config.env_params.gym_type.startswith(ATTACKS_HO)
+            and not config.env_params.gym_type.startswith(MARL_PZ)):
         continuous_traffic_generation(
             env, options={"show_normal_traffic": config.env_params.show_normal_traffic}
         )
@@ -176,6 +183,11 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
             am = AgentManager(env, config)
             set_agent_manager(am)
             attack_detect_main(config, am, env)
+
+        elif config.env_params.gym_type.startswith(MARL_PZ):
+            am = AgentManager(env, config)
+            set_agent_manager(am)
+            marl_pz_main(config, am, env)
 
         elif config.env_params.gym_type.startswith(MARL_ATTACKS):
             am = AgentManager(env, config)

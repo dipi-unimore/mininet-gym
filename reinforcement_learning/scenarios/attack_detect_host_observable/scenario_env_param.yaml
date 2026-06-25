@@ -1,6 +1,6 @@
 attacks:
   likely: 0.45
-  likely_train: 0.9
+  likely_train: 0.5
   likely_eval: 0.3
   short_attack_duration: 5
   long_attack_duration: 25
@@ -8,8 +8,9 @@ attacks:
   unblock_min_hold_rounds: 2
   unblock_required_normal_streak: 2
   apply_drop_rules: false
+  include_percentage_variations: false
   thresholds:
-    packets: 120000
+    packets: 80000
     var_packets: 50
-    bytes: 4230000000
+    bytes: 250000000
     var_bytes: 30

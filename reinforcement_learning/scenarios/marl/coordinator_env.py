@@ -35,7 +35,7 @@ class CoordinatorEnv(gym.Env):
         # This will need to be populated with appropriate values for your network.
         self.global_state = global_state
         # State: [total_packets, var_packets, total_bytes, var_bytes, receving_attack_message]
-        self.low = np.array([0, -self.threshold_var_packets, -self.threshold_var_bytes,0, 0])
+        self.low = np.array([0, -self.threshold_var_packets, 0, -self.threshold_var_bytes, 0])
         self.high = np.array([self.threshold_packets*len(self.net.hosts), 
                               self.threshold_var_packets, 
                               self.threshold_bytes*len(self.net.hosts), 
@@ -45,7 +45,8 @@ class CoordinatorEnv(gym.Env):
 
         # Define the number of discrete bins for each observation dimension
         self.n_bins = params.n_bins
-        
+        self.use_communication = getattr(params.attacks, 'use_communication', True)
+
         # This will be updated with the global state at each step
         #self.reset()
         
@@ -139,9 +140,9 @@ class CoordinatorEnv(gym.Env):
         if action == COORDINATOR_ACTIONS.ATTACK:
             # Action 1: 
             msg = comunicate_attack_detected()
-        # message  customized by agent variant
-        agent_name = get_agent_name( host_name = COORDINATOR)
-        self.global_state.set_message(agent_name, COORDINATOR, action)
+        if self.use_communication:
+            agent_name = get_agent_name(host_name=COORDINATOR)
+            self.global_state.set_message(agent_name, COORDINATOR, action)
         if show_action:
             information(f"{COORDINATOR} {msg} R: {reward}\n", f"{agent_name}")
 
@@ -187,10 +188,12 @@ class CoordinatorEnv(gym.Env):
         Retrieves the current global state of the network.
         """
         state = self.global_state.get_coordinator_state()
-        #message by agent variant
-        agent_name = get_agent_name( host_name = COORDINATOR)
-        agent_messages = self.global_state.get_messages(agent_name)
-        message_state = sum(1 for k, v in agent_messages.items() if v > 0 and k != COORDINATOR) # 5: Message
+        if self.use_communication:
+            agent_name = get_agent_name(host_name=COORDINATOR)
+            agent_messages = self.global_state.get_messages(agent_name)
+            message_state = sum(1 for k, v in agent_messages.items() if v > 0 and k != COORDINATOR)
+        else:
+            message_state = 0
         state = np.append(state, message_state)
         self.status = self.global_state.coordinator_status
         

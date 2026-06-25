@@ -47,11 +47,15 @@ class AgentManager:
                 check_env(self.env.coordinator_env, warn=True)
             else:
                 time.sleep(1.5)
+        elif self.gym_type.startswith(MARL_PZ):
+            # MarlPzEnv check_env is deferred until SingleAgentViews are created
+            information("Marl PZ environment — check deferred to SingleAgentView creation\n")
+            time.sleep(1.5)
         else:
-            if config.env_params.must_check_env:    
+            if config.env_params.must_check_env:
                 check_env(env, warn=True)
             else:
-                time.sleep(1.5)                
+                time.sleep(1.5)
         self.env.initialize_storage()
         information("Check environment finished\n")
         
@@ -93,11 +97,11 @@ class AgentManager:
         model = None
         #use lower case for algorithm names check
         if algorithm.lower() == ALGO_Q_LEARNING:
-            if  self.env.observation_space.shape[0]  > 64:
+            if env.observation_space.shape[0] > 64:
                 raise Exception(f"Custom agents with Q-Learning or SARSA algorithms are not supported in this env, the observation is too big for Q-Table (max 64, so max 8 hosts * 8 features, but it's better to avoid and use Deep algorithms).")
             return self.create_custom_agent(QLearningAgent, env, agent_param, name), {}, True
         elif algorithm.lower() == ALGO_SARSA:
-            if  self.env.observation_space.shape[0]  > 64:
+            if env.observation_space.shape[0] > 64:
                 raise Exception(f"Custom agents with Q-Learning or SARSA algorithms are not supported in this env, the observation is too big for Q-Table (max 64, so max 8 hosts * 8 features, but it's better to avoid and use Deep algorithms).")
             return self.create_custom_agent(SARSAAgent, env, agent_param, name), {}, True       
         elif algorithm.lower() == ALGO_SUPERVISED:
@@ -269,9 +273,54 @@ class AgentManager:
 
         return model
     
+    def create_marl_pz_agent(self, agent_param):
+        """
+        Create per-agent instances for the marl_pz scenario.
+
+        Each agent in possible_agents (hosts + coordinator) gets its own
+        SingleAgentView and an associated model instance.
+        """
+        from reinforcement_learning.scenarios.marl_pz.marl_pz_env import (
+            MarlPzEnv, SingleAgentView,
+        )
+        from reinforcement_learning.scenarios.marl_pz.constants import (
+            COORDINATOR as MARL_PZ_COORDINATOR,
+            NORMALIZED, RAW,
+        )
+
+        env: MarlPzEnv = self.env
+        agent_param.instances = {}
+
+        for agent_id in env.possible_agents:
+            is_coordinator = (agent_id == MARL_PZ_COORDINATOR)
+
+            # Determine state_mode: tabular agents work with RAW obs (they
+            # discretize manually); deep agents need NORMALIZED.
+            algo = agent_param.algorithm.lower()
+            is_tabular = algo in (ALGO_Q_LEARNING, ALGO_SARSA)
+            state_mode = RAW if is_tabular else NORMALIZED
+
+            single_view = SingleAgentView(env, agent_id, state_mode=state_mode)
+
+            instance, custom_callback, is_custom_agent = self.create_agent(
+                agent_param, env=single_view, name=agent_id
+            )
+            instance.is_team_member      = True
+            instance.is_team_coordinator = is_coordinator
+
+            agent_param.instances[agent_id] = {
+                'instance':        instance,
+                'custom_callback': custom_callback,
+                'is_custom_agent': is_custom_agent,
+                'max_steps':       env.max_steps,
+                'single_view':     single_view,
+            }
+
     def create_agents(self):
         for agent_param in self.agents_params:
-            if self.gym_type.startswith("marl"):
+            if self.gym_type.startswith(MARL_PZ):
+                self.create_marl_pz_agent(agent_param)
+            elif self.gym_type.startswith("marl"):
                 self.create_marl_agent(agent_param)
             else:
                 agent_param.instance, agent_param.custom_callback, agent_param.is_custom_agent = self.create_agent(agent_param)
