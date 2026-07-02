@@ -114,7 +114,24 @@ async function checkAndRecoverTrainingState() {
         if (response.is_training) {
             console.log('Active training detected:', response.message);
             saveTrainingStateToStorage(response.status);
-            
+
+            // Sync systemStatus immediately from the AJAX response (mirrors
+            // syncTrainingStateOnReconnect's mapping) instead of waiting for
+            // the socket to (re)connect — this also locks the Configuration
+            // page right away via setStatus() -> updateConfigLockFromStatus().
+            let recoveredState = SYSTEM_STATUS.TRAINING_RUNNING;
+            if (response.is_paused) {
+                recoveredState = SYSTEM_STATUS.PAUSED;
+            } else if (response.is_stopping) {
+                recoveredState = SYSTEM_STATUS.STOPPED;
+            }
+            setStatus(recoveredState, response.message);
+
+            // Stash which agent the server says is currently training/evaluating
+            // so the tab bar (built later, during navigation) can mark it
+            // 'Running' immediately instead of waiting for the next live metric.
+            window.pendingCurrentTrainingAgent = response.current_agent || null;
+
             // Restore training session data (summaries, stats, etc.)
             const dataRestored = restoreTrainingSessionData();
             
@@ -150,6 +167,7 @@ async function checkAndRecoverTrainingState() {
             return true;
         } else {
             // Clear any stale training state
+            window.pendingCurrentTrainingAgent = null;
             localStorage.removeItem('trainingStatus');
             sessionStorage.removeItem('trainingSessionData');
             sessionStorage.removeItem('chartDataRaw');

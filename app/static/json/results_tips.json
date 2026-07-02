@@ -1,0 +1,21 @@
+{
+  "general_stats": "Quick snapshot of the run size before digging into the charts below: total training episodes, steps per episode, evaluation episodes, and the agent's mean training accuracy.",
+
+  "analysis_charts": "Cross-agent comparison charts (Metrics Comparison, Radar, K-Fold). Use these to spot which agent generalizes best and how stable each agent is across metrics or folds — a narrow K-Fold confidence band means the model is robust to the specific training data.",
+
+  "agents_training": "Per-agent training charts (rewards, accuracy, confusion matrix, bin coverage, etc.). Each block is one agent's own learning trajectory — compare shapes/trends across agents to see who converged fastest or got stuck.",
+
+  "communication_activity": "In questo contesto, la metrica dei <b>Total Alerts</b> (o messaggi totali scambiati) viene analizzata per capire l'efficienza del protocollo di comunicazione:<ul><li>Se la maggior parte dei messaggi totali è guidata da stati <b>uncertain</b>, significa che gli agenti stanno collaborando attivamente per risolvere situazioni ambigue o sconosciute dell'ambiente.</li><li>Se la maggior parte è guidata da stati <b>confident</b>, gli agenti stanno semplicemente confermando piani d'azione già consolidati o trasmettendo dati ad alta affidabilità.</li></ul>L'obiettivo degli algoritmi MARL efficienti è ridurre i Total Alerts complessivi, spingendo gli agenti a comunicare solo quando l'incertezza è alta o quando la confidenza nel successo dell'azione collettiva dipende strettamente dalla condivisione di quel messaggio.",
+
+  "communication_activity.alerts_table": "Total alerts per host, split into confident vs uncertain counts (UAQ only). Messages with moderate confidence are withheld entirely (no message sent), so 'Total' only counts alerts that actually reached the coordinator or were filtered as uncertain.",
+
+  "communication_activity.alerts_chart": "Per-host alert volume across episodes. A downward trend over training suggests the communication protocol is becoming more selective as agents gain confidence and stop flagging moderate-confidence detections. Click the chart to zoom in.",
+
+  "test_results": "Charts generated during the evaluation phase (post-training, greedy policy, no exploration). These reflect the agent's final learned behaviour on unseen episodes, not the noisier learning-phase curves above.",
+
+  "training_summary": "Recap of the scenario configuration and training-phase accuracy spread (min/mean/max across agents). A wide spread means agents diverged significantly in learning quality.",
+
+  "test_summary": "Recap of evaluation results: raw score and normalized score % (min/mean/max across agents), plus the attack-mitigation ratio when available (marl_pz attack scenarios only).",
+
+  "winner_score": "Composite winner score = weighted sum of recall on outgoing attacks, incoming attacks, and normal/no-cross-contamination traffic. Weights are inversely proportional to class frequency so rare classes (e.g. attacks) aren't drowned out by the abundant 'normal' class. Highest score wins."
+}

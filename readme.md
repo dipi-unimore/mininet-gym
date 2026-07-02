@@ -219,9 +219,11 @@ All experiment parameters are stored in `config/default.yaml` and can be edited 
 
 Key configuration sections:
 
-- **`env_params.gym_type`** — selects the scenario (Classification, Attack-Net, Attack-PerHost, MARL).
+- **`env_params.gym_type`** — selects the scenario: `classification`, `attacks`, `attacks_ho`, `marl_attacks`, `marl_pz` (and `*_from_dataset` variants).
 - **`env_params.episodes` / `max_steps`** — control experiment length.
 - **`env_params.attacks`** — tune attack probability, duration and SDN blocking behaviour.
+- **`env_params.communication`** — (`marl_pz` only) select the inter-agent communication strategy: `none`, `naive_broadcast`, `uaq`, `federated_sync`, `policy_exchange`, `experience_sharing`.
+- **`env_params.pettingzoo`** — (`marl_pz` only) PettingZoo Parallel API settings: `local_ratio`, `shared_reward`, `max_cycles`.
 - **`env_params.net_params`** — set topology size (hosts, IoT nodes) and OpenDayLight controller address.
 - **`agents`** — add one or more agents (Q-Learning, SARSA, DQN, PPO, A2C, Supervised) with independent hyperparameters.
 
@@ -274,6 +276,9 @@ Key configuration sections:
 - [x] Attack scheduling: `likely_train` / `likely_eval` split for realistic evaluation conditions
 - [x] Unblock logic: hold-round and normal-streak thresholds before releasing a blocked host
 - [x] In-browser User Manual with full parameter reference
+- [x] **MARL PZ** — PettingZoo Parallel API multi-agent environment with coordinator and communication strategies
+- [x] Communication strategies: `none`, `naive_broadcast` (S0), `uaq` (S1), `federated_sync` (S2), `policy_exchange` (S3), `experience_sharing` (S4)
+- [x] Communication sub-tab in the configuration UI (visible for `marl_pz` scenarios)
 
 ### Phase 6 — AAMAS 2026 · *Dec 2025 – May 2026*
 - [x] Demo video production and YouTube publication
@@ -284,7 +289,8 @@ Key configuration sections:
 ---
 
 ### Upcoming
-- [ ] MARL scenario adn communication techniques
+- [ ] Communication strategy `hierarchical` (S5) — cluster-head aggregation for large IoT topologies
+- [ ] S2–S4 support for SB3 deep agents (DQN weight averaging, prioritised experience replay sharing)
 - [ ] Docker Compose one-command deployment (Mininet + ODL + MininetGym)
 - [ ] Additional attack types: Slowloris, DNS amplification
 - [ ] Curriculum learning: progressive difficulty ramp across episodes

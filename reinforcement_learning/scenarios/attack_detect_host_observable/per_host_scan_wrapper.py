@@ -272,12 +272,15 @@ class PerHostScanWrapper(gym.Wrapper):
     def _effective_ground_truth(self, host_idx: int, host_status_id: int, host_status_text: str):
         """
         Convert UNDER_ATTACK to INCOMING_BLOCKED_ATTACK when incoming attack is mitigated.
-        
+
         Mapping rules:
+        - idle / unknown (id < 0) → treated as NORMAL (class 0)
         - OUT_ATTACK_BLOCKED (status 2) → stays as ATTACKING (class 2)
         - UNDER_ATTACK with all attackers blocked → INCOMING_BLOCKED_ATTACK (status 3)
         - Everything else → unchanged
         """
+        if host_status_id < 0:
+            return 0, HostStatus.NORMAL, False
         if host_status_text == HostStatus.OUT_ATTACK_BLOCKED:
             return 2, HostStatus.ATTACKING, False
         if host_status_text == HostStatus.UNDER_ATTACK and self._is_incoming_attack_mitigated(host_idx):

@@ -7,6 +7,7 @@ from utility.my_log import error, information
 from ..services import (
     build_dataset_list,
     build_load_dir_list,
+    build_result_comm_stats_preview,
     build_result_pdf_response,
     build_results_dir_list,
     build_saved_configs_list,
@@ -56,6 +57,18 @@ def create_results_blueprint(state):
             return jsonify(preview), status_code
         except Exception as exc:
             error(f"[RESULTS] Error in preview_result_statuses: {exc}")
+            error(f"[RESULTS] Traceback: {traceback.format_exc()}")
+            return jsonify({"status": "error", "message": str(exc)}), 500
+
+    @bp.route('/preview_result_comm_stats', methods=['POST'])
+    def preview_result_comm_stats():
+        payload = request.get_json(silent=True) or {}
+        result_path = payload.get('path', '')
+        try:
+            preview, status_code = build_result_comm_stats_preview(state['current_config'], result_path)
+            return jsonify(preview), status_code
+        except Exception as exc:
+            error(f"[RESULTS] Error in preview_result_comm_stats: {exc}")
             error(f"[RESULTS] Traceback: {traceback.format_exc()}")
             return jsonify({"status": "error", "message": str(exc)}), 500
 

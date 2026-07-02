@@ -5,7 +5,7 @@ import numpy as np
 import json
 from reinforcement_learning.scenarios.marl.constants import COORDINATOR
 from reinforcement_learning.network_env import NetworkEnv
-from utility.constants import ATTACKS_HO, CLASSIFICATION, CLASSIFICATION_FROM_DATASET, GYM_TYPE, SystemLevels
+from utility.constants import ATTACKS_HO, CLASSIFICATION, CLASSIFICATION_FROM_DATASET, MARL_PZ, MARL_PZ_FROM_DATASET, GYM_TYPE, SystemLevels
 from utility.my_log import information, debug, notify_client
 from colorama import Fore
 from gymnasium import spaces
@@ -214,7 +214,10 @@ class BaseAgent(ABC):
             status['traffic_type']   = infos['action_correct']
         else:
             status['action_choosen'] = action
-        if _is_classification:
+        _uses_traffic_type = _is_classification or self.env.gym_type in (
+            GYM_TYPE[MARL_PZ], GYM_TYPE[MARL_PZ_FROM_DATASET]
+        )
+        if _uses_traffic_type:
             status['traffic_type'] = infos['action_correct']
         else:
             status['action_correct'] = infos['is_correct_action']

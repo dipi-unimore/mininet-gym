@@ -44,6 +44,7 @@ let resultsSelectionMode = false;
 let selectedResultItems = new Map();
 let _resultsSortState = {}; // { [scenarioId]: { col, asc } }
 let _chartDescriptions = null; // cached chart_descriptions.json
+let _resultsTips = null; // cached results_tips.json
 
 function getChartDescriptions() {
     if (_chartDescriptions !== null) {
@@ -53,6 +54,25 @@ function getChartDescriptions() {
         .then(r => r.ok ? r.json() : {})
         .then(data => { _chartDescriptions = data; return data; })
         .catch(() => { _chartDescriptions = {}; return {}; });
+}
+
+function getResultsTips() {
+    if (_resultsTips !== null) {
+        return Promise.resolve(_resultsTips);
+    }
+    return fetch('/static/json/results_tips.json')
+        .then(r => r.ok ? r.json() : {})
+        .then(data => { _resultsTips = data; return data; })
+        .catch(() => { _resultsTips = {}; return {}; });
+}
+
+// Builds an info-icon <img> reusing the same click-to-popup mechanism as the
+// Configuration page tooltips (see ui_helpers.js resolveConfigComment/info.png handler).
+function resultTipIcon(key, extraClass) {
+    const tip = (_resultsTips && _resultsTips[key]) ? _resultsTips[key] : '';
+    if (!tip) return '';
+    const plain = stripHtmlTags(tip);
+    return ` <img src="/static/images/icon/info.png" alt="Info" title="${escapeHtml(plain)}" data-html-note="${escapeHtml(tip)}" class="inline-block w-4 h-4 ml-1 opacity-60 hover:opacity-100 cursor-pointer align-middle ${extraClass || ''}">`;
 }
 
 function findChartDescription(filename) {
@@ -248,13 +268,16 @@ function renderResultsList(list) {
             </div>
             <div id="complete-section-${scenarioId}">
                 <div class="overflow-x-auto">
-                <div class="min-w-[820px]">
-                <div class="grid grid-cols-9 font-bold border-b text-xs">
+                <div class="min-w-[1200px]">
+                <div class="grid grid-cols-12 font-bold border-b text-xs">
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="datetime" data-label="Date Time">Date Time <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="networkconfig" data-label="Network Config">Network Config <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="comm" data-label="Comm">Comm <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="trainingepisodes" data-label="Training Eps">Training Eps <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="maxsteps" data-label="Max Steps">Max Steps <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="agents" data-label="Agents">Agents <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="algos" data-label="Algos">Algos <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="bins" data-label="Bins">Bins <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="accuracy" data-label="Accuracy %">Accuracy % <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="testepisodes" data-label="Test Eps">Test Eps <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="score" data-label="Score %">Score % <span class="sort-ind text-gray-400">⇅</span></span>
@@ -320,9 +343,12 @@ function orderBy(gymType, col) {
             //case 'datetime':        va = new Date(a.datetime || 0); vb = new Date(b.datetime || 0); break;
             case 'datetime':        va = String(a.datetime || ''); vb = String(b.datetime || ''); break;
             case 'networkconfig':   va = String(a.network_config || ''); vb = String(b.network_config || ''); break;
+            case 'comm':            va = String(a.comm_strategy || ''); vb = String(b.comm_strategy || ''); break;
             case 'trainingepisodes':va = Number(a.training_episodes || 0); vb = Number(b.training_episodes || 0); break;
             case 'maxsteps':        va = Number(a.max_steps || 0); vb = Number(b.max_steps || 0); break;
             case 'agents':          va = a.agents_data.length; vb = b.agents_data.length; break;
+            case 'algos':           va = String((a.agents_data || []).map(x => x.algorithm || '').join(',')); vb = String((b.agents_data || []).map(x => x.algorithm || '').join(',')); break;
+            case 'bins':            va = Number(a.n_bins || 0); vb = Number(b.n_bins || 0); break;
             case 'accuracy':        va = Number(a.mean_accuracy || 0); vb = Number(b.mean_accuracy || 0); break;
             case 'testepisodes':    va = Number(a.test_episodes || 0); vb = Number(b.test_episodes || 0); break;
             case 'score':           va = Number(a.mean_score || 0); vb = Number(b.mean_score || 0); break;
@@ -357,6 +383,11 @@ function renderDataList( gym_type, list) {
     dirListDataHtml = '';
     list.forEach(exp => {
         const isSelected = resultsSelectionMode && selectedResultItems.has(String(exp.path || ''));
+        const algos_list = (exp.agents_data || []).map(a => a.algorithm || '').filter(Boolean);
+        const algos_unique = [...new Set(algos_list)];
+        const algos_value = algos_unique.join(', ') || '—';
+        const bins_value = (exp.n_bins != null) ? exp.n_bins : '—';
+        const comm_value = exp.comm_strategy || '—';
         if (exp.agents_data.length >1 ) {
             agent_title = `${exp.agents_data.map(_ => _.agent_name).join(', ')}`;
             accuracy_title = `${exp.name_min_accuracy}=${exp.min_accuracy }/${exp.mean_accuracy }/${exp.name_max_accuracy}=${exp.max_accuracy }`;
@@ -373,12 +404,15 @@ function renderDataList( gym_type, list) {
 
         }
         const dirItemHtml = `
-            <li class="results-result-row p-2 border-b cursor-pointer hover:bg-gray-100 text-xs grid grid-cols-9 ${isSelected ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-white'}" data-gym-type="${escapeAttr(gym_type)}" data-path="${escapeAttr(exp.path)}" data-result-kind="complete">
+            <li class="results-result-row p-2 border-b cursor-pointer hover:bg-gray-100 text-xs grid grid-cols-12 ${isSelected ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-white'}" data-gym-type="${escapeAttr(gym_type)}" data-path="${escapeAttr(exp.path)}" data-result-kind="complete">
                 <span>${exp.datetime}</span>
                 <span>${exp.network_config}</span>
+                <span title="${escapeAttr(comm_value)}">${comm_value}</span>
                 <span>${exp.training_episodes}</span>
                 <span>${exp.max_steps}</span>
                 <span title="${agent_title}">${exp.agents_data.length}</span>
+                <span title="${escapeAttr(algos_value)}">${algos_value}</span>
+                <span>${bins_value}</span>
                 <span title="${accuracy_title}">${accuracy_value}</span>
                 <span>${exp.test_episodes}</span>
                 <span title="${score_title}">${score_value}</span>
@@ -429,7 +463,7 @@ function loadResultsData(gym_type, path) {
     el = list_dir.find(e => e.path === path);
     selectedResultDetail = { gym_type, path, data: el };
     $('#result-modal').removeClass('hidden');
-    renderResultModalContent(gym_type, path, el);
+    getResultsTips().then(() => renderResultModalContent(gym_type, path, el));
 }
 
 $("#close-result-panel-modal-btn").on('click', function () {
@@ -439,6 +473,7 @@ $("#close-result-panel-modal-btn").on('click', function () {
 function closeResultsPanelModal() {
     $('#result-modal').addClass('hidden');
     $('#result-modal-content').html('');
+    resetPopupFullscreen('#result-modal-card', '#result-modal');
 }
 
 function renderResultModalContent(gym_type, path, data) {
@@ -504,7 +539,7 @@ let modalContentHtml = `
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                 <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 col-span-1">
-                    <h4 class="font-bold text-blue-800 mb-3 uppercase text-xs">General Stats</h4>
+                    <h4 class="font-bold text-blue-800 mb-3 uppercase text-xs">General Stats${resultTipIcon('general_stats')}</h4>
                     <div class="grid grid-cols-2 gap-y-3 text-sm italic">
                         <p>Train Eps: <strong>${data.training_episodes}</strong></p>
                         <p>Max Steps: <strong>${data.max_steps}</strong></p>
@@ -534,6 +569,7 @@ let modalContentHtml = `
                 <h3 class="text-indigo-700 font-black mb-3 uppercase text-sm flex items-center gap-2">
                     Analysis Charts
                     <span class="text-xs font-normal text-gray-400 normal-case">(metrics_comparison · radar · k-fold)</span>
+                    ${resultTipIcon('analysis_charts')}
                 </h3>
                 <div class="grid grid-cols-1 md:grid-cols-${Math.min(analysisImages.length, 3)} gap-4">
                     ${analysisImages.map(img => `
@@ -549,7 +585,7 @@ let modalContentHtml = `
             </div>
             ` : ''}
 
-            <h3 class="text-lg font-black mb-4 flex items-center gap-2 underline decoration-blue-500">AGENTS TRAINING</h3>
+            <h3 class="text-lg font-black mb-4 flex items-center gap-2 underline decoration-blue-500">AGENTS TRAINING${resultTipIcon('agents_training')}</h3>
             <div class="space-y-6">
                 ${data.agents_data.map(agent => {
                     const agentScore = data.test_scores[agent.agent_name] || 0;
@@ -588,8 +624,19 @@ let modalContentHtml = `
                 }).join('')}
             </div>
 
+            ${gym_type.startsWith('marl_pz') && data.comm_strategy ? `
             <div class="mt-10 pt-6 border-t border-gray-200">
-                <h3 class="text-red-700 font-black mb-4 uppercase">Test Results</h3>
+                <h3 class="text-purple-700 font-black mb-4 uppercase flex items-center gap-2">
+                    Communication Activity
+                    <span class="text-xs font-normal text-gray-400 normal-case">(${data.comm_strategy})</span>
+                    ${resultTipIcon('communication_activity')}
+                </h3>
+                <div id="comm-stats-panel" class="text-sm text-gray-500 italic">Loading communication stats...</div>
+            </div>
+            ` : ''}
+
+            <div class="mt-10 pt-6 border-t border-gray-200">
+                <h3 class="text-red-700 font-black mb-4 uppercase">Test Results${resultTipIcon('test_results')}</h3>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     ${data.test_charts.map(testImg => {
                         const testImgPath = testImg.includes('/')
@@ -608,7 +655,7 @@ let modalContentHtml = `
 
             <div class="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                    <h4 class="font-bold text-emerald-800 mb-3 uppercase text-xs">Training Summary</h4>
+                    <h4 class="font-bold text-emerald-800 mb-3 uppercase text-xs">Training Summary${resultTipIcon('training_summary')}</h4>
                     <div class="space-y-1 text-sm">
                         <p><span class="font-semibold">Scenario:</span> ${gym_type}</p>
                         <p><span class="font-semibold">Network:</span> ${data.network_config}</p>
@@ -620,7 +667,7 @@ let modalContentHtml = `
                 </div>
 
                 <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                    <h4 class="font-bold text-amber-800 mb-3 uppercase text-xs">Test Summary</h4>
+                    <h4 class="font-bold text-amber-800 mb-3 uppercase text-xs">Test Summary${resultTipIcon('test_summary')}</h4>
                     <div class="space-y-1 text-sm">
                         <p><span class="font-semibold">Test Episodes:</span> ${data.test_episodes}</p>
                         <p><span class="font-semibold">Score (min/mean/max):</span> ${data.min_score} / ${data.mean_score} / ${data.max_score}</p>
@@ -659,7 +706,7 @@ let modalContentHtml = `
                             }).join('');
                             return `
                             <div class="mt-3 pt-3 border-t border-amber-200">
-                                <p class="text-xs text-amber-900 font-semibold mb-1">Winner Score <span class="font-normal text-gray-500">(inversely weighted by class frequency)</span></p>
+                                <p class="text-xs text-amber-900 font-semibold mb-1">Winner Score <span class="font-normal text-gray-500">(inversely weighted by class frequency)</span>${resultTipIcon('winner_score')}</p>
                                 <p class="text-xs text-gray-600 mb-2">${formulaLine}</p>
                                 <table class="w-full text-xs">
                                     <thead><tr class="text-gray-500 border-b border-amber-200">
@@ -712,6 +759,189 @@ let modalContentHtml = `
 
     $('#result-modal-content').html(modalContentHtml);
     trackContainerImagesLoading('#result-modal-content', 'result-images', 'Loading result images...');
+
+    if (gym_type.startsWith('marl_pz') && data.comm_strategy) {
+        fetchAndRenderCommStats(path);
+    }
+}
+
+// ====================================================================
+// COMMUNICATION ACTIVITY (marl_pz results summary)
+// ====================================================================
+
+async function fetchAndRenderCommStats(path) {
+    const panel = $('#comm-stats-panel');
+    if (panel.length === 0) return;
+    try {
+        const response = await fetch('/preview_result_comm_stats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+        });
+        const preview = await response.json();
+        if (!response.ok || preview.status === 'error') {
+            panel.html(`<p class="text-gray-400 italic">${escapeHtml(preview.message || 'No communication data recorded for this run.')}</p>`);
+            return;
+        }
+        panel.html(renderCommStatsPanel(preview));
+        if (preview.family === 'alert') {
+            renderCommEpisodeCharts(preview);
+        }
+    } catch (err) {
+        panel.html(`<p class="text-red-500 italic">Error loading communication stats: ${escapeHtml(err.message)}</p>`);
+    }
+}
+
+function renderCommStatsPanel(preview) {
+    const agents = preview.agents || {};
+    const agentNames = Object.keys(agents);
+    if (agentNames.length === 0) {
+        return `<p class="text-gray-400 italic">No communication data recorded for this run.</p>`;
+    }
+
+    if (preview.family === 'alert') {
+        return agentNames.map(agentName => {
+            const a = agents[agentName];
+            const hosts = Object.keys(a.per_host_totals || {});
+            const isUaq = preview.comm_strategy === 'uaq';
+            const rows = hosts.map(host => {
+                const t = a.per_host_totals[host];
+                return `<tr>
+                    <td class="py-1 pr-2">${escapeHtml(host)}</td>
+                    <td class="py-1 pr-2 text-center">${t.total}</td>
+                    ${isUaq ? `<td class="py-1 pr-2 text-center">${t.confident}</td><td class="py-1 text-center">${t.uncertain}</td>` : ''}
+                </tr>`;
+            }).join('');
+            return `
+            <div class="mb-6">
+                <p class="text-xs font-bold uppercase text-gray-600 mb-2">${escapeHtml(agentName)}</p>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="w-full border rounded-lg overflow-y-auto" style="max-height:260px">
+                        <table class="w-full text-xs">
+                            <thead class="sticky top-0"><tr class="text-gray-500 border-b bg-gray-50">
+                                <th class="text-left py-1 pl-2">Host</th>
+                                <th class="py-1">Total alerts${resultTipIcon('communication_activity.alerts_table')}</th>
+                                ${isUaq ? `<th class="py-1">Confident</th><th class="py-1">Uncertain</th>` : ''}
+                            </tr></thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                    <div class="relative border rounded-lg p-2 bg-gray-50" style="height:220px">
+                        <button type="button" class="comm-chart-zoom-btn absolute top-1 right-1 z-10 bg-white/90 hover:bg-white border border-gray-300 rounded px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 shadow-sm" data-comm-chart-zoom="${escapeAttr(agentName)}" title="Zoom chart">⤢ Zoom</button>
+                        <canvas data-comm-chart="${escapeHtml(agentName)}"></canvas>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    if (preview.family === 'policy_coordination') {
+        return agentNames.map(agentName => {
+            const a = agents[agentName];
+            const counts = a.event_counts || {};
+            const countsBadges = Object.keys(counts).map(t => `<span class="mr-3">${escapeHtml(t)}: <strong>${counts[t]}</strong></span>`).join('');
+            const rows = (a.sync_events || []).map(ev => {
+                const d = ev.detail || {};
+                const detailText = Object.keys(d).map(k => `${k}=${Array.isArray(d[k]) ? d[k].join(',') : d[k]}`).join(' ');
+                return `<tr>
+                    <td class="py-1 pr-2">${ev.episode ?? '-'}</td>
+                    <td class="py-1 pr-2">${escapeHtml(ev.eventType || '')}</td>
+                    <td class="py-1 pr-2">${(ev.participants || []).join(', ')}</td>
+                    <td class="py-1 text-xs text-gray-500">${escapeHtml(detailText)}</td>
+                </tr>`;
+            }).join('');
+            return `
+            <div class="mb-6">
+                <p class="text-xs font-bold uppercase text-gray-600 mb-1">${escapeHtml(agentName)}</p>
+                <p class="text-xs text-gray-500 mb-2">${countsBadges || 'No sync events recorded'}</p>
+                <div class="w-full border rounded-lg overflow-y-auto" style="max-height:260px">
+                    <table class="w-full text-xs">
+                        <thead class="sticky top-0"><tr class="text-gray-500 border-b bg-gray-50">
+                            <th class="text-left py-1 pl-2">Episode</th>
+                            <th class="text-left py-1">Type</th>
+                            <th class="text-left py-1">Participants</th>
+                            <th class="text-left py-1">Detail</th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    return `<p class="text-gray-400 italic">No communication data recorded for this run.</p>`;
+}
+
+function renderCommEpisodeCharts(preview) {
+    const agents = preview.agents || {};
+    Object.keys(agents).forEach(agentName => {
+        const a = agents[agentName];
+        const canvasEl = $(`canvas[data-comm-chart="${agentName}"]`);
+        if (canvasEl.length === 0) return;
+        const hosts = Object.keys(a.per_episode_series || {});
+        const palette = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2'];
+        new Chart(canvasEl, {
+            type: 'line',
+            data: {
+                labels: a.episodes || [],
+                datasets: hosts.map((host, i) => ({
+                    label: host,
+                    data: a.per_episode_series[host],
+                    borderColor: palette[i % palette.length],
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    tension: 0.1,
+                })),
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                // Rendered above 1x so the zoomed snapshot (see openChartZoom) stays crisp.
+                devicePixelRatio: Math.max(window.devicePixelRatio || 1, 2),
+                scales: {
+                    x: { title: { display: true, text: 'Episode' } },
+                    y: { title: { display: true, text: 'Alerts' }, beginAtZero: true },
+                },
+                plugins: {
+                    title: { display: true, text: 'Alerts per Episode' },
+                },
+            },
+        });
+    });
+}
+
+$(document).on('click', '.comm-chart-zoom-btn', function (event) {
+    event.stopPropagation();
+    const agentName = $(this).data('comm-chart-zoom');
+    const canvasEl = $(`canvas[data-comm-chart="${CSS.escape(String(agentName))}"]`).get(0);
+    if (!canvasEl) return;
+    openChartZoom(canvasEl, `${agentName} — Alerts per Episode`, _resultsTips && _resultsTips['communication_activity.alerts_chart']);
+});
+
+// Zooms a Chart.js canvas (e.g. the per-host Alerts-per-Episode line chart) using the
+// same overlay as image zoom, but as a single snapshot with no prev/next navigation.
+function openChartZoom(canvasEl, captionText, tipHtml) {
+    ensureZoomControls();
+    zoomImages = [];
+    zoomIndex = -1;
+    const dataUrl = canvasEl.toDataURL('image/png');
+    $('#zoomed-image').attr('src', dataUrl);
+    $('#zoom-caption').text(captionText);
+    $('#zoom-filename').text('');
+    $('#zoom-prev-btn, #zoom-next-btn').addClass('hidden');
+
+    const $panel = $('#zoom-description-panel');
+    const $title = $('#zoom-description-title');
+    const $text = $('#zoom-description-text');
+    if (tipHtml) {
+        $title.text(captionText);
+        $text.html(tipHtml);
+        $panel.removeClass('hidden');
+    } else {
+        $panel.addClass('hidden');
+    }
+    $('#image-zoom-overlay').fadeIn(150).removeClass('hidden').addClass('flex');
 }
 
 function escapeHtml(text) {
@@ -894,6 +1124,7 @@ function openZoomAt(index) {
         zoomIndex = index;
     }
     updateZoomView();
+    $('#zoom-prev-btn, #zoom-next-btn').removeClass('hidden');
     $('#image-zoom-overlay').fadeIn(150).removeClass('hidden').addClass('flex');
 }
 
@@ -919,6 +1150,7 @@ $(document).on('click', '.result-sort-th', function () {
 $(document).ready(function() {
     ensureZoomControls();
     getChartDescriptions(); // preload so first zoom is instant
+    getResultsTips(); // preload so first modal render already has tip icons
     syncResultsSelectionToolbar();
 
     // 1. Apertura Zoom al click su un'immagine del modal
@@ -970,6 +1202,7 @@ $(document).ready(function() {
     // 5. Gestione chiusura modal principale
     $('#close-result-panel-modal-btn').on('click', function() {
         $('#result-modal').addClass('hidden').removeClass('flex');
+        resetPopupFullscreen('#result-modal-card', '#result-modal');
         closeZoomOverlay();
     });
 

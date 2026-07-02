@@ -683,6 +683,10 @@ def plot_and_save_data_agent(agent, config):
                 directory_name,
                 agent_name=agent.name,
                 n_bins=getattr(config.env_params, "n_bins", 4),
+                include_pct_var=getattr(
+                    getattr(config.env_params, 'attacks', None),
+                    'include_percentage_variations', True,
+                ),
             )
         except Exception as e:
             error(Fore.RED

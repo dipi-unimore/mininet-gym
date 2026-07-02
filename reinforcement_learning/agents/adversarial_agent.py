@@ -219,8 +219,11 @@ def host_task(host: Host, net_env, options):
                     if not success:
                         error(f"Error while {host.name} is assigned {task_type} targeting {destination.name}.")
                     else:
-                        debug(f"{host.name} has finished attacking {destination.name} after duration {task_duration}")
-                        time.sleep(0.5)  # Ensure attack process has finished to propagate
+                        # Attack is fire-and-forget: hping3 runs in background for task_duration seconds.
+                        # Wait the full duration so host_tasks keeps showing the attack status.
+                        debug(f"{host.name} attacking {destination.name} for {task_duration}s")
+                        time.sleep(task_duration)
+                        debug(f"{host.name} finished attacking {destination.name}")
                     # Reset task both for error and success
                     task_duration = 0
                     host_tasks[host.name] = {

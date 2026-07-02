@@ -87,15 +87,30 @@
     <tr><td><code>attacks_from_dataset</code></td><td>Attack-Net (dataset)</td><td>Same binary detection</td><td>Alert only (2 classes)</td><td>Replay dataset</td></tr>
     <tr><td><code>attacks_ho</code></td><td>Attack-PerHost</td><td>Per-host: Normal / Victim / Attacker</td><td>SDN link block per host</td><td>Live Mininet</td></tr>
     <tr><td><code>attacks_ho_from_dataset</code></td><td>Attack-PerHost (dataset)</td><td>Same per-host detection</td><td>SDN link block per host</td><td>Replay dataset</td></tr>
-    <tr><td><code>marl_attacks</code></td><td>MARL</td><td>Hierarchical multi-agent (Coordinator + Host agents)</td><td>Distributed SDN block</td><td>Live Mininet</td></tr>
-    <tr><td><code>marl_attacks_from_dataset</code></td><td>MARL (dataset)</td><td>Same MARL task</td><td>Distributed SDN block</td><td>Replay dataset</td></tr>
+    <tr><td><code>marl_pz</code></td><td>MARL-PZ</td><td>PettingZoo multi-agent (Host agents + optional Coordinator), Dec-POMDP with CTDE</td><td>Distributed SDN block</td><td>Live Mininet</td></tr>
+    <tr><td><code>marl_pz_from_dataset</code></td><td>MARL-PZ (dataset)</td><td>Same MARL-PZ task</td><td>Distributed SDN block</td><td>Replay dataset</td></tr>
+    <tr><td><code>marl_attacks</code></td><td>MARL (legacy)</td><td>Hierarchical multi-agent (Coordinator + Host agents), threaded</td><td>Distributed SDN block</td><td>Live Mininet</td></tr>
+    <tr><td><code>marl_attacks_from_dataset</code></td><td>MARL (legacy, dataset)</td><td>Same legacy MARL task</td><td>Distributed SDN block</td><td>Replay dataset</td></tr>
   </tbody>
 </table>
 <div class="man-note">
-  <strong>Attack-PerHost</strong> (<code>attacks_ho</code>) is the primary demonstration scenario: a correct
-  <em>Attacker</em> classification triggers an OpenDayLight flow rule that drops traffic
-  from that host at the switch level. Use the <code>_from_dataset</code> variant whenever you
+  <strong>Attack-PerHost</strong> (<code>attacks_ho</code>) is the primary single-agent demonstration
+  scenario: a correct <em>Attacker</em> classification triggers an OpenDayLight flow rule that drops
+  traffic from that host at the switch level. Use the <code>_from_dataset</code> variant whenever you
   want fast, reproducible runs without a running Mininet network.
+</div>
+<div class="man-note">
+  <strong>MARL-PZ</strong> (<code>marl_pz</code>) is the recommended multi-agent scenario — a cleaner
+  PettingZoo Parallel-API replacement for the legacy threaded <strong>MARL</strong>
+  (<code>marl_attacks</code>) scenario. See the dedicated <strong>MARL-PZ — PettingZoo Multi-Agent
+  Mode</strong> section below for architecture, communication strategies, and agent compatibility.
+</div>
+<div class="man-warn">
+  <strong>MARL-PZ agent compatibility:</strong> PPO and A2C (Stable-Baselines3) are <strong>not
+  supported</strong> in the <code>marl_pz</code> / <code>marl_pz_from_dataset</code> scenarios. The UI
+  blocks and auto-disables these agents when <code>marl_pz</code> is selected — see the
+  <strong>Agent Compatibility</strong> note under <strong>MARL-PZ — PettingZoo Multi-Agent Mode</strong>
+  below for the reason and a MAPPO reference.
 </div>
 
 <h3>Agent Configuration</h3>
@@ -104,7 +119,7 @@
   Each agent entry has:
 </p>
 <ul>
-  <li><strong>Algorithm</strong> — choose from Q-Learning, SARSA, DQN, PPO, A2C, Supervised.</li>
+  <li><strong>Algorithm</strong> — choose from Q-Learning, SARSA, DQN, PPO, A2C, Supervised. <strong>PPO and A2C are not available when the scenario is <code>marl_pz</code></strong> — see MARL-PZ Agent Compatibility below.</li>
   <li><strong>Name</strong> — a free-form label shown in all charts and tables.</li>
   <li><strong>Episodes</strong> — number of training episodes (overrides <code>env_params.episodes</code> if set per-agent).</li>
   <li><strong>Steps per episode</strong> — maximum steps before an episode resets (overrides <code>env_params.max_steps</code>).</li>
@@ -425,7 +440,7 @@
     </tr>
     <tr>
       <td><code>algorithm</code></td><td>—</td>
-      <td>Algorithm identifier: <code>Q-learning</code>, <code>SARSA</code>, <code>DQN</code>, <code>PPO</code>, <code>A2C</code>, <code>Supervised</code>. Case-insensitive.</td>
+      <td>Algorithm identifier: <code>Q-learning</code>, <code>SARSA</code>, <code>DQN</code>, <code>PPO</code>, <code>A2C</code>, <code>Supervised</code>. Case-insensitive. <code>PPO</code>/<code>A2C</code> are rejected by the UI when <code>env_params.gym_type</code> is <code>marl_pz</code> (see MARL-PZ Agent Compatibility).</td>
     </tr>
     <tr>
       <td><code>enabled</code></td><td><code>true</code></td>
@@ -535,6 +550,9 @@
 </table>
 
 <h4>PPO (Proximal Policy Optimisation)</h4>
+<div class="man-warn">
+  Not supported in the <code>marl_pz</code> scenario — see MARL-PZ Agent Compatibility below.
+</div>
 <table>
   <thead><tr><th>Parameter</th><th>Default (quick)</th><th>Description</th></tr></thead>
   <tbody>
@@ -568,6 +586,9 @@
 </div>
 
 <h4>A2C (Advantage Actor-Critic)</h4>
+<div class="man-warn">
+  Not supported in the <code>marl_pz</code> scenario — see MARL-PZ Agent Compatibility below.
+</div>
 <table>
   <thead><tr><th>Parameter</th><th>Default (quick)</th><th>Description</th></tr></thead>
   <tbody>
@@ -915,10 +936,138 @@ agents:
 
 <hr>
 
-<h2>MARL — Multi-Agent Mode</h2>
+<h2>MARL-PZ — PettingZoo Multi-Agent Mode</h2>
 <p>
-  In the <strong>MARL</strong> scenario (<code>marl_attacks</code>), two agent types collaborate via an internal
-  message bus:
+  The <strong>MARL-PZ</strong> scenario (<code>marl_pz</code> / <code>marl_pz_from_dataset</code>) is
+  a PettingZoo Parallel-API multi-agent environment — a cleaner, race-condition-free replacement for
+  the legacy threaded <strong>MARL</strong> scenario described further below. It is modelled as a
+  Decentralized Partially Observable MDP (Dec-POMDP) under the Centralized-Training,
+  Decentralized-Execution (CTDE) paradigm: agents train with access to richer coordination signals
+  but act at deployment time using only their own local observation and the coordinator's message.
+</p>
+<ul>
+  <li><strong>Host Agents</strong> (one per host) — observe per-host traffic (4 or 8 features
+  depending on <code>attacks.include_percentage_variations</code>), classify the host as
+  <code>NORMAL</code> / <code>ATTACK_IN</code> (victim) / <code>ATTACK_OUT</code> (attacker).</li>
+  <li><strong>Coordinator</strong> (optional, <code>attacks.use_coordinator: true</code>) —
+  aggregates host alerts and relays a signal back to all hosts, according to the selected
+  <em>communication strategy</em> below. When disabled, hosts act as fully independent learners.</li>
+</ul>
+
+<h3>Communication Strategies (<code>env_params.communication.strategy</code>)</h3>
+<table>
+  <thead><tr><th>Strategy</th><th>ID</th><th>Description</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>— Independent</td><td><code>none</code></td><td>No coordinator, no messages — hosts learn fully independently.</td><td>Implemented</td></tr>
+    <tr><td>S0 — Naive Broadcast</td><td><code>naive_broadcast</code></td><td>Coordinator relays any attack alert to all hosts, unfiltered. Default; the communication upper bound.</td><td>Implemented</td></tr>
+    <tr><td>S1 — Uncertainty-Aware Querying (UAQ)</td><td><code>uaq</code></td><td>Hosts flag alerts as uncertain or confident via normalised Shannon entropy of their action distribution (<code>communication.uaq.tau</code> / <code>tau_expert</code>); the coordinator relays only confident alerts.</td><td>Implemented</td></tr>
+    <tr><td>S2 — Federated Policy Sync</td><td><code>federated_sync</code></td><td>Every <code>communication.federated_sync.sync_interval</code> steps, Q-tables of all host agents are averaged (FedAvg-style). <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
+    <tr><td>S3 — Periodic Policy Exchange</td><td><code>policy_exchange</code></td><td>After each episode, the best-performing agent's Q-table is copied to any peer lagging by more than <code>communication.policy_exchange.lag_threshold</code>. <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
+    <tr><td>S4 — Experience Replay Sharing</td><td><code>experience_sharing</code></td><td>Every <code>communication.experience_sharing.exchange_interval</code> steps, agents broadcast their highest-TD-error transitions to peers. <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
+    <tr><td>S5 — Hierarchical Coordination</td><td><code>hierarchical</code></td><td>Cluster-head aggregation for large IoT topologies (<code>N ≫ 10</code>), avoiding the <em>O(N²)</em> cost of peer-to-peer coordination.</td><td>Future work</td></tr>
+  </tbody>
+</table>
+<div class="man-note">
+  If <code>env_params.communication</code> is absent from the config, behaviour is derived from
+  the legacy <code>attacks.use_coordinator</code> flag: <code>true</code> → <code>naive_broadcast</code>,
+  <code>false</code> → <code>none</code>.
+</div>
+
+<h3>Communication Visibility (Dashboard &amp; Results)</h3>
+<p>
+  What the hosts and coordinator are actually communicating is visible both live and after training.
+  The alert family (per-step messages) and the policy-coordination family (rare, discrete sync events)
+  are shown differently rather than through one generic widget, since they have very different
+  meaning and update frequency:
+</p>
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>Alert family (<code>none</code> / <code>naive_broadcast</code> / <code>uaq</code>)</th>
+      <th>Policy-coordination family (<code>federated_sync</code> / <code>policy_exchange</code> / <code>experience_sharing</code>)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Live badge</strong> (next to each host in the Training Dashboard)</td>
+      <td>Continuous — reflects the current message value every step: gray "Normal", amber "Uncertain" (UAQ only), red "Alert" / "Confident".</td>
+      <td>Transient pulse — turns blue ("Synced" / "Copied" / "Shared") for a few seconds right after a sync event, then fades back to gray "Idle".</td>
+    </tr>
+    <tr>
+      <td><strong>Live timeline</strong> (expand a host's panel)</td>
+      <td>One line per step, only when the alert value actually changes (deduplicated) — e.g. <code>h3 -&gt; coord: CONFIDENT (2)</code>.</td>
+      <td>One line per sync event — e.g. <code>[ep50] h5 (best, r=120) -&gt; copied policy to h3</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Results summary</strong> ("Communication Activity" section, Results Panel)</td>
+      <td>Per-host table of total / confident / uncertain alerts, plus a line chart of alerts per episode.</td>
+      <td>Full table of sync events (episode, type, participants, detail) plus a count per event type.</td>
+    </tr>
+  </tbody>
+</table>
+<div class="man-note">
+  With <code>communication.strategy: none</code> there is no coordinator and nothing to show — the
+  badge and timeline stay hidden during training, and the Results panel displays no
+  "Communication Activity" section for that run.
+</div>
+<div class="man-tip">
+  Communication data for completed runs is stored per agent in <code>comm_stats.json</code>, next to
+  the existing <code>train_statuses.json</code>. Runs recorded before this feature was added simply
+  have no such file — the Results panel shows "No communication data recorded for this run."
+  instead of an error.
+</div>
+
+<h3>Reward Blending (<code>env_params.pettingzoo</code>)</h3>
+<table>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>local_ratio</code></td><td><code>1.0</code></td><td>Blend between individual and team reward: <code>1.0</code> = fully individual (each host optimises only its own traffic), <code>0.0</code> = fully shared team reward (mean of all host rewards), <code>0.5</code> = equal mix.</td></tr>
+    <tr><td><code>shared_reward</code></td><td><code>false</code></td><td>If <code>true</code>, overrides <code>local_ratio</code> and gives every agent the same mean team reward.</td></tr>
+    <tr><td><code>max_cycles</code></td><td>—</td><td>PettingZoo's name for episode length; if set, takes precedence over <code>env_params.max_steps</code>.</td></tr>
+  </tbody>
+</table>
+
+<h3>Agent Compatibility</h3>
+<div class="man-warn">
+  <strong>PPO and A2C (Stable-Baselines3) are not supported in <code>marl_pz</code>.</strong>
+  MininetGym's <code>marl_pz</code> joint training loop steps all host agents together — one
+  <code>env.step()</code> per round — for <strong>every</strong> communication strategy
+  (<code>none</code>, <code>naive_broadcast</code>, <code>uaq</code>, <code>federated_sync</code>,
+  <code>policy_exchange</code>, <code>experience_sharing</code>). Only off-policy algorithms
+  (replay-buffer based, like DQN) and tabular agents (Q-Learning, SARSA) can support this cleanly.
+  SB3's PPO and A2C are on-policy and have no replay buffer to step jointly: for
+  <code>none</code>/<code>naive_broadcast</code>/<code>uaq</code> they fall back to a slow,
+  sequential per-host training path; for <code>federated_sync</code>/<code>policy_exchange</code>/
+  <code>experience_sharing</code> they use a slightly less slow episode-interleaved path (one
+  instance trains a full episode at a time, then syncs) — still without a validated multi-agent
+  (MAPPO) implementation. The Configuration UI blocks and auto-disables PPO/A2C whenever the
+  scenario is <code>marl_pz</code> — whether you switch the scenario while they're enabled, or try
+  to enable them while <code>marl_pz</code> is already active.
+</div>
+<p>
+  A proper multi-agent PPO (MAPPO) implementation is on the roadmap. In the meantime, existing
+  frameworks with validated MAPPO/multi-agent support include:
+</p>
+<ul>
+  <li><a href="https://docs.ray.io/en/latest/rllib/rllib-examples.html#multi-agent-rl" target="_blank" rel="noopener">MARLlib / RLlib — multi-agent RL examples</a></li>
+  <li><a href="https://docs.pytorch.org/rl/stable/tutorials/multiagent_ppo.html" target="_blank" rel="noopener">TorchRL — Multi-Agent PPO tutorial</a></li>
+  <li><a href="https://docs.pytorch.org/rl/stable/tutorials/multiagent_competitive_ddpg.html" target="_blank" rel="noopener">TorchRL — Multi-Agent DDPG tutorial</a></li>
+</ul>
+
+<div class="man-note">
+  MARL-PZ training is more resource-intensive than single-agent modes: up to
+  <code>num_hosts + 1</code> agents run per experiment. Reduce <code>episodes</code> or
+  <code>max_steps</code> if the machine is under heavy load, or use
+  <code>marl_pz_from_dataset</code> for faster replay-based runs.
+</div>
+
+<hr>
+
+<h2>MARL (Legacy) — Multi-Agent Mode</h2>
+<p>
+  In the legacy <strong>MARL</strong> scenario (<code>marl_attacks</code>), two agent types
+  collaborate via an internal message bus:
 </p>
 <ul>
   <li>
@@ -977,6 +1126,12 @@ agents:
 <h3>PPO / A2C assertion error at startup</h3>
 <ul>
   <li>Ensure <code>batch_size &lt; n_steps × n_envs</code>. With a single environment, set <code>batch_size = 1</code> or increase <code>n_steps</code>.</li>
+</ul>
+
+<h3>"Incompatible agent(s) for marl_pz" popup / an agent got auto-disabled</h3>
+<ul>
+  <li>This is expected: PPO and A2C are not supported in the <code>marl_pz</code> scenario. The Configuration UI automatically disables them and shows this warning whenever they would otherwise be enabled together with <code>marl_pz</code> — see <strong>MARL-PZ — Agent Compatibility</strong> above.</li>
+  <li>Switch to Q-Learning, SARSA, or DQN for <code>marl_pz</code>, or switch the scenario to <code>attacks_ho</code> / <code>marl_attacks</code> if you specifically need PPO/A2C.</li>
 </ul>
 
 <h3>PDF export fails</h3>

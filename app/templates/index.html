@@ -88,6 +88,13 @@
         <!-- ============================================== -->
         <div id="config-page" class="space-y-3">
 
+            <!-- Locked banner: shown while an experiment is running/paused -->
+            <div id="config-locked-banner"
+                class="hidden items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 text-sm font-medium px-4 py-2 rounded-xl">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                <span id="config-locked-banner-text">Configuration is locked while an experiment is running. Stop or wait for it to finish to make changes.</span>
+            </div>
+
             <!-- Header bar -->
             <div class="bg-white px-4 py-2 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-center gap-3 border border-gray-100">
                 <h2 class="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -115,7 +122,7 @@
                 <div class="flex border-b border-gray-200 bg-gray-50/70">
                     <button class="config-tab" data-tab="general">
                         <img src="{{ url_for('static', filename='images/gif/settings.gif') }}" class="w-4 h-4">
-                        General
+                        System
                     </button>
                     <button class="config-tab" data-tab="env">
                         <img src="{{ url_for('static', filename='images/gif/earth.gif') }}" class="w-4 h-4">
@@ -153,6 +160,10 @@
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
                                 Network
                             </button>
+                            <button class="env-sub-tab env-subtab-communication hidden" data-env-tab="communication">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                Communication
+                            </button>
                             <button class="env-sub-tab env-subtab-extra hidden" data-env-tab="extra">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
                                 Extra
@@ -173,6 +184,10 @@
                         <!-- Network: net_params -->
                         <div id="env-sub-network" class="env-sub-panel hidden">
                             <div id="env-network-list" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
+                        </div>
+                        <!-- Communication: communication + pettingzoo (marl_pz only) -->
+                        <div id="env-sub-communication" class="env-sub-panel hidden">
+                            <div id="env-communication-list" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
                         </div>
                         <!-- Extra: scenario generation/loading (attacks_ho / marl) -->
                         <div id="env-sub-extra" class="env-sub-panel hidden">
@@ -376,33 +391,37 @@
                         <canvas id="barChartBytes"></canvas>
                     </div>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-1 gap-6" id="charts-metrics-section">
-                    <div class="agent-section my-8 border-t border-gray-300 hidden">
-                        <details open class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
-                            <summary class="text-1xl font-semibold text-gray-800 mb-6 border-b pb-2 agent-title">Agent
-                                Name</summary>
-                            <div class="grid grid-cols-1 md:grid-cols-5 gap-6 agent-charts-data-section">
-                                <div class="agent-charts-section md:col-span-3">
-                                    <details close
-                                        class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
-                                        <summary class=" text-gray-800 mb-6 border-b pb-2 accuracy-chart-title">
-                                            Accuracy Chart </summary>
-                                        <div class="p-4 border rounded-lg shadow-sm">
-                                            <canvas class="lineChartAccuracy"></canvas>
-                                        </div>
-                                    </details>
-                                    <details close
-                                        class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
-                                        <summary class=" text-gray-800 mb-6 border-b pb-2 reward-chart-title">
-                                            Reward Chart </summary>
-                                        <div class="p-4 border rounded-lg shadow-sm">
-                                            <canvas class="lineChartReward"></canvas>
-                                        </div>
-                                    </details>
-                                </div>
-                                <div class="agent-data-section md:col-span-2"></div>
+                <!-- Agent tab bar + panels container -->
+                <div class="mt-4 flex flex-col" id="charts-metrics-section">
+                    <!-- Tab bar (populated dynamically, hidden until agents are initialized) -->
+                    <div id="agent-metrics-tab-bar"
+                        class="hidden flex-wrap border-b border-gray-200 overflow-x-auto bg-gray-50 rounded-t-xl px-1 pt-1 gap-0.5">
+                    </div>
+                    <!-- Template agent panel (hidden, cloned dynamically for each agent) -->
+                    <div class="agent-section border border-gray-200 bg-white hidden">
+                        <!-- Agent header with popup buttons (filled by JS) -->
+                        <div class="agent-title p-3 border-b border-gray-200 bg-gray-50 text-sm font-semibold text-gray-800 rounded-t-xl"></div>
+                        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 agent-charts-data-section p-2">
+                            <div class="agent-charts-section md:col-span-3">
+                                <details close
+                                    class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                                    <summary class=" text-gray-800 mb-6 border-b pb-2 accuracy-chart-title">
+                                        Accuracy Chart </summary>
+                                    <div class="p-4 border rounded-lg shadow-sm">
+                                        <canvas class="lineChartAccuracy"></canvas>
+                                    </div>
+                                </details>
+                                <details close
+                                    class="lg:col-span-1 bg-white p-2 rounded-xl shadow-xl border-gray-800 border">
+                                    <summary class=" text-gray-800 mb-6 border-b pb-2 reward-chart-title">
+                                        Reward Chart </summary>
+                                    <div class="p-4 border rounded-lg shadow-sm">
+                                        <canvas class="lineChartReward"></canvas>
+                                    </div>
+                                </details>
                             </div>
-                        </details>
+                            <div class="agent-data-section md:col-span-2"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -459,15 +478,25 @@
     <!-- Modal to show complete results of an experiment  -->
     <div id="result-modal"
         class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div id="result-modal-card" class="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
 
             <div class="p-6 border-b flex justify-between items-center bg-gray-50">
                 <h3 class="text-xl font-bold truncate">Results: <span id="result-path"
                         class="text-blue-600 font-mono text-sm ml-2"></span></h3>
-                <button id="close-result-panel-modal-btn"
-                    class="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors font-bold">
-                    ✕ Close
-                </button>
+                <div class="flex items-center gap-1">
+                    <button type="button" class="popup-fullscreen-btn text-gray-400 hover:text-gray-700 transition p-1"
+                        data-target="#result-modal-card" data-overlay="#result-modal"
+                        title="Fullscreen" aria-label="Toggle fullscreen">
+                        <svg class="fs-icon-expand w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9M20.25 20.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                        </svg>
+                        <svg class="fs-icon-compress w-5 h-5 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                        </svg>
+                    </button>
+                    <button id="close-result-panel-modal-btn"
+                        class="text-gray-400 hover:text-gray-700 text-3xl font-light leading-none transition ml-1" aria-label="Close">&times;</button>
+                </div>
             </div>
 
             <div id="result-modal-content" class="flex-1 overflow-y-auto p-6 space-y-6 bg-white">
@@ -477,7 +506,7 @@
     </div>
 
     <div id="image-zoom-overlay"
-        class="fixed inset-0 bg-black bg-opacity-90 z-[100] hidden flex flex-col items-center justify-center cursor-zoom-out">
+        class="fixed inset-0 bg-black bg-opacity-90 z-[121] hidden flex flex-col items-center justify-center cursor-zoom-out">
         <img id="zoomed-image" src="" class="max-w-[95%] max-h-[75vh] shadow-2xl rounded-lg border-2 border-white/20 object-contain">
         <div id="zoom-description-panel" class="hidden max-w-[90vw] mt-4 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl px-6 py-4 text-white text-sm cursor-default" style="max-height:20vh;overflow-y:auto;">
             <div id="zoom-description-title" class="font-semibold text-indigo-300 mb-1 text-base"></div>
@@ -496,10 +525,11 @@
             <h3 class="text-xl font-bold mb-4">Choose Model Directory</h3>
             <input type="hidden" id="model-dir-id">
 
-            <div class="grid grid-cols-3 font-bold border-b">
+            <div class="grid grid-cols-4 font-bold border-b">
                 <span id="sort-date" class="cursor-pointer hover:text-blue-500">Date</span>
                 <span id="sort-accuracy" class="cursor-pointer hover:text-blue-500">Accuracy</span>
                 <span>Bins</span>
+                <span>Comm</span>
             </div>
 
             <div class="h-96 overflow-y-scroll gap-6">
@@ -610,15 +640,27 @@
     <div id="manual-modal"
         class="fixed inset-0 bg-gray-900/80 backdrop-blur-sm z-[300] hidden items-center justify-center p-4"
         data-src="{{ url_for('static', filename='manual.html') }}">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style="height:90vh">
+        <div id="manual-modal-card" class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style="height:90vh">
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
                 <div class="flex items-center gap-3">
                     <span class="inline-flex items-center justify-center w-8 h-8 rounded-full border-2 border-violet-600 text-violet-700 font-bold text-sm">?</span>
                     <h2 class="text-xl font-bold text-gray-800">MininetGym — User Manual</h2>
                 </div>
-                <button onclick="closeManual()"
-                    class="text-gray-400 hover:text-gray-700 text-3xl font-light leading-none transition">&times;</button>
+                <div class="flex items-center gap-1">
+                    <button type="button" class="popup-fullscreen-btn text-gray-400 hover:text-gray-700 transition p-1"
+                        data-target="#manual-modal-card" data-overlay="#manual-modal"
+                        title="Fullscreen" aria-label="Toggle fullscreen">
+                        <svg class="fs-icon-expand w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9M20.25 20.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                        </svg>
+                        <svg class="fs-icon-compress w-5 h-5 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                        </svg>
+                    </button>
+                    <button onclick="closeManual()"
+                        class="text-gray-400 hover:text-gray-700 text-3xl font-light leading-none transition">&times;</button>
+                </div>
             </div>
             <!-- Body -->
             <div class="flex flex-1 min-h-0 overflow-hidden">
@@ -670,6 +712,7 @@
         window.closeManual = function () {
             modal.classList.add('hidden');
             modal.classList.remove('flex');
+            resetPopupFullscreen('#manual-modal-card', '#manual-modal');
         };
 
         window.closeLightbox = function () {

@@ -403,6 +403,49 @@ def plot_agent_cumulative_rewards(indicators, dir_name, title=''):
     plt.savefig(f"{dir_name}/rewards.png")
     plt.close()
 
+
+def plot_agent_cumulative_rewards_per_host(host_indicators, dir_name, title=''):
+    """Multi-host variant of plot_agent_cumulative_rewards for marl_pz joint training.
+
+    Plots one smoothed reward-per-episode line per host on a single chart
+    (host_indicators: {host_name: indicators_list}) instead of a single
+    dual-axis chart, since overlaying reward + correct_predictions + steps
+    for every host would be unreadable. Saves to the same filename
+    ("rewards.png") as the single-host version so no other code needs to
+    know which variant was used.
+    """
+    if not host_indicators:
+        return
+
+    palette = plt.cm.tab10.colors
+    max_episodes = max(
+        (len(indicators) for indicators in host_indicators.values()), default=0
+    )
+    x = min(60, 10 + 3 * int(max_episodes / 70))
+    y = min(30, 10 + int(max_episodes / 70))
+    fig, ax = plt.subplots(figsize=(x, y))
+
+    for i, (host_name, indicators) in enumerate(host_indicators.items()):
+        if not indicators:
+            continue
+        episodes = np.array([item['episode'] for item in indicators])
+        reward = [item['cumulative_reward'] for item in indicators]
+        color = palette[i % len(palette)]
+        mean, std = _rolling_smooth(reward)
+        ax.plot(episodes, reward, color=color, alpha=0.12, linewidth=0.8)
+        ax.plot(episodes, mean, label=host_name, color=color, linewidth=2)
+        ax.fill_between(episodes, mean - std, mean + std, alpha=0.15, color=color)
+
+    ax.set_title(f'{title} Cumulative Rewards (per host)')
+    ax.set_xlabel('Episodes')
+    ax.set_ylabel('Reward')
+    ax.legend()
+
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/rewards.png")
+    plt.close()
+
+
 def plot_agent_execution_confusion_matrix(indicators, dir_name, must_print = True, title=''):
     """print confusion matrix
 

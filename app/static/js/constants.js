@@ -61,6 +61,11 @@ const STATE_INPUT_MODES = [
     'normalized', 'raw'
 ];
 
+const COMM_STRATEGY_OPTIONS = [
+    'none', 'naive_broadcast', 'uaq',
+    'federated_sync', 'policy_exchange', 'experience_sharing', 'hierarchical'
+];
+
 let algoDefaults = {}; // keyed by lowercase algorithm name, loaded from /get_algo_defaults
 
 let socket = null;

@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", message=".*shimmy.*", category=UserWarning)
 import os
 import sys
 import shutil
@@ -51,6 +53,7 @@ def ensure_default_config_file():
 
 
 def start_experiment(config_dict, pause_event=None, stop_event=None):
+    config_dict.pop("training_execution_directory", None)  # clear stale path from previous run
     config = js.loads(js.dumps(config_dict), object_hook=Params)
 
     set_log_level(config.log_level)
@@ -123,6 +126,7 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
             "hosts":        [h.name for h in env.hosts],
             "agents":       [agent.name for agent in config.agents if agent.enabled],
             "isMultiAgent": isMultiAgent,
+            "commStrategy": getattr(env, "_comm_strategy", None),
         }
         notify_client(level=SystemLevels.CONFIG, config=cfg)
         socketio.cfg = cfg

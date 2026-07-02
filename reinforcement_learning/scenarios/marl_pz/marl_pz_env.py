@@ -30,6 +30,7 @@ import numpy as np
 from colorama import Fore
 from gymnasium import spaces
 import gymnasium as gym
+from pettingzoo import ParallelEnv
 
 from reinforcement_learning.network_env import (
     NetworkEnv,
@@ -67,6 +68,7 @@ from .constants import (
     COORDINATOR_ACTIONS,
     COORDINATOR_REWARDS,
     COORDINATOR_STATUS_ID_MAPPING,
+    CommStrategy,
     HOST_STATUS_ID_MAPPING,
     NORMALIZED,
     RAW,
@@ -104,16 +106,20 @@ def _discretize_obs(obs: np.ndarray, low: np.ndarray, high: np.ndarray,
 # MarlPzEnv
 # ────────────────────────────────────────────────────────────────────────────
 
-class MarlPzEnv(NetworkEnv):
+class MarlPzEnv(NetworkEnv, ParallelEnv):
     """
-    PettingZoo-style parallel MARL environment for network attack detection.
+    PettingZoo-compatible parallel MARL environment for network attack detection.
+
+    Inherits from NetworkEnv (Mininet/gym machinery) and PettingZoo ParallelEnv
+    (parallel multi-agent interface).  The PZ interface takes precedence for
+    reset() / step() signatures; gym-compat is provided via SingleAgentView.
 
     Each host has its own agent observing local traffic.
-    A coordinator agent aggregates signals from all hosts.
+    A coordinator agent (optional) aggregates signals from all hosts.
     All agents act simultaneously each step.
     """
 
-    metadata = {"name": "marl_pz_v1", "render_modes": ["human"]}
+    metadata = {"name": "marl_pz_v1", "render_modes": ["human", "rgb_array"]}
 
     # ------------------------------------------------------------------
     # Construction
@@ -151,6 +157,60 @@ class MarlPzEnv(NetworkEnv):
             getattr(params.attacks, 'unblock_required_normal_streak', 2)
         )
 
+        # ── Communication strategy ────────────────────────────────────────
+        comm_cfg = getattr(params, 'communication', None) or {}
+        if not isinstance(comm_cfg, dict):
+            comm_cfg = vars(comm_cfg) if hasattr(comm_cfg, '__dict__') else {}
+
+        strategy = comm_cfg.get('strategy', None)
+        if strategy is None:
+            # Backward compat: derive from legacy use_coordinator param
+            strategy = (CommStrategy.NAIVE_BROADCAST
+                        if self._use_coordinator else CommStrategy.NONE)
+
+        if strategy not in CommStrategy.IMPLEMENTED:
+            raise NotImplementedError(
+                f"Communication strategy '{strategy}' is not yet implemented. "
+                f"Implemented strategies: {CommStrategy.IMPLEMENTED}"
+            )
+
+        self._comm_strategy: str = strategy
+
+        # Strategy is the master switch for coordinator presence
+        self._use_coordinator = (strategy != CommStrategy.NONE)
+
+        # UAQ (S1) params — only active when strategy == CommStrategy.UAQ
+        uaq_cfg = comm_cfg.get('uaq', {}) or {}
+        if not isinstance(uaq_cfg, dict):
+            uaq_cfg = vars(uaq_cfg) if hasattr(uaq_cfg, '__dict__') else {}
+        self._uaq_tau: float        = float(uaq_cfg.get('tau', 0.8))
+        self._uaq_tau_expert: float = float(uaq_cfg.get('tau_expert', 0.3))
+        self._uaq_cooldown: int     = int(uaq_cfg.get('cooldown_steps', 5))
+
+        # Per-agent entropy (injected by training loop each step; default = 1.0 = max uncertain)
+        self._uaq_uncertainties: Dict[str, float] = {}
+
+        # Full comm config dict — exposed for training-loop helpers (S2/S3/S4)
+        # Deep-convert any nested Params objects so callers can use .get() safely.
+        def _deep_to_dict(obj):
+            if hasattr(obj, '__dict__'):
+                return {k: _deep_to_dict(v) for k, v in vars(obj).items()}
+            return obj
+        self._comm_cfg: dict = {k: _deep_to_dict(v) for k, v in comm_cfg.items()}
+
+        # Per-episode message counters (reset on env.reset(); read by training loop for logging)
+        #   host_total   — host→coordinator messages with value != 0 (any alert)
+        #   confident    — UAQ only: messages with value == 2 (confident attack)
+        #   uncertain    — UAQ only: messages with value == 1 (uncertain, filtered out)
+        self._ep_msgs: dict = {'host_total': 0, 'confident': 0, 'uncertain': 0}
+
+        # Per-episode, per-host alert message counters (mirrors _ep_msgs but broken
+        # down by host, so results/live view can show which host is communicating).
+        # {host_name: {'total': int, 'confident': int, 'uncertain': int}}
+        self._ep_msgs_per_host: Dict[str, dict] = {
+            h.name: {'total': 0, 'confident': 0, 'uncertain': 0} for h in self.hosts
+        }
+
         # PettingZoo agent lists (coordinator included only if enabled)
         self.possible_agents: List[str] = (
             [h.name for h in self.net.hosts] + ([COORDINATOR] if self._use_coordinator else [])
@@ -173,6 +233,23 @@ class MarlPzEnv(NetworkEnv):
 
         # n_bins for tabular agents
         self.n_bins = params.n_bins
+
+        # ── PettingZoo parameters ──────────────────────────────────────
+        pz_cfg = getattr(params, 'pettingzoo', None) or {}
+        if not isinstance(pz_cfg, dict):
+            pz_cfg = vars(pz_cfg) if hasattr(pz_cfg, '__dict__') else {}
+        self._local_ratio: float = float(pz_cfg.get('local_ratio', 1.0))
+        self._shared_reward: bool = bool(pz_cfg.get('shared_reward', False))
+        self._render_mode = pz_cfg.get('render_mode', None)
+        max_cycles = pz_cfg.get('max_cycles', None)
+        if max_cycles is not None and str(max_cycles).lower() not in ('null', 'none', ''):
+            self.max_steps = int(max_cycles)
+
+        # Remove gym-compat singular attrs so PZ observation_space(agent) /
+        # action_space(agent) methods are reachable (not shadowed by instance attrs).
+        # Agent-level gym access is provided by SingleAgentView.
+        self.__dict__.pop('observation_space', None)
+        self.__dict__.pop('action_space', None)
 
         # Shared state
         coordinator_state = np.zeros(4, dtype=np.float32)
@@ -262,36 +339,56 @@ class MarlPzEnv(NetworkEnv):
         n_host_feat = n_host_raw + (1 if self._use_coordinator else 0)
         n_coord_feat = 5
 
-        # Per-agent spaces (all normalized to [0,1])
-        self._observation_spaces: Dict[str, spaces.Box] = {}
-        self._action_spaces: Dict[str, spaces.Discrete] = {}
+        # PettingZoo public dicts: observation_spaces[agent] / action_spaces[agent]
+        # Bounds match the raw observations returned by step()/reset() (_get_obs_raw).
+        # SingleAgentView creates its own Box(0,1) space when state_mode=NORMALIZED.
+        self.observation_spaces: Dict[str, spaces.Box] = {}
+        self.action_spaces: Dict[str, spaces.Discrete] = {}
 
         for agent_id in self.possible_agents:
             if agent_id == COORDINATOR:
-                self._observation_spaces[agent_id] = spaces.Box(
-                    low=np.zeros(n_coord_feat, dtype=np.float32),
-                    high=np.ones(n_coord_feat, dtype=np.float32),
+                self.observation_spaces[agent_id] = spaces.Box(
+                    low=self._coord_low_raw,
+                    high=self._coord_high_raw,
                     dtype=np.float32,
                 )
-                self._action_spaces[agent_id] = spaces.Discrete(COORDINATOR_ACTIONS.NUMBER)
+                self.action_spaces[agent_id] = spaces.Discrete(COORDINATOR_ACTIONS.NUMBER)
             else:
-                self._observation_spaces[agent_id] = spaces.Box(
-                    low=np.zeros(n_host_feat, dtype=np.float32),
-                    high=np.ones(n_host_feat, dtype=np.float32),
+                self.observation_spaces[agent_id] = spaces.Box(
+                    low=self._host_low_raw,
+                    high=self._host_high_raw,
                     dtype=np.float32,
                 )
-                self._action_spaces[agent_id] = spaces.Discrete(AGENT_ACTIONS.NUMBER)
+                self.action_spaces[agent_id] = spaces.Discrete(AGENT_ACTIONS.NUMBER)
 
         # Gymnasium compat (first host space is the default)
         first_host = self.hosts[0].name if self.hosts else COORDINATOR
-        self.observation_space = self._observation_spaces[first_host]
-        self.action_space = self._action_spaces[first_host]
+        self.observation_space = self.observation_spaces[first_host]
+        self.action_space = self.action_spaces[first_host]
 
         # Normalize bounds shortcuts
         self.low  = self._host_low_raw
         self.high = self._host_high_raw
         self.low_to_normalize  = self.low
         self.high_to_normalize = self.high
+
+    # ------------------------------------------------------------------
+    # PettingZoo API — required overrides
+    # ------------------------------------------------------------------
+
+    def observation_space(self, agent: str) -> spaces.Space:
+        """Return the observation space for agent (PettingZoo API)."""
+        return self.observation_spaces[agent]
+
+    def action_space(self, agent: str) -> spaces.Space:
+        """Return the action space for agent (PettingZoo API)."""
+        return self.action_spaces[agent]
+
+    def state(self) -> np.ndarray:
+        """Global state for centralized-training / CTDE algorithms (PZ API)."""
+        return self.global_state.state
+
+    # ------------------------------------------------------------------
 
     def _init_messages(self) -> dict:
         """Create empty message dicts: each agent receives messages from all others."""
@@ -300,6 +397,21 @@ class MarlPzEnv(NetworkEnv):
         for agent_id in agent_list:
             msgs[agent_id] = {s: 0 for s in agent_list if s != agent_id}
         return msgs
+
+    def set_agent_uncertainty(self, agent_id: str, entropy_normalized: float):
+        """Inject per-agent policy entropy for UAQ (S1) strategy.
+
+        Called by the training loop *before* env.step() on each step.
+        entropy_normalized ∈ [0..1]:
+          1.0 = maximum uncertainty (uniform policy — all Q-values equal)
+          0.0 = fully certain (all probability mass on one action)
+
+        The value is used in _execute_agent_action() to encode host messages:
+          H > tau         → uncertain flag  → alert filtered by coordinator
+          H <= tau_expert → confident flag  → alert reaches coordinator obs
+          tau_expert < H <= tau → moderate confidence → no message sent
+        """
+        self._uaq_uncertainties[agent_id] = float(np.clip(entropy_normalized, 0.0, 1.0))
 
     # ------------------------------------------------------------------
     # PettingZoo interface
@@ -320,6 +432,12 @@ class MarlPzEnv(NetworkEnv):
         self._total_count = 0
         self.agents = list(self.possible_agents)
         self._agent_corrects = {a: 0 for a in self.possible_agents}
+
+        # Reset per-episode message counters
+        self._ep_msgs = {'host_total': 0, 'confident': 0, 'uncertain': 0}
+        self._ep_msgs_per_host = {
+            h.name: {'total': 0, 'confident': 0, 'uncertain': 0} for h in self.hosts
+        }
 
         # Reset anti-oscillation counters
         for h in self.hosts:
@@ -364,9 +482,20 @@ class MarlPzEnv(NetworkEnv):
         # Snapshot ground-truth BEFORE applying actions
         ground_truths = self._snapshot_ground_truths()
 
-        # Calculate per-agent rewards
+        # Calculate per-agent individual rewards
         rewards = {a: self._reward_for_agent(a, actions.get(a, 0), ground_truths[a])
                    for a in self.possible_agents}
+
+        # Apply PettingZoo local_ratio / shared_reward blending
+        if self._shared_reward and rewards:
+            mean_r = sum(rewards.values()) / len(rewards)
+            rewards = {a: mean_r for a in rewards}
+        elif self._local_ratio < 1.0 and rewards:
+            mean_r = sum(rewards.values()) / len(rewards)
+            rewards = {
+                a: self._local_ratio * r + (1.0 - self._local_ratio) * mean_r
+                for a, r in rewards.items()
+            }
 
         # Execute per-agent actions (drop rules, messages)
         for a in self.possible_agents:
@@ -562,6 +691,7 @@ class MarlPzEnv(NetworkEnv):
             self.global_state.links_status[host.name] = 1 if self.status_links[i] else 0
 
         traffic_data = self.global_state.get_network_traffic_status()
+        traffic_data["commData"] = self.global_state.get_comm_snapshot(self._comm_strategy)
         notify_client(level=SystemLevels.DATA, traffic_data=traffic_data)
 
         if (self.gym_type == GYM_TYPE[MARL_PZ]
@@ -614,10 +744,13 @@ class MarlPzEnv(NetworkEnv):
         """Return the raw (non-normalized) observation for one agent."""
         if agent_id == COORDINATOR:
             cs = self.global_state.coordinator_state
-            msg_count = float(sum(
-                1 for v in self.global_state.get_messages(COORDINATOR).values()
-                if v != 0
-            ))
+            msgs = self.global_state.get_messages(COORDINATOR)
+            if self._comm_strategy == CommStrategy.UAQ:
+                # UAQ: coordinator sees only *confident* alerts (msg_val == 2)
+                msg_count = float(sum(1 for v in msgs.values() if v == 2))
+            else:
+                # naive_broadcast: any non-zero message counts
+                msg_count = float(sum(1 for v in msgs.values() if v != 0))
             raw = np.array([cs[0], cs[1], cs[2], cs[3], msg_count], dtype=np.float32)
             return np.clip(raw, self._coord_low_raw, self._coord_high_raw)
         else:
@@ -796,13 +929,12 @@ class MarlPzEnv(NetworkEnv):
                                ground_truth: dict):
         """Execute action side-effects: drop rules and messaging."""
         if agent_id == COORDINATOR:
-            # Broadcast attack alert to all hosts
-            if action == CoordinatorActions.ATTACK:
-                for h in self.hosts:
-                    self.global_state.set_message(h.name, COORDINATOR, 1)
-            else:
-                for h in self.hosts:
-                    self.global_state.set_message(h.name, COORDINATOR, 0)
+            # Coordinator broadcasts its RL decision to all hosts.
+            # Both naive_broadcast and UAQ use the coordinator's own action;
+            # the difference lies in what the coordinator *observes* (see _get_obs_raw).
+            broadcast_val = 1 if action == CoordinatorActions.ATTACK else 0
+            for h in self.hosts:
+                self.global_state.set_message(h.name, COORDINATOR, broadcast_val)
             return
 
         # Host agent
@@ -812,12 +944,46 @@ class MarlPzEnv(NetworkEnv):
         if host_index is None:
             return
 
-        # Send message to coordinator (only when coordinator is enabled)
-        if self._use_coordinator:
-            self.global_state.set_message(
-                COORDINATOR, agent_id,
-                1 if action != AGENT_ACTIONS.NORMAL_TRAFFIC else 0
-            )
+        # Send message to coordinator (only when a communication strategy is active)
+        if self._comm_strategy == CommStrategy.NAIVE_BROADCAST:
+            # S0: binary alert — 0 = normal, 1 = attack (any direction)
+            msg_val = 1 if action != AGENT_ACTIONS.NORMAL_TRAFFIC else 0
+            self.global_state.set_message(COORDINATOR, agent_id, msg_val)
+            if msg_val != 0:
+                self._ep_msgs['host_total'] += 1
+                self._ep_msgs_per_host[agent_id]['total'] += 1
+        elif self._comm_strategy == CommStrategy.UAQ:
+            # S1: three-valued message encoding:
+            #   0 = no attack, OR attack with moderate confidence
+            #       (tau_expert < H <= tau) — host withholds the alert
+            #   1 = attack, *uncertain* (H > tau) — filtered by coordinator
+            #   2 = attack, *confident* (H <= tau_expert) — reaches coordinator obs
+            entropy = self._uaq_uncertainties.get(agent_id, 1.0)
+            is_confident = entropy <= self._uaq_tau_expert
+            is_uncertain = entropy > self._uaq_tau
+            if action == AGENT_ACTIONS.NORMAL_TRAFFIC:
+                msg_val = 0
+            elif is_confident:
+                msg_val = 2
+            elif is_uncertain:
+                msg_val = 1
+            else:
+                # Moderate confidence (tau_expert < H <= tau): not certain enough
+                # to be trusted as "confident", not uncertain enough to warrant
+                # flagging — the host stays silent to reduce alert overhead.
+                msg_val = 0
+            self.global_state.set_message(COORDINATOR, agent_id, msg_val)
+            if msg_val == 2:
+                self._ep_msgs['confident'] += 1
+                self._ep_msgs['host_total'] += 1
+                self._ep_msgs_per_host[agent_id]['confident'] += 1
+                self._ep_msgs_per_host[agent_id]['total'] += 1
+            elif msg_val == 1:
+                self._ep_msgs['uncertain'] += 1
+                self._ep_msgs['host_total'] += 1
+                self._ep_msgs_per_host[agent_id]['uncertain'] += 1
+                self._ep_msgs_per_host[agent_id]['total'] += 1
+        # CommStrategy.NONE: no message sent
 
         if not self._apply_drop_rules:
             return
@@ -855,6 +1021,8 @@ class MarlPzEnv(NetworkEnv):
                     ground_truth: dict, done: bool, truncated: bool) -> dict:
         """Build the infos dict for a single agent (compatible with base_agent.manage_step_data)."""
         gt_id = ground_truth.get('id', 0)
+        if gt_id < 0:
+            gt_id = 0
         gt_status = ground_truth.get('status', 'normal')
         is_correct = self._is_action_correct(agent_id, action, ground_truth)
 
@@ -932,8 +1100,18 @@ class SingleAgentView(gym.Env):
         self.state_mode = state_mode
         self.is_coordinator = (agent_id == COORDINATOR)
 
-        self.observation_space = marl_env._observation_spaces[agent_id]
-        self.action_space = marl_env._action_spaces[agent_id]
+        # RAW: inherit raw bounds that match what MarlPzEnv.step() actually returns.
+        # NORMALIZED: SingleAgentView normalizes obs to [0,1], so declare Box(0,1).
+        if state_mode == NORMALIZED:
+            n_feat = marl_env.observation_spaces[agent_id].shape[0]
+            self.observation_space = spaces.Box(
+                low=np.zeros(n_feat, dtype=np.float32),
+                high=np.ones(n_feat, dtype=np.float32),
+                dtype=np.float32,
+            )
+        else:
+            self.observation_space = marl_env.observation_spaces[agent_id]
+        self.action_space = marl_env.action_spaces[agent_id]
 
         # Attributes expected by tabular agents
         self.n_bins = marl_env.n_bins

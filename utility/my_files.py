@@ -198,18 +198,16 @@ def create_directory_training_execution(config, agent_name = None):
         except Exception as e:
             error(f"An error occurred: {e}")
      
-    #create execution directory 
+    #create execution directory
     timestr = time.strftime("%Y%m%d-%H%M%S")
     if agent_name is None:
-        directory_name= f"{training_gym_type_directory}/{timestr}_{config.net_config_filter}"
-    else:    
-        directory_name= f"{config.training_execution_directory}/{agent_name}"
-        
+        directory_name = f"{training_gym_type_directory}/{timestr}_{config.net_config_filter}"
+    else:
+        directory_name = f"{config.training_execution_directory}/{agent_name}"
+
     try:
-        os.mkdir(directory_name)
+        os.makedirs(directory_name, exist_ok=True)
         information(f"Directory '{directory_name}' created successfully.\n")
-    except FileExistsError:
-        error(f"Directory '{directory_name}' already exists.\n")
     except PermissionError:
         error(f"Permission denied: Unable to create '{directory_name}'.\n")
     except Exception as e:

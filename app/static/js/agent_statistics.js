@@ -136,25 +136,6 @@ function initializeLineChartReward(agent, hostsDataset = [], canvasEl) {
 }
 
 
-function buildRestoredChartDataset(agentName, metricName, rawSeries) {
-    const colorPrefix = metricName === 'accuracy' ? 'acc' : 'rew';
-    if (isMultiAgentMode) { 
-        colorPrefix += agentName;
-    } 
-    const color = getAgentColor(colorPrefix);
-    return [{
-        label: agentName,
-        data: rawSeries,
-        borderColor: color,
-        backgroundColor: addTransparency(color, 0.2),
-        borderWidth: 2,
-        pointRadius: 4,
-        pointBackgroundColor: color,
-        tension: 0.1,
-        fill: false,
-    }];
-}
-
 function ensureChartRedraw(chart, expectedLen) {
     if (!chart) return;
     try {
@@ -181,6 +162,57 @@ function ensureChartRedraw(chart, expectedLen) {
 }
 
 
+/**
+ * Applies a restored {labels, datasets: {key: [values...]}} series onto a
+ * chart, matching/creating datasets by label (one per host in multi-agent
+ * mode, one per agent otherwise) — mirrors how updateLineChartAccuracy /
+ * updateLineChartReward build datasets during live updates, so restored
+ * charts look identical to charts that were never reloaded.
+ */
+function applyRestoredHostSeries(chart, hostShapedData, isAccuracy) {
+    if (!chart || !hostShapedData || !Array.isArray(hostShapedData.labels) || hostShapedData.labels.length === 0) {
+        return false;
+    }
+    const labels = hostShapedData.labels;
+    let didApply = false;
+
+    Object.keys(hostShapedData.datasets || {}).forEach(key => {
+        const raw = hostShapedData.datasets[key];
+        if (!Array.isArray(raw) || raw.length === 0) return;
+
+        let dataset = chart.data.datasets.find(ds => ds.label === key);
+        if (!dataset) {
+            const colorPrefix = (isAccuracy ? 'acc' : 'rew') + (isMultiAgentMode ? key : '');
+            const color = getAgentColor(colorPrefix);
+            dataset = {
+                label: key,
+                data: [],
+                borderColor: color,
+                backgroundColor: addTransparency(color, 0.2),
+                borderWidth: 2,
+                pointRadius: 4,
+                pointBackgroundColor: color,
+                tension: 0.1,
+                fill: false,
+            };
+            chart.data.datasets.push(dataset);
+        }
+        dataset.data = labels.map((_, i) => {
+            if (i >= raw.length) return null;
+            const value = Number(raw[i]);
+            return isAccuracy ? value * 100 : value;
+        });
+        didApply = true;
+    });
+
+    if (didApply) {
+        chart.data.labels = labels;
+        chart.update();
+        ensureChartRedraw(chart, labels.length);
+    }
+    return didApply;
+}
+
 function restoreAgentsChartsFromRawData(rawChartData) {
     const payload = rawChartData || chartDataRaw;
     if (!payload || !currentConfig || !currentConfig.cfg) {
@@ -202,24 +234,20 @@ function restoreAgentsChartsFromRawData(rawChartData) {
         console.groupCollapsed(`restoreAgentsChartsFromRawData: agent='${agent}'`);
         if (!accuracyChart) {
             if (currentConfig.cfg && currentConfig.cfg.agents && currentConfig.cfg.hosts) {
-                initializeAgentsCharts(currentConfig.cfg.isMultiAgent, currentConfig.cfg.agents, currentConfig.cfg.hosts); // Initialize all charts with config data        
+                initializeAgentsCharts(currentConfig.cfg.isMultiAgent, currentConfig.cfg.agents, currentConfig.cfg.hosts); // Initialize all charts with config data
             }
             console.log(' -> accuracyChart: not found, attempted re-initialization');
         }
-        if (accuracyChart && accuracyRaw !== null && accuracyRaw !== undefined) {
-            // open the details
-            $(`[data-agent="${agent}"]`).find('.agent-charts-section').find('details').prop('open', true);
-
-            const accuracySeries = extractNumericSeries(accuracyRaw, true);
-            if (accuracySeries && accuracySeries.length > 0) {
-                console.log(' -> accuracy: restoring', accuracySeries.length, 'points');
-                accuracyChart.data.labels = accuracySeries.map((_, index) => index + 1); // Episodes start at 1
-                accuracyChart.data.datasets = buildRestoredChartDataset(agent, 'accuracy', accuracySeries);
-                accuracyChart.update();
-                ensureChartRedraw(accuracyChart, accuracySeries.length);
-                didUpdate = true;
+        if (accuracyChart && accuracyRaw) {
+            // mark tab as finished and open its charts if visible
+            if (typeof setAgentMetricsTabStatus === 'function') {
+                setAgentMetricsTabStatus(agent, 'finished');
             }
-            else {
+
+            if (applyRestoredHostSeries(accuracyChart, accuracyRaw, true)) {
+                console.log(' -> accuracy: restored');
+                didUpdate = true;
+            } else {
                 console.log(' -> accuracy: skipped (empty series)');
             }
         }
@@ -230,17 +258,11 @@ function restoreAgentsChartsFromRawData(rawChartData) {
             console.log(' -> accuracy: skipped (null/undefined from chart instance)');
         }
 
-        if (rewardChart && rewardRaw !== null && rewardRaw !== undefined) {
-            const rewardSeries = extractNumericSeries(rewardRaw, false); // Try to extract reward series, allowing for more flexible formats
-            if (rewardSeries && rewardSeries.length > 0) {
-                console.log(' -> reward: restoring', rewardSeries.length, 'points');
-                rewardChart.data.labels = rewardSeries.map((_, index) => index + 1); // Episodes start at 1
-                rewardChart.data.datasets = buildRestoredChartDataset(agent, 'reward', rewardSeries);
-                rewardChart.update();
-                ensureChartRedraw(rewardChart, rewardSeries.length);
+        if (rewardChart && rewardRaw) {
+            if (applyRestoredHostSeries(rewardChart, rewardRaw, false)) {
+                console.log(' -> reward: restored');
                 didUpdate = true;
-            }
-            else {
+            } else {
                 console.log(' -> reward: skipped (empty series)');
             }
         }
@@ -253,6 +275,18 @@ function restoreAgentsChartsFromRawData(rawChartData) {
 
         console.groupEnd();
     });
+
+    // Activate the first agent tab that has restored data
+    if (didUpdate && typeof activateAgentMetricsTab === 'function') {
+        const firstRestored = configuredAgents.find(a => {
+            const hasAcc = payload.accuracy && payload.accuracy[a] !== undefined;
+            const hasRew = payload.reward  && payload.reward[a]  !== undefined;
+            return hasAcc || hasRew;
+        });
+        if (firstRestored) {
+            activateAgentMetricsTab(firstRestored);
+        }
+    }
 
     return didUpdate;
 }
@@ -393,6 +427,67 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
         }
     }
 
+    // === Build tab bar ===
+    // Preserve statuses from a previous call (e.g. socket reconnect or the
+    // reload-recovery flow both re-run this) so an agent already known to be
+    // 'running'/'finished' doesn't visually fall back to 'waiting'.
+    const previousTabStatuses = agentTabStatuses;
+    agentTabStatuses = {};
+    const tabBar = $('#agent-metrics-tab-bar');
+    tabBar.empty();
+    const isSequential = isSequentialMarlEnv();
+
+    for (let i = 0; i < agents.length; i++) {
+        const agentName = agents[i];
+        const initialStatus = previousTabStatuses[agentName]
+            || (isSequential ? 'waiting' : 'running');
+        agentTabStatuses[agentName] = initialStatus;
+
+        const isActive = (i === 0);
+        const badgeClass = _agentTabBadgeClasses(initialStatus);
+        const badgeText  = _agentTabBadgeText(initialStatus);
+        const activeTabClass = isActive
+            ? 'border-blue-600 text-blue-700 bg-white'
+            : 'border-transparent text-gray-500';
+
+        const tabBtn = $(`
+            <button type="button"
+                class="agent-metrics-tab flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap transition-colors hover:text-gray-700 ${activeTabClass}"
+                data-agent="${escapeAgentSummaryHtml(agentName)}">
+                <span class="agent-tab-name">${escapeAgentSummaryHtml(agentName)}</span>
+                <span class="agent-tab-status-badge inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${badgeClass}">${badgeText}</span>
+            </button>
+        `);
+        tabBar.append(tabBtn);
+    }
+
+    if (agents.length > 0) {
+        tabBar.addClass('flex').removeClass('hidden');
+    }
+
+    // Show only the first agent panel; for parallel scenarios open charts immediately
+    for (let i = 0; i < agents.length; i++) {
+        const agentName = agents[i];
+        const section = $(`#charts-metrics-section .agent-section[data-agent="${agentName}"]`);
+        if (i === 0) {
+            section.removeClass('hidden');
+            if (!isSequential) {
+                section.find('.agent-charts-section details').prop('open', true);
+            }
+        } else {
+            section.addClass('hidden');
+        }
+    }
+    // === End tab bar ===
+
+    // Reload/reconnect recovery: server told us which agent is currently
+    // training/evaluating (see /get_training_status's current_agent field).
+    // Applied here, after tabs exist, regardless of which caller triggered
+    // this rebuild.
+    if (window.pendingCurrentTrainingAgent) {
+        applyCurrentAgentFromServer(window.pendingCurrentTrainingAgent);
+    }
+
     if (typeof applyPendingChartRestore === 'function') {
         applyPendingChartRestore();
     }
@@ -403,6 +498,134 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
         restoreEvaluationResultsButtonStates();
     }
 }
+
+// ====================================================================
+// AGENT METRICS TAB MANAGEMENT
+// ====================================================================
+
+let agentTabStatuses = {}; // agentName → 'waiting' | 'running' | 'finished'
+
+/**
+ * Returns true for marl_* gym types where agents train sequentially.
+ * Returns false for classification/attacks where agents run in parallel.
+ */
+function isSequentialMarlEnv() {
+    const gymType = String(
+        (currentConfig && currentConfig.env_params && currentConfig.env_params.gym_type) || ''
+    ).toLowerCase();
+    return gymType.startsWith('marl_') || gymType.startsWith('attacks_ho');
+}
+
+function _agentTabBadgeClasses(status) {
+    if (status === 'running')  return 'bg-green-100 text-green-700';
+    if (status === 'finished') return 'bg-blue-100 text-blue-700';
+    return 'bg-gray-200 text-gray-600';
+}
+
+function _agentTabBadgeText(status) {
+    if (status === 'running')  return 'Running';
+    if (status === 'finished') return 'Finished';
+    return 'Waiting';
+}
+
+/**
+ * Switches the visible agent panel to agentName and highlights its tab button.
+ */
+function activateAgentMetricsTab(agentName) {
+    // Update tab button styles
+    $('#agent-metrics-tab-bar .agent-metrics-tab').each(function () {
+        const isActive = $(this).data('agent') === agentName;
+        $(this)
+            .toggleClass('border-blue-600 text-blue-700 bg-white', isActive)
+            .toggleClass('border-transparent text-gray-500', !isActive);
+    });
+
+    // Show the matching panel, hide all others
+    $('#charts-metrics-section .agent-section[data-agent]').each(function () {
+        const isActive = $(this).data('agent') === agentName;
+        $(this).toggleClass('hidden', !isActive);
+    });
+
+    // If the agent has data (running or finished), open its charts
+    const status = agentTabStatuses[agentName];
+    if (status === 'running' || status === 'finished') {
+        const panel = $(`#charts-metrics-section .agent-section[data-agent="${agentName}"]`);
+        panel.find('.agent-charts-section details').prop('open', true);
+    }
+}
+
+/**
+ * Updates the status badge on the agent's tab button and
+ * opens charts when the agent becomes active/finished.
+ */
+function setAgentMetricsTabStatus(agentName, status) {
+    agentTabStatuses[agentName] = status;
+
+    const tab = $(`#agent-metrics-tab-bar .agent-metrics-tab[data-agent="${agentName}"]`);
+    if (!tab.length) return;
+
+    const badge = tab.find('.agent-tab-status-badge');
+    badge
+        .removeClass('bg-gray-200 text-gray-600 bg-green-100 text-green-700 bg-blue-100 text-blue-700')
+        .addClass(_agentTabBadgeClasses(status))
+        .text(_agentTabBadgeText(status));
+
+    // Open charts if the panel is currently visible
+    if (status === 'running' || status === 'finished') {
+        const panel = $(`#charts-metrics-section .agent-section[data-agent="${agentName}"]`);
+        if (!panel.hasClass('hidden')) {
+            panel.find('.agent-charts-section details').prop('open', true);
+        }
+    }
+}
+
+/**
+ * Called from statistics.js whenever chart data arrives for an agent.
+ * Transitions the agent from 'waiting' → 'running' and, in sequential MARL,
+ * auto-activates that agent's tab.
+ */
+function notifyAgentChartUpdated(agentName) {
+    const current = agentTabStatuses[agentName];
+    if (!current || current === 'waiting') {
+        setAgentMetricsTabStatus(agentName, 'running');
+        if (isSequentialMarlEnv()) {
+            activateAgentMetricsTab(agentName);
+        }
+    }
+}
+
+/**
+ * Called after reload/reconnect recovery (/get_training_status) with the
+ * agent the server says is currently training/evaluating. Live metric
+ * messages can take a while to arrive for slow environments (e.g. Mininet
+ * network-step simulation), so without this the tab would show 'Waiting'
+ * even though the agent is actively running.
+ */
+function applyCurrentAgentFromServer(agentName) {
+    if (!agentName || !(agentName in agentTabStatuses)) return;
+    if (agentTabStatuses[agentName] === 'finished') return;
+    setAgentMetricsTabStatus(agentName, 'running');
+    if (isSequentialMarlEnv()) {
+        activateAgentMetricsTab(agentName);
+    }
+}
+
+/**
+ * Resets all tab state (called on new training run).
+ */
+function resetAgentMetricsTabState() {
+    agentTabStatuses = {};
+    const tabBar = $('#agent-metrics-tab-bar');
+    tabBar.empty().addClass('hidden').removeClass('flex');
+}
+
+// Tab click delegation
+$(document).on('click', '#agent-metrics-tab-bar .agent-metrics-tab', function () {
+    const agentName = $(this).data('agent');
+    activateAgentMetricsTab(agentName);
+});
+
+// ====================================================================
 
 function escapeAgentSummaryHtml(text) {
     return String(text ?? '')
@@ -503,7 +726,7 @@ function renderMetricCards(summary) {
     return cards.map(([label, value]) => `
         <div class="bg-white border border-slate-200 rounded-xl p-3">
             <div class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">${escapeAgentSummaryHtml(label)}</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeAgentSummaryHtml(value)}</div>
+            <div class="text-sm font-bold text-slate-500 mt-1">${escapeAgentSummaryHtml(value)}</div>
         </div>
     `).join('');
 }
@@ -527,7 +750,7 @@ function renderExtraMetrics(summary) {
         .map(metricKey => `
             <div class="flex items-center justify-between text-sm border-b border-slate-100 py-1.5">
                 <span class="text-slate-300 font-medium">${escapeAgentSummaryHtml(metricLabels[metricKey])}</span>
-                <span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(formatTrainingMetricValue(metricKey, latestMetrics[metricKey]))}</span>
+                <span class="font-semibold text-slate-500">${escapeAgentSummaryHtml(formatTrainingMetricValue(metricKey, latestMetrics[metricKey]))}</span>
             </div>
         `)
         .join('');
@@ -637,7 +860,7 @@ function renderEvaluationMetricCards(summary) {
     return cards.map(([label, value]) => `
         <div class="bg-white border border-amber-200 rounded-xl p-3">
             <div class="text-[11px] uppercase tracking-wide text-amber-700 font-semibold">${escapeAgentSummaryHtml(label)}</div>
-            <div class="text-sm font-bold text-slate-800 mt-1">${escapeAgentSummaryHtml(value)}</div>
+            <div class="text-sm font-bold text-slate-500 mt-1">${escapeAgentSummaryHtml(value)}</div>
         </div>
     `).join('');
 }
@@ -655,10 +878,10 @@ function renderEvaluationMitigation(summary) {
         <div class="bg-white border border-amber-200 rounded-xl p-4">
             <div class="text-xs font-bold uppercase text-amber-700 mb-2">Attack Mitigation</div>
             <div class="space-y-1 text-sm">
-                <div class="flex items-center justify-between"><span class="text-slate-400">Episodes with data</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.episodes_with_mitigation_data || 0)}</span></div>
-                <div class="flex items-center justify-between"><span class="text-slate-400">Under attack total</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.total_under_attack_count || 0)}</span></div>
-                <div class="flex items-center justify-between"><span class="text-slate-400">Mitigated total</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(mitigationSummary.total_mitigated_under_attack_count || 0)}</span></div>
-                <div class="flex items-center justify-between"><span class="text-slate-400">Mitigation ratio</span><span class="font-semibold text-slate-800">${escapeAgentSummaryHtml(`${ratioPct.toFixed(2)}%`)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-400">Episodes with data</span><span class="font-semibold text-slate-500">${escapeAgentSummaryHtml(mitigationSummary.episodes_with_mitigation_data || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-400">Under attack total</span><span class="font-semibold text-slate-500">${escapeAgentSummaryHtml(mitigationSummary.total_under_attack_count || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-400">Mitigated total</span><span class="font-semibold text-slate-500">${escapeAgentSummaryHtml(mitigationSummary.total_mitigated_under_attack_count || 0)}</span></div>
+                <div class="flex items-center justify-between"><span class="text-slate-400">Mitigation ratio</span><span class="font-semibold text-slate-500">${escapeAgentSummaryHtml(`${ratioPct.toFixed(2)}%`)}</span></div>
             </div>
         </div>
     `;
@@ -756,6 +979,9 @@ function handleAgentTrainingSummary(agentName, summary) {
     window.lastAgentTrainingSummaries[agentName] = summary;
     updateAgentTrainingPopupButton(agentName);
 
+    // Mark agent tab as finished
+    setAgentMetricsTabStatus(agentName, 'finished');
+
     // Save to sessionStorage for recovery on page reload
     if (typeof saveTrainingSessionData === 'function') {
         saveTrainingSessionData();
@@ -845,13 +1071,14 @@ function getLiElement(agentKey, agent, isHost) {
     ilElement.addClass("flex items-center  bg-white p-1 rounded shadow mb-1 mr-1");
     html = getHtmlGauce(agentKey);
     html += "<details close class='ml-3'>";
-    html += getHtmlSummaryAgent(agent)
+    html += getHtmlSummaryAgent(agent, agentKey)
     if (isHost) {
         html += getHtmlDivTrafficHost();
     }
     else {
         html += getHtmlDivTrafficNetwork();
     }
+    html += getHtmlCommTimeline(agentKey);
     html += `</details>`;
     ilElement.html(html);
     var gaugeContainer = ilElement.find(`#gauge-accuracy-${agentKey}`);;
@@ -859,13 +1086,139 @@ function getLiElement(agentKey, agent, isHost) {
     return ilElement;
 }
 
-function getHtmlSummaryAgent(agent) {
+function getHtmlSummaryAgent(agent, agentKey) {
     let html = `<summary class="font-bold cursor-pointer">`;
     if (agent != "")
         html += `<h1 class="ml-2 font-bold uppercase text-gray-800">${agent}</h1>`;
     html += getHtmlMetrics();
+    html += getHtmlCommBadge(agentKey);
     html += `</summary> `;
     return html;
+}
+
+// ====================================================================
+// COMMUNICATION VISIBILITY (marl_pz: alert family vs policy-coordination family)
+// ====================================================================
+
+function getHtmlCommBadge(agentKey) {
+    // Hidden until we know the active comm strategy (see updateCommBadge()) —
+    // stays hidden entirely for CommStrategy.NONE (no coordinator, nothing to show).
+    return `<span class="comm-badge hidden ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" data-comm-badge="${agentKey}"></span>`;
+}
+
+function getHtmlCommTimeline(agentKey) {
+    return `<div class="comm-timeline-wrapper hidden mt-1" data-comm-timeline-wrapper="${agentKey}">
+        <div class="comm-timeline-log max-h-32 overflow-y-auto text-[10px] font-mono bg-gray-50 border rounded p-1"
+             data-comm-timeline="${agentKey}"></div>
+    </div>`;
+}
+
+const _COMM_TIMELINE_MAX_ENTRIES = 200;
+const _commBadgeRevertTimers = {};   // agentKey -> setTimeout id (policy-coordination pulse)
+const _lastCommAlertValue = {};      // agentKey -> last rendered alert value (dedupe timeline)
+
+function _commBadgeClassesAlert(value, strategy) {
+    if (strategy === 'uaq') {
+        if (value === 2) return 'bg-red-100 text-red-700';
+        if (value === 1) return 'bg-amber-100 text-amber-700';
+        return 'bg-gray-200 text-gray-600';
+    }
+    return value ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-600';
+}
+
+function _commBadgeTextAlert(value, strategy) {
+    if (strategy === 'uaq') {
+        if (value === 2) return 'Confident';
+        if (value === 1) return 'Uncertain';
+        return 'Normal';
+    }
+    return value ? 'Alert' : 'Normal';
+}
+
+function _commBadgeClassesSync() {
+    return 'bg-blue-100 text-blue-700';
+}
+
+function _commBadgeTextSync(eventType) {
+    if (eventType === 'fedavg_sync') return 'Synced';
+    if (eventType === 'policy_copy') return 'Copied';
+    if (eventType === 'experience_share') return 'Shared';
+    return 'Synced';
+}
+
+/**
+ * Shows/updates the per-host comm badge for agentKey (`${agentTeamName}_${hostOrCoordinator}`).
+ * `payload` is either an alert-family snapshot ({family:'alert', hostAlerts, ...}) with `hostName`
+ * telling us which entry to read, or a policy-coordination event ({family:'policy_coordination', eventType}).
+ */
+function updateCommBadge(agentKey, hostName, payload) {
+    const badge = $(`span[data-comm-badge='${agentKey}']`);
+    if (badge.length === 0) return;
+
+    if (payload.family === 'alert') {
+        const alert = (payload.hostAlerts || {})[hostName];
+        if (!alert) return;
+        badge.removeClass().addClass(
+            `comm-badge ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${_commBadgeClassesAlert(alert.value, payload.strategy)}`
+        );
+        badge.text(_commBadgeTextAlert(alert.value, payload.strategy));
+    } else if (payload.family === 'policy_coordination') {
+        badge.removeClass().addClass(
+            `comm-badge ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${_commBadgeClassesSync()}`
+        );
+        badge.text(_commBadgeTextSync(payload.eventType));
+        // Transient pulse: policy-coordination has no continuous per-step state
+        // to show (unlike alerts), so revert to idle a few seconds after the event.
+        if (_commBadgeRevertTimers[agentKey]) {
+            clearTimeout(_commBadgeRevertTimers[agentKey]);
+        }
+        _commBadgeRevertTimers[agentKey] = setTimeout(() => {
+            badge.removeClass().addClass(
+                'comm-badge ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-600'
+            );
+            badge.text('Idle');
+        }, 3000);
+    }
+}
+
+/**
+ * Appends one formatted line to the per-host communication timeline log.
+ * Alert-family entries are deduped on value-change (avoids a firehose of
+ * identical "normal" lines every step); policy-coordination entries are
+ * per-event and always appended.
+ */
+function appendCommTimelineEntry(agentKey, hostName, payload) {
+    const wrapper = $(`div[data-comm-timeline-wrapper='${agentKey}']`);
+    const log = $(`div[data-comm-timeline='${agentKey}']`);
+    if (log.length === 0) return;
+    wrapper.removeClass('hidden');
+
+    let line = null;
+    if (payload.family === 'alert') {
+        const alert = (payload.hostAlerts || {})[hostName];
+        if (!alert) return;
+        if (_lastCommAlertValue[agentKey] === alert.value) return; // dedupe
+        _lastCommAlertValue[agentKey] = alert.value;
+        line = `${hostName} -> coord: ${alert.label.toUpperCase()} (${alert.value})`;
+    } else if (payload.family === 'policy_coordination') {
+        const d = payload.detail || {};
+        if (payload.eventType === 'fedavg_sync') {
+            line = `[ep${payload.episode}] FedAvg sync: ${d.synced_count} agents averaged`;
+        } else if (payload.eventType === 'policy_copy') {
+            line = `[ep${payload.episode}] ${d.source}(best,r=${Number(d.best_reward).toFixed(1)}) -> copied policy to ${(d.targets || []).join(', ')}`;
+        } else if (payload.eventType === 'experience_share') {
+            line = `[ep${payload.episode}] ${d.source} shared ${d.shared_count} high-reward transitions -> ${(d.targets || []).join(', ')}`;
+        } else {
+            line = `[ep${payload.episode}] ${payload.eventType}`;
+        }
+    }
+    if (!line) return;
+
+    log.append(`<div>${$('<div>').text(line).html()}</div>`);
+    if (log.children().length > _COMM_TIMELINE_MAX_ENTRIES) {
+        log.children().first().remove();
+    }
+    log.scrollTop(log[0].scrollHeight);
 }
 
 function getHtmlDivTrafficHost() {

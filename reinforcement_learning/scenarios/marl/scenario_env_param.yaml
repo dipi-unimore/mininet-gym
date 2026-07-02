@@ -9,6 +9,7 @@ attacks:
   unblock_min_hold_rounds: 2
   unblock_required_normal_streak: 2
   apply_drop_rules: false
+  include_percentage_variations: false
   thresholds:
     packets: 120000
     var_packets: 50

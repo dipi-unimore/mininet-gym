@@ -66,6 +66,10 @@ async function syncTrainingStateOnReconnect() {
 
         if (response.is_training) {
             console.log('Training state synced after reconnect:', response.message);
+            // Stash which agent the server says is currently training/evaluating
+            // so initializeAgentsCharts (called below) can mark its tab 'Running'
+            // immediately instead of waiting for the next live metric.
+            window.pendingCurrentTrainingAgent = response.current_agent || null;
             // Map the status response to system status
             let newState = SYSTEM_STATUS.TRAINING_RUNNING;
             if (response.is_paused) {
@@ -101,6 +105,7 @@ async function syncTrainingStateOnReconnect() {
         } else {
             // No active training: if we were in a training state, training finished while
             // disconnected — show FINISHED so the guard in setStatus doesn't block the transition.
+            window.pendingCurrentTrainingAgent = null;
             localStorage.removeItem('trainingStatus');
             if (systemStatus > SYSTEM_STATUS.IDLE && systemStatus !== SYSTEM_STATUS.FINISHED) {
                 setStatus(SYSTEM_STATUS.FINISHED, 'Training completed');
