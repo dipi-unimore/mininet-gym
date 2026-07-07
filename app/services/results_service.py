@@ -178,6 +178,7 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
     test_charts = []
     detected_test_episodes = []
     mitigation_entries = []
+    test_durations = {}
     is_marl = gym_type_in_config.startswith(MARL_ATTACKS)
     is_classification = gym_type_in_config.startswith(CLASSIFICATION)
 
@@ -218,6 +219,18 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
                 if test_agent_name:
                     merged_test_scores[test_agent_name] = score_value
 
+        test_execution_time = test_data.get("test_execution_time")
+        if test_execution_time is not None:
+            duration_agent_names = list(predicted.keys()) if isinstance(predicted, dict) and predicted else []
+            if not duration_agent_names:
+                test_folder_name = os.path.basename(test_dir_path)
+                if test_folder_name.startswith(f"{test_dir}_"):
+                    duration_agent_names = [test_folder_name[len(f"{test_dir}_"):]]
+                elif len(agent_names) == 1:
+                    duration_agent_names = [agent_names[0]]
+            for duration_agent_name in duration_agent_names:
+                test_durations[duration_agent_name] = test_execution_time
+
         # Accumulate gt/pred for composite winner scoring (attack scenarios only)
         if not is_classification and gt is not None and isinstance(predicted, dict):
             for agent_name, pred_for_agent in predicted.items():
@@ -250,7 +263,7 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
             merged_composite_scores[agent_name] = cs
 
     mitigation_summary = _summarize_mitigation_entries(mitigation_entries)
-    return merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores
+    return merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores, test_durations
 
 
 def _summarize_mitigation_entries(mitigation_entries):
@@ -379,6 +392,7 @@ def _collect_agents_data(
             "accuracy": accuracy,
             "charts": charts,
             "print_training_chart": print_training_chart,
+            "training_duration_seconds": data.get("train_execution_time"),
         })
 
         if accuracy < min_accuracy:
@@ -797,6 +811,13 @@ def build_results_dir_list(current_config):
                     _comm_raw = _comm_raw.__dict__
                 _cs = _comm_raw.get("strategy", None) if isinstance(_comm_raw, dict) else None
                 comm_strategy = None if (not _cs or _cs == "none") else _cs
+                _css = _comm_raw.get("strategies", None) if isinstance(_comm_raw, dict) else None
+                comm_strategies = list(_css) if _css else []
+                _attacks_raw = env_params.get("attacks", {}) or {}
+                if hasattr(_attacks_raw, '__dict__'):
+                    _attacks_raw = _attacks_raw.__dict__
+                apply_drop_rules = _attacks_raw.get("apply_drop_rules", None) if isinstance(_attacks_raw, dict) else None
+                include_percentage_variations = _attacks_raw.get("include_percentage_variations", None) if isinstance(_attacks_raw, dict) else None
                 # Convert Params object to dict to access net_params values
                 net_params_dict = net_params.__dict__ if hasattr(net_params, '__dict__') else net_params
                 # Use helper for backward compatibility: try num_iots first, then num_iot
@@ -828,6 +849,9 @@ def build_results_dir_list(current_config):
                     "test_episodes": test_episodes,
                     "n_bins": n_bins,
                     "comm_strategy": comm_strategy,
+                    "comm_strategies": comm_strategies,
+                    "apply_drop_rules": apply_drop_rules,
+                    "include_percentage_variations": include_percentage_variations,
                 }
 
                 agents_ok, agents_reason, agents_summary = _collect_agents_data(
@@ -860,7 +884,7 @@ def build_results_dir_list(current_config):
                     _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "Missing test directory: expected TEST or TEST_<algorithm>")
                     continue
 
-                merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores = _collect_test_results(
+                merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores, test_durations = _collect_test_results(
                     candidate_test_dirs=candidate_test_dirs,
                     dir_path=dir_path,
                     test_dir=test_dir,
@@ -870,6 +894,9 @@ def build_results_dir_list(current_config):
                 if not merged_test_scores:
                     _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "No valid test scores found in test.json files")
                     continue
+
+                for agent_d in data_gym_type["agents_data"]:
+                    agent_d["test_duration_seconds"] = test_durations.get(agent_d["agent_name"])
 
                 if detected_test_episodes:
                     test_episodes = max(detected_test_episodes)
@@ -981,6 +1008,7 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                     agent_cfg = next((a for a in agents_cfg if a.get("name") == agent_name), {})
                     _lc = env_p.get("communication", {}) or {}
                     _lcs = _lc.get("strategy") if isinstance(_lc, dict) else None
+                    _lcss = _lc.get("strategies") if isinstance(_lc, dict) else None
                     load_dir_list.append({
                         "accuracy": float(np.mean(accuracy)) if accuracy else 0,
                         "datetime": path.split('/')[2].split('_')[0],
@@ -989,6 +1017,7 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                         "episodes": env_p.get("episodes"),
                         "algorithm": agent_cfg.get("algorithm"),
                         "comm_strategy": None if (not _lcs or _lcs == "none") else _lcs,
+                        "comm_strategies": list(_lcss) if _lcss else [],
                     })
                 else:
                     if not os.path.isfile(f"{path}/{agent_name}.{extension}") or not os.path.isfile(f"{path}/data.json"):
@@ -1004,6 +1033,7 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                         agent_cfg = next((a for a in agents_cfg if a.get("name") == agent_name), {})
                         _lc = env_p.get("communication", {}) or {}
                         _lcs = _lc.get("strategy") if isinstance(_lc, dict) else None
+                        _lcss = _lc.get("strategies") if isinstance(_lc, dict) else None
                         load_dir_list.append({
                             "accuracy": acc_val,
                             "datetime": path.split('/')[2].split('_')[0],
@@ -1012,6 +1042,7 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                             "episodes": env_p.get("episodes"),
                             "algorithm": agent_cfg.get("algorithm"),
                             "comm_strategy": None if (not _lcs or _lcs == "none") else _lcs,
+                            "comm_strategies": list(_lcss) if _lcss else [],
                         })
                     except Exception as exc:
                         error(f"Error reading data.json for {path}: {exc}")
@@ -1579,6 +1610,7 @@ def build_result_comm_stats_preview(current_config, result_path):
 
     agents_payload = {}
     comm_strategy = None
+    comm_strategies: list = []
     family = None
 
     for agent_name, path in agent_paths.items():
@@ -1586,7 +1618,9 @@ def build_result_comm_stats_preview(current_config, result_path):
         if not data:
             continue
         comm_strategy = comm_strategy or data.get("comm_strategy")
+        comm_strategies = comm_strategies or (data.get("comm_strategies") or [])
         family = family or data.get("family")
+        agent_payload = {}
 
         if data.get("family") == "alert":
             columns = data.get("alert_columns", [])
@@ -1611,7 +1645,7 @@ def build_result_comm_stats_preview(current_config, result_path):
                 per_episode_by_host.setdefault(host_name, {})[episode] = int(row[col_idx["total"]])
 
             episodes = sorted({ep for series in per_episode_by_host.values() for ep in series})
-            agents_payload[agent_name] = {
+            agent_payload.update({
                 "family": "alert",
                 "per_host_totals": per_host_totals,
                 "episodes": episodes,
@@ -1619,18 +1653,24 @@ def build_result_comm_stats_preview(current_config, result_path):
                     host: [series.get(ep, 0) for ep in episodes]
                     for host, series in per_episode_by_host.items()
                 },
-            }
-        elif data.get("family") == "policy_coordination":
+            })
+
+        # Not `elif`: a run combining a Tier A alerting channel with Tier B
+        # mechanisms (e.g. uaq + federated_sync) carries both an "alert"
+        # payload and sync_events in the same comm_stats.json (see
+        # marl_pz_main._build_comm_stats_payload) — surface both.
+        if data.get("sync_events"):
             events = data.get("sync_events", [])
             event_counts = {}
             for ev in events:
                 event_type = ev.get("eventType", "unknown")
                 event_counts[event_type] = event_counts.get(event_type, 0) + 1
-            agents_payload[agent_name] = {
-                "family": "policy_coordination",
-                "sync_events": events,
-                "event_counts": event_counts,
-            }
+            agent_payload.setdefault("family", data.get("family", "policy_coordination"))
+            agent_payload["sync_events"] = events
+            agent_payload["event_counts"] = event_counts
+
+        if agent_payload:
+            agents_payload[agent_name] = agent_payload
 
     if not agents_payload:
         return {"status": "error", "message": "Unable to read communication data for this run."}, 500
@@ -1638,6 +1678,7 @@ def build_result_comm_stats_preview(current_config, result_path):
     return {
         "status": "ok",
         "comm_strategy": comm_strategy,
+        "comm_strategies": comm_strategies,
         "family": family,
         "agents": agents_payload,
     }, 200

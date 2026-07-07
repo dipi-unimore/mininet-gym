@@ -3,7 +3,7 @@ from threading import Thread
 from flask import Blueprint, jsonify
 
 from utility.constants import SystemStatus
-from utility.my_log import set_drop_rule_message_visibility, get_agent_summaries, get_current_training_agent
+from utility.my_log import set_drop_rule_message_visibility, get_agent_summaries, get_current_training_agent, get_agent_comm_events
 
 
 def create_training_blueprint(state):
@@ -151,6 +151,7 @@ def create_training_blueprint(state):
                 "is_stopping": stop_set,
                 "agent_chart_data": agent_chart_data,
                 "agent_button_state": agent_button_state,
+                "agent_comm_events": get_agent_comm_events(),
                 "current_agent": current_agent_info.get('name'),
                 "current_agent_mode": current_agent_info.get('mode'),
             }), 200

@@ -512,10 +512,13 @@ function renderTrainingCaption() {
     // Scenario
     if (env.gym_type) badges.push(badge(B.blue, env.gym_type));
 
-    // Communication strategy (marl_pz only)
+    // Communication strategy (marl_pz only): Tier A (alerting channel) + Tier B
+    // (peer coordination mechanisms, combinable — see CommStrategy in constants.py)
     const commStrategy = env.communication && env.communication.strategy;
+    const commStrategies = (env.communication && env.communication.strategies) || [];
     if (commStrategy && commStrategy !== 'none') {
-        badges.push(badge(B.purple, `comm: ${commStrategy}`));
+        const tail = commStrategies.length ? ` + ${commStrategies.join(', ')}` : '';
+        badges.push(badge(B.purple, `comm: ${commStrategy}${tail}`));
     }
 
     // Network topology
@@ -657,16 +660,51 @@ function loadConfigComments() {
     });
 }
 
+// Tier A — alerting channel (single-select). Only 'uaq' has its own config
+// sub-section (tau/tau_expert/cooldown_steps); none/naive_broadcast don't.
 function _updateCommStrategyVisibility(strategy) {
-    const STRATEGY_SECTIONS = ['uaq', 'federated_sync', 'policy_exchange', 'experience_sharing', 'hierarchical'];
-    for (const s of STRATEGY_SECTIONS) {
+    const $uaqSection = $(`#${CSS.escape('env_params.communication.uaq-section')}`);
+    if (strategy === 'uaq') {
+        $uaqSection.removeClass('hidden');
+    } else {
+        $uaqSection.addClass('hidden');
+    }
+}
+
+// Tier B — peer coordination mechanisms (multi-select). Each mechanism's
+// section is independently visible based on whether its checkbox is checked
+// — unlike Tier A, more than one can be visible/active at once.
+function _updateCommStrategiesVisibility(strategies) {
+    const active = new Set(strategies || []);
+    for (const s of COMM_STRATEGY_TIER_B_OPTIONS) {
         const $sec = $(`#${CSS.escape(`env_params.communication.${s}-section`)}`);
-        if (strategy === s) {
+        if (active.has(s)) {
             $sec.removeClass('hidden');
         } else {
             $sec.addClass('hidden');
         }
     }
+    _renderCommStrategiesWarningBanner(active);
+}
+
+// Surfaces the risky-combination notes from COMM_STRATEGY_TIER_B_WARNINGS
+// (S2+S3, S3+S4 — see docs/marl_pz_communication.md) as an inline banner.
+// Informational only: selection stays free, nothing is blocked.
+function _renderCommStrategiesWarningBanner(activeSet) {
+    const $banner = $('#comm-strategies-warning-banner');
+    if ($banner.length === 0) return;
+    const matched = COMM_STRATEGY_TIER_B_WARNINGS.filter(w => w.pair.every(s => activeSet.has(s)));
+    if (matched.length === 0) {
+        $banner.addClass('hidden').html('');
+        return;
+    }
+    $banner.removeClass('hidden').html(
+        matched.map(w => `
+            <p class="text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 text-xs mb-1">
+                ⚠️ ${escapeHtml(w.message)}
+            </p>
+        `).join('')
+    );
 }
 
 /**
@@ -739,6 +777,8 @@ function createInputField(key, value, fullId, isAgent) {
                             $('.env-subtab-communication').removeClass('hidden');
                             const strategy = (currentConfig.env_params.communication && currentConfig.env_params.communication.strategy) || 'naive_broadcast';
                             _updateCommStrategyVisibility(strategy);
+                            const strategies = (currentConfig.env_params.communication && currentConfig.env_params.communication.strategies) || [];
+                            _updateCommStrategiesVisibility(strategies);
                         } else {
                             $('.env-subtab-communication').addClass('hidden');
                         }
@@ -803,17 +843,51 @@ function createInputField(key, value, fullId, isAgent) {
         ).join('')}
                 </select>`;
     }
-    // 5b. Communication strategy Select
+    // 5b. Communication strategy Select (Tier A — alerting channel, single-select)
     else if (key === 'strategy' && fullId.includes('communication')) {
         const strVal = String(value || '').toLowerCase();
         inputElement = `<select id="${fullId}" data-path="${fullId}" class="config-select">
-                    ${COMM_STRATEGY_OPTIONS.map(opt =>
+                    ${COMM_STRATEGY_TIER_A_OPTIONS.map(opt =>
             `<option value="${opt}" ${strVal === opt ? 'selected' : ''}>${opt}</option>`
         ).join('')}
                 </select>`;
         $(document).off('change', `#${CSS.escape(fullId)}.comm-strategy-select`)
                    .on('change',  `#${CSS.escape(fullId)}`, function() {
             _updateCommStrategyVisibility($(this).val());
+        });
+    }
+    // 5c. Communication strategies checkboxes (Tier B — peer coordination
+    // mechanisms, combinable). Deliberately has no data-path on the checkbox
+    // inputs themselves: collectConfigFromUI() scans every input/select by
+    // data-path and would otherwise clobber the array with whichever
+    // checkbox happened to be read last. Instead this maintains
+    // currentConfig.env_params.communication.strategies directly, the same
+    // way the gym_type select above mutates currentConfig in its own handler.
+    else if (key === 'strategies' && fullId.includes('communication')) {
+        const activeSet = new Set(Array.isArray(value) ? value : []);
+        const checkboxesHtml = COMM_STRATEGY_TIER_B_OPTIONS.map(opt => `
+            <label class="inline-flex items-center gap-1.5 mr-4 mb-1 text-sm">
+                <input type="checkbox" class="comm-strategies-checkbox w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                       data-strategy="${opt}" ${activeSet.has(opt) ? 'checked' : ''}>
+                ${escapeHtml(opt)}
+            </label>
+        `).join('');
+        inputElement = `
+            <div id="${fullId}">
+                ${checkboxesHtml}
+                <div id="comm-strategies-warning-banner" class="mt-2 hidden"></div>
+            </div>`;
+
+        $(document).off('change', '.comm-strategies-checkbox')
+                   .on('change', '.comm-strategies-checkbox', function () {
+            const strategy = $(this).data('strategy');
+            const comm = currentConfig.env_params.communication = currentConfig.env_params.communication || {};
+            const list = Array.isArray(comm.strategies) ? comm.strategies : [];
+            const idx = list.indexOf(strategy);
+            if (this.checked && idx === -1) list.push(strategy);
+            if (!this.checked && idx !== -1) list.splice(idx, 1);
+            comm.strategies = list;
+            _updateCommStrategiesVisibility(list);
         });
     }
     // 6. Array (read-only text display)
@@ -1018,13 +1092,15 @@ function renderList(list) {
     }
     _applyLoadDirSort(list).forEach(dir => {
         const binsLabel = (dir.n_bins != null) ? dir.n_bins : '—';
-        const commLabel = dir.comm_strategy || '—';
+        const commStrategiesTail = Array.isArray(dir.comm_strategies) && dir.comm_strategies.length
+            ? ` + ${dir.comm_strategies.join(',')}` : '';
+        const commLabel = dir.comm_strategy ? `${dir.comm_strategy}${commStrategiesTail}` : '—';
         const dirItemHtml = `
             <li class="p-2 border-b cursor-pointer hover:bg-gray-100 load-dir-item grid grid-cols-4" title="${escapeHtml(dir.path)}"
                 data-n-bins="${dir.n_bins != null ? dir.n_bins : ''}"
                 data-episodes="${dir.episodes != null ? dir.episodes : ''}"
                 data-algorithm="${escapeHtml(dir.algorithm || '')}"
-                data-comm-strategy="${escapeHtml(dir.comm_strategy || '')}">
+                data-comm-strategy="${escapeHtml(commLabel === '—' ? '' : commLabel)}">
                 <span>${_formatDirDatetime(dir.datetime)}</span>
                 <span>${dir.accuracy.toFixed(4)}</span>
                 <span>${binsLabel}</span>
@@ -1239,6 +1315,8 @@ function _renderEnvParamSections() {
         $('.env-subtab-communication').removeClass('hidden');
         const strategy = (currentConfig.env_params.communication && currentConfig.env_params.communication.strategy) || 'naive_broadcast';
         _updateCommStrategyVisibility(strategy);
+        const strategies = (currentConfig.env_params.communication && currentConfig.env_params.communication.strategies) || [];
+        _updateCommStrategiesVisibility(strategies);
     } else {
         $('.env-subtab-communication').addClass('hidden');
     }
@@ -2466,8 +2544,13 @@ function setConfigValue(obj, path, value) {
 function collectConfigFromUI() {
     let newConfig = JSON.parse(JSON.stringify(currentConfig)); // Deep copy
 
-    // Collect all inputs and update the config based on the data-path attribute
-    $('input, select').each(function () {
+    // Collect all inputs and update the config based on the data-path attribute.
+    // Scoped to #config-page only: unrelated inputs elsewhere (e.g. the Results
+    // Panel's per-experiment selection checkboxes, whose data-path is a result
+    // folder path with no dots) would otherwise be picked up by setConfigValue
+    // and written as bogus root-level keys (path has no '.', so it falls through
+    // to newConfig[path] = value at the top level).
+    $('#config-page').find('input, select').each(function () {
         const $input = $(this);
         const path = $input.data('path');
         let value;

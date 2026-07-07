@@ -277,8 +277,9 @@ Key configuration sections:
 - [x] Unblock logic: hold-round and normal-streak thresholds before releasing a blocked host
 - [x] In-browser User Manual with full parameter reference
 - [x] **MARL PZ** — PettingZoo Parallel API multi-agent environment with coordinator and communication strategies
-- [x] Communication strategies: `none`, `naive_broadcast` (S0), `uaq` (S1), `federated_sync` (S2), `policy_exchange` (S3), `experience_sharing` (S4)
+- [x] Communication strategies: Tier A alerting channel `none`, `naive_broadcast` (S0), `uaq` (S1); Tier B combinable peer coordination `federated_sync` (S2), `policy_exchange` (S3), `experience_sharing` (S4)
 - [x] Communication sub-tab in the configuration UI (visible for `marl_pz` scenarios)
+- [x] Multi-strategy Tier B selection (`communication.strategies`, combinable) with risky-combination warnings (S2+S3, S3+S4)
 
 ### Phase 6 — AAMAS 2026 · *Dec 2025 – May 2026*
 - [x] Demo video production and YouTube publication
@@ -289,7 +290,7 @@ Key configuration sections:
 ---
 
 ### Upcoming
-- [ ] Communication strategy `hierarchical` (S5) — cluster-head aggregation for large IoT topologies
+- [ ] Communication architecture axis (paper 7 §Communication Architecture): peer-to-peer vs. hierarchical (cluster-head aggregation for large IoT topologies), orthogonal to and applicable to any Tier B strategy — not a strategy of its own
 - [ ] S2–S4 support for SB3 deep agents (DQN weight averaging, prioritised experience replay sharing)
 - [ ] Docker Compose one-command deployment (Mininet + ODL + MininetGym)
 - [ ] Additional attack types: Slowloris, DNS amplification

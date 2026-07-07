@@ -102,6 +102,29 @@ def _discretize_obs(obs: np.ndarray, low: np.ndarray, high: np.ndarray,
     return tuple(discrete)
 
 
+def _compute_attack_reward_scale(num_hosts: int) -> float:
+    """
+    Reward multiplier for attack-class terms, proportional to the class
+    imbalance introduced by the number of hosts (mirrors
+    attack_detect_host_observable.per_host_scan_wrapper._compute_attack_reward_scale).
+
+    With N hosts and ~2 attack-related hosts per round, normal traffic
+    dominates the ground truth roughly (N-2):2. Without compensation, the
+    expected reward of an "always predict normal" policy exceeds that of an
+    agent that actually learns to detect attacks once N is large enough,
+    since CORRECT_NORMAL_TRAFFIC accumulates on the vast majority of steps
+    while attack-detection rewards only pay off on a handful of them. Scaling
+    the attack-related terms (but not CORRECT_NORMAL_TRAFFIC, which stays
+    constant) keeps the "always normal" degenerate policy net-negative in
+    expectation regardless of network size.
+
+        num_hosts=3  → scale=1.0
+        num_hosts=6  → scale=2.5
+        num_hosts=10 → scale=4.5
+    """
+    return float(max(1.0, min((num_hosts - 1) / 2.0, 8.0)))
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # MarlPzEnv
 # ────────────────────────────────────────────────────────────────────────────
@@ -132,6 +155,14 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
 
         self.hosts = self.net.hosts
         self.num_hosts = len(self.hosts)
+
+        # Attack reward scale — proportional to class imbalance (see
+        # _compute_attack_reward_scale docstring). Applied in _reward_for_agent.
+        self._attack_reward_scale: float = _compute_attack_reward_scale(self.num_hosts)
+        information(
+            f"MarlPzEnv: num_hosts={self.num_hosts}, "
+            f"attack_reward_scale={self._attack_reward_scale:.2f}\n"
+        )
 
         # Traffic generation thread pool (one worker per host + 2 slack)
         _pool = self.num_hosts + getattr(params.net_params, 'num_iots', 0) + 2
@@ -174,7 +205,42 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                 f"Implemented strategies: {CommStrategy.IMPLEMENTED}"
             )
 
+        # Tier B — peer coordination mechanisms (S2/S3/S4). Combinable, unlike
+        # the Tier A alerting channel above. `strategies` is the new list
+        # field; older configs may instead have put a single Tier B value
+        # directly into `strategy` (the pre-split flat model) — fold that in
+        # for backward compatibility, defaulting the alerting channel to
+        # naive_broadcast exactly as it implicitly did before.
+        strategies_cfg = comm_cfg.get('strategies', []) or []
+        if not isinstance(strategies_cfg, (list, tuple, set, frozenset)):
+            strategies_cfg = [strategies_cfg]
+
+        if strategy in CommStrategy.TIER_B:
+            strategies_cfg = list(strategies_cfg) + [strategy]
+            strategy = CommStrategy.NAIVE_BROADCAST
+
+        for s in strategies_cfg:
+            if s not in CommStrategy.TIER_B:
+                raise ValueError(
+                    f"'{s}' in communication.strategies is not a valid peer "
+                    f"coordination mechanism. Allowed: {CommStrategy.TIER_B}"
+                )
+
+        if strategy not in CommStrategy.TIER_A:
+            raise ValueError(
+                f"Communication strategy '{strategy}' is not a valid alerting "
+                f"channel (Tier A). Allowed: {CommStrategy.TIER_A}"
+            )
+
+        if strategy == CommStrategy.NONE and strategies_cfg:
+            raise ValueError(
+                "communication.strategies requires an active alerting channel "
+                "(naive_broadcast or uaq) — peer coordination mechanisms "
+                f"{strategies_cfg} cannot run with strategy: none."
+            )
+
         self._comm_strategy: str = strategy
+        self._comm_strategies: frozenset = frozenset(strategies_cfg)
 
         # Strategy is the master switch for coordinator presence
         self._use_coordinator = (strategy != CommStrategy.NONE)
@@ -883,6 +949,7 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
             )
             is_blocked = not self.status_links[host_index]
             reward = 0.0
+            scale = self._attack_reward_scale
 
             if gt_id == HOST_STATUS_ID_MAPPING['normal'] or gt_id < 0:
                 gt_label = HostStatus.NORMAL
@@ -901,23 +968,26 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
 
             if action == AGENT_ACTIONS.NORMAL_TRAFFIC:
                 if gt_label == HostStatus.NORMAL:
+                    # Not scaled: reward for normal stays constant regardless
+                    # of host count, so "always predict normal" does not
+                    # become more attractive as the network grows.
                     reward += REWARDS.CORRECT_NORMAL_TRAFFIC
                 else:
-                    reward += REWARDS.FALSE_NEGATIVE
+                    reward += REWARDS.FALSE_NEGATIVE * scale
             elif action == AGENT_ACTIONS.ATTACK_IN:
                 if gt_label == HostStatus.UNDER_ATTACK:
-                    reward += REWARDS.CORRECT_UNDER_ATTACK_DETECTION
+                    reward += REWARDS.CORRECT_UNDER_ATTACK_DETECTION * scale
                 elif gt_label == HostStatus.NORMAL:
-                    reward += REWARDS.FALSE_POSITIVE
+                    reward += REWARDS.FALSE_POSITIVE * scale
                 elif gt_label == HostStatus.ATTACKING:
-                    reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED
+                    reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
             elif action == AGENT_ACTIONS.ATTACK_OUT:
                 if gt_label == HostStatus.ATTACKING:
-                    reward += REWARDS.CORRECT_ATTACK_DETECTION
+                    reward += REWARDS.CORRECT_ATTACK_DETECTION * scale
                 elif gt_label == HostStatus.NORMAL:
-                    reward += REWARDS.FALSE_POSITIVE
+                    reward += REWARDS.FALSE_POSITIVE * scale
                 elif gt_label == HostStatus.UNDER_ATTACK:
-                    reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED
+                    reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
 
             return reward
 

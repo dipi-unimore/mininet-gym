@@ -291,7 +291,9 @@ def start_testing_agents(am, config):
     return test_attack_detect_agents(am, directory_name, config)  
                         
 def test_attack_detect_agents(am, directory_name, config):
+    start_time = time.time()
     score, ground_truth, predicted = evaluate_attack_detect_agent(am)
+    test_execution_time = time.time() - start_time
     notify_client(level=SystemLevels.STATUS, status=SystemStatus.RUNNING, mode=SystemModes.PLOTTING, message="Plotting evaluation data...")
     metrics =  {agent.name: {'accuracy': [], 'precision': [], 'recall': [], 'f1_score': []} for agent in config.agents}
 
@@ -339,9 +341,10 @@ def test_attack_detect_agents(am, directory_name, config):
     data = type('', (), {})()
     data.score = score
     data.ground_truth = ground_truth
-    data.predicted = predicted    
+    data.predicted = predicted
     data.metrics = metrics
-    
+    data.test_execution_time = test_execution_time
+
     save_data_to_file(data.__dict__, directory_name,"test")
     # plot test
     try:

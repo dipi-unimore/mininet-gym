@@ -131,6 +131,9 @@ async function checkAndRecoverTrainingState() {
             // so the tab bar (built later, during navigation) can mark it
             // 'Running' immediately instead of waiting for the next live metric.
             window.pendingCurrentTrainingAgent = response.current_agent || null;
+            // Stash cached comm/sync events so the tab bar (built later) can
+            // replay them into the per-host timelines (see agent_statistics.js).
+            window.pendingAgentCommEvents = response.agent_comm_events || null;
 
             // Restore training session data (summaries, stats, etc.)
             const dataRestored = restoreTrainingSessionData();
@@ -168,6 +171,7 @@ async function checkAndRecoverTrainingState() {
         } else {
             // Clear any stale training state
             window.pendingCurrentTrainingAgent = null;
+            window.pendingAgentCommEvents = null;
             localStorage.removeItem('trainingStatus');
             sessionStorage.removeItem('trainingSessionData');
             sessionStorage.removeItem('chartDataRaw');

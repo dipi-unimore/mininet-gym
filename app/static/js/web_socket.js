@@ -70,6 +70,10 @@ async function syncTrainingStateOnReconnect() {
             // so initializeAgentsCharts (called below) can mark its tab 'Running'
             // immediately instead of waiting for the next live metric.
             window.pendingCurrentTrainingAgent = response.current_agent || null;
+            // Stash cached comm/sync events (FedAvg sync, policy copy, ...) so
+            // initializeAgentsCharts can replay them into the per-host timelines,
+            // which are otherwise wiped by the reconnect (see agent_statistics.js).
+            window.pendingAgentCommEvents = response.agent_comm_events || null;
             // Map the status response to system status
             let newState = SYSTEM_STATUS.TRAINING_RUNNING;
             if (response.is_paused) {
@@ -106,6 +110,7 @@ async function syncTrainingStateOnReconnect() {
             // No active training: if we were in a training state, training finished while
             // disconnected — show FINISHED so the guard in setStatus doesn't block the transition.
             window.pendingCurrentTrainingAgent = null;
+            window.pendingAgentCommEvents = null;
             localStorage.removeItem('trainingStatus');
             if (systemStatus > SYSTEM_STATUS.IDLE && systemStatus !== SYSTEM_STATUS.FINISHED) {
                 setStatus(SYSTEM_STATUS.FINISHED, 'Training completed');
@@ -239,6 +244,23 @@ function initializeWebSocket() {
         } else {
             newState = SYSTEM_STATUS.UNKNOWN; //unknown
         }
+
+        // Per-agent tab state: the backend is the sole source of truth for when
+        // an agent is "Running" vs truly "Finished" (i.e. after its evaluation
+        // completes, not merely after its training summary arrives).
+        if (data.agent_name && typeof agentTabStatuses !== 'undefined' && typeof setAgentMetricsTabStatus === 'function') {
+            if (data.status === STATUS.FINISHED && data.mode === MODE.EVALUATING) {
+                setAgentMetricsTabStatus(data.agent_name, 'finished');
+            } else if (data.status === STATUS.RUNNING && (data.mode === MODE.TRAINING || data.mode === MODE.EVALUATING)) {
+                if (agentTabStatuses[data.agent_name] !== 'finished') {
+                    setAgentMetricsTabStatus(data.agent_name, 'running');
+                    if (typeof isSequentialMarlEnv === 'function' && isSequentialMarlEnv() && typeof activateAgentMetricsTab === 'function') {
+                        activateAgentMetricsTab(data.agent_name);
+                    }
+                }
+            }
+        }
+
         setStatus(newState, msg);
         // Save state to localStorage for persistence across disconnections
         if (newState !== SYSTEM_STATUS.IDLE && newState !== SYSTEM_STATUS.DISCONNECTED) {

@@ -93,6 +93,19 @@ function escapeAttr(value) {
     return String(value || '').replace(/'/g, "&#39;").replace(/\"/g, '&quot;');
 }
 
+function formatDuration(seconds) {
+    const total = Number(seconds);
+    if (!Number.isFinite(total) || total < 0) {
+        return 'N/A';
+    }
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = Math.floor(total % 60);
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}
+
 function syncResultsSelectionToolbar() {
     const selectedCount = selectedResultItems.size;
     $('#results-selection-count').text(`${selectedCount} selected`);
@@ -260,6 +273,10 @@ function renderResultsList(list) {
 
         incompleteData.forEach(inc => existingResultPaths.add(String(inc.path || '')));
 
+        const hasDropRulesCol = gt.data.some(exp => exp.apply_drop_rules !== null && exp.apply_drop_rules !== undefined);
+        const hasPctVarCol = gt.data.some(exp => exp.include_percentage_variations !== null && exp.include_percentage_variations !== undefined);
+        const totalCols = 13 + (hasDropRulesCol ? 1 : 0) + (hasPctVarCol ? 1 : 0);
+
         tabPanelsHtml += `<div class="results-tab-panel hidden" id="res-tab-${scenarioId}">
             <div class="flex gap-2 mb-2">
                 <button class="scenario-filter-btn px-2 py-1 text-xs rounded border bg-blue-600 text-white border-blue-700" data-scenario-id="${scenarioId}" data-filter="all">All</button>
@@ -269,10 +286,12 @@ function renderResultsList(list) {
             <div id="complete-section-${scenarioId}">
                 <div class="overflow-x-auto">
                 <div class="min-w-[1200px]">
-                <div class="grid grid-cols-12 font-bold border-b text-xs">
+                <div class="grid grid-cols-[repeat(${totalCols},minmax(0,1fr))] font-bold border-b text-xs">
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="datetime" data-label="Date Time">Date Time <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="networkconfig" data-label="Network Config">Network Config <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="comm" data-label="Comm">Comm <span class="sort-ind text-gray-400">⇅</span></span>
+                    ${hasDropRulesCol ? `<span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="dropRules" data-label="ADR" title="Apply Drop Rules">ADR <span class="sort-ind text-gray-400">⇅</span></span>` : ''}
+                    ${hasPctVarCol ? `<span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="pctVar" data-label="IPV" title="Include Percentage Variations">IPV <span class="sort-ind text-gray-400">⇅</span></span>` : ''}
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="trainingepisodes" data-label="Training Eps">Training Eps <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="maxsteps" data-label="Max Steps">Max Steps <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="agents" data-label="Agents">Agents <span class="sort-ind text-gray-400">⇅</span></span>
@@ -281,6 +300,7 @@ function renderResultsList(list) {
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="accuracy" data-label="Accuracy %">Accuracy % <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="testepisodes" data-label="Test Eps">Test Eps <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="score" data-label="Score %">Score % <span class="sort-ind text-gray-400">⇅</span></span>
+                    <span class="result-sort-th cursor-pointer hover:text-blue-500 select-none" data-gym-type="${gt.gym_type}" data-col="winner" data-label="Winner">Winner <span class="sort-ind text-gray-400">⇅</span></span>
                     <span class="text-right pr-2">Actions</span>
                 </div>
                 <div class="${heightScroll} gap-6">
@@ -344,6 +364,8 @@ function orderBy(gymType, col) {
             case 'datetime':        va = String(a.datetime || ''); vb = String(b.datetime || ''); break;
             case 'networkconfig':   va = String(a.network_config || ''); vb = String(b.network_config || ''); break;
             case 'comm':            va = String(a.comm_strategy || ''); vb = String(b.comm_strategy || ''); break;
+            case 'dropRules':       va = Boolean(a.apply_drop_rules); vb = Boolean(b.apply_drop_rules); break;
+            case 'pctVar':          va = Boolean(a.include_percentage_variations); vb = Boolean(b.include_percentage_variations); break;
             case 'trainingepisodes':va = Number(a.training_episodes || 0); vb = Number(b.training_episodes || 0); break;
             case 'maxsteps':        va = Number(a.max_steps || 0); vb = Number(b.max_steps || 0); break;
             case 'agents':          va = a.agents_data.length; vb = b.agents_data.length; break;
@@ -352,6 +374,7 @@ function orderBy(gymType, col) {
             case 'accuracy':        va = Number(a.mean_accuracy || 0); vb = Number(b.mean_accuracy || 0); break;
             case 'testepisodes':    va = Number(a.test_episodes || 0); vb = Number(b.test_episodes || 0); break;
             case 'score':           va = Number(a.mean_score || 0); vb = Number(b.mean_score || 0); break;
+            case 'winner':          va = computeWinnerInfo(a).pct; vb = computeWinnerInfo(b).pct; break;
             default: return 0;
         }
         const cmp = typeof va === 'number' && typeof vb === 'number'
@@ -379,15 +402,56 @@ function updateResultsSortHeaders(gymType) {
     });
 }
 
+// Mirrors the winner-detection logic used in the result detail modal's
+// "Winner Score" / "Ranking" tables (composite_scores when present, else
+// raw test_scores), but flattened into a plain-text summary for a tooltip.
+function computeWinnerInfo(exp) {
+    const cs = exp.composite_scores || {};
+    const hasComposite = Object.keys(cs).length > 0;
+
+    if (hasComposite) {
+        const winnerName = exp.name_max_winner;
+        const worstName = exp.name_min_winner;
+        const pct = winnerName && cs[winnerName] ? cs[winnerName].composite * 100 : 0;
+        const title = Object.keys(cs).map(name => {
+            const tag = name === winnerName ? ' (winner)' : (name === worstName && worstName !== winnerName ? ' (worst)' : '');
+            return `${name}: ${(cs[name].composite * 100).toFixed(1)}%${tag}`;
+        }).join(' | ') || 'No scores available';
+        return { name: winnerName || '—', pct, title };
+    }
+
+    const eps = Number(exp.test_episodes) || 1;
+    const entries = Object.entries(exp.test_scores || {})
+        .map(([name, score]) => ({ name, score: Number(score) || 0 }))
+        .sort((a, b) => b.score - a.score);
+    if (entries.length === 0) {
+        return { name: '—', pct: 0, title: 'No scores available' };
+    }
+    const winnerName = entries[0].name;
+    const worstName = entries.length > 1 ? entries[entries.length - 1].name : null;
+    const title = entries.map(e => {
+        const tag = e.name === winnerName ? ' (winner)' : (e.name === worstName ? ' (worst)' : '');
+        return `${e.name}: ${((e.score / eps) * 100).toFixed(1)}%${tag}`;
+    }).join(' | ');
+    return { name: winnerName, pct: (entries[0].score / eps) * 100, title };
+}
+
 function renderDataList( gym_type, list) {
     dirListDataHtml = '';
+    const hasDropRulesCol = list.some(exp => exp.apply_drop_rules !== null && exp.apply_drop_rules !== undefined);
+    const hasPctVarCol = list.some(exp => exp.include_percentage_variations !== null && exp.include_percentage_variations !== undefined);
+    const totalCols = 13 + (hasDropRulesCol ? 1 : 0) + (hasPctVarCol ? 1 : 0);
     list.forEach(exp => {
         const isSelected = resultsSelectionMode && selectedResultItems.has(String(exp.path || ''));
         const algos_list = (exp.agents_data || []).map(a => a.algorithm || '').filter(Boolean);
         const algos_unique = [...new Set(algos_list)];
         const algos_value = algos_unique.join(', ') || '—';
         const bins_value = (exp.n_bins != null) ? exp.n_bins : '—';
-        const comm_value = exp.comm_strategy || '—';
+        const commStrategiesTail = Array.isArray(exp.comm_strategies) && exp.comm_strategies.length
+            ? ` + ${exp.comm_strategies.join(',')}` : '';
+        const comm_value = exp.comm_strategy ? `${exp.comm_strategy}${commStrategiesTail}` : (commStrategiesTail ? commStrategiesTail.replace(/^ \+ /, '') : '—');
+        const dropRules_value = exp.apply_drop_rules === true ? '✓' : '—';
+        const pctVar_value = exp.include_percentage_variations === true ? '✓' : '—';
         if (exp.agents_data.length >1 ) {
             agent_title = `${exp.agents_data.map(_ => _.agent_name).join(', ')}`;
             accuracy_title = `${exp.name_min_accuracy}=${exp.min_accuracy }/${exp.mean_accuracy }/${exp.name_max_accuracy}=${exp.max_accuracy }`;
@@ -403,19 +467,29 @@ function renderDataList( gym_type, list) {
             score_value = `${((exp.mean_score / exp.test_episodes) * 100).toFixed(2)}`;
 
         }
+        const winnerInfo = computeWinnerInfo(exp);
+        const trainingDurationTitle = 'Training time&#10;' + (exp.agents_data || [])
+            .map(a => `${a.agent_name}: ${formatDuration(a.training_duration_seconds)}`)
+            .join('&#10;');
+        const testDurationTitle = 'Test time&#10;' + (exp.agents_data || [])
+            .map(a => `${a.agent_name}: ${formatDuration(a.test_duration_seconds)}`)
+            .join('&#10;');
         const dirItemHtml = `
-            <li class="results-result-row p-2 border-b cursor-pointer hover:bg-gray-100 text-xs grid grid-cols-12 ${isSelected ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-white'}" data-gym-type="${escapeAttr(gym_type)}" data-path="${escapeAttr(exp.path)}" data-result-kind="complete">
+            <li class="results-result-row p-2 border-b cursor-pointer hover:bg-gray-100 text-xs grid grid-cols-[repeat(${totalCols},minmax(0,1fr))] ${isSelected ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-white'}" data-gym-type="${escapeAttr(gym_type)}" data-path="${escapeAttr(exp.path)}" data-result-kind="complete">
                 <span>${exp.datetime}</span>
                 <span>${exp.network_config}</span>
                 <span title="${escapeAttr(comm_value)}">${comm_value}</span>
-                <span>${exp.training_episodes}</span>
+                ${hasDropRulesCol ? `<span title="Apply Drop Rules">${dropRules_value}</span>` : ''}
+                ${hasPctVarCol ? `<span title="Include Percentage Variations">${pctVar_value}</span>` : ''}
+                <span title="${escapeAttr(trainingDurationTitle)}">${exp.training_episodes}</span>
                 <span>${exp.max_steps}</span>
                 <span title="${agent_title}">${exp.agents_data.length}</span>
                 <span title="${escapeAttr(algos_value)}">${algos_value}</span>
                 <span>${bins_value}</span>
                 <span title="${accuracy_title}">${accuracy_value}</span>
-                <span>${exp.test_episodes}</span>
+                <span title="${escapeAttr(testDurationTitle)}">${exp.test_episodes}</span>
                 <span title="${score_title}">${score_value}</span>
+                <span title="${escapeAttr(winnerInfo.title)}">${escapeHtml(winnerInfo.name)}: ${winnerInfo.pct.toFixed(1)}%</span>
                 <span class="text-right flex items-center justify-end gap-2">
                     <label class="result-select-toggle inline-flex items-center gap-1 text-[10px] text-gray-500 ${resultsSelectionMode ? '' : 'hidden'}">
                         <input type="checkbox"
@@ -503,6 +577,18 @@ function renderResultModalContent(gym_type, path, data) {
     const agentNames = Array.isArray(data.agents_data)
         ? data.agents_data.map(a => a.agent_name).join(', ')
         : '-';
+    const trainingDurations = (Array.isArray(data.agents_data) ? data.agents_data : [])
+        .map(a => Number(a.training_duration_seconds))
+        .filter(Number.isFinite);
+    const testDurations = (Array.isArray(data.agents_data) ? data.agents_data : [])
+        .map(a => Number(a.test_duration_seconds))
+        .filter(Number.isFinite);
+    const meanTrainingDuration = trainingDurations.length
+        ? trainingDurations.reduce((sum, v) => sum + v, 0) / trainingDurations.length
+        : null;
+    const meanTestDuration = testDurations.length
+        ? testDurations.reduce((sum, v) => sum + v, 0) / testDurations.length
+        : null;
     const pngFiles = Array.isArray(data.files)
         ? data.files.filter(f => String(f).toLowerCase().endsWith('.png'))
         : [];
@@ -606,7 +692,10 @@ let modalContentHtml = `
                     <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
                         <div class="${headerBg} text-white p-2 px-4 flex justify-between items-center">
                             <span class="font-bold text-sm">${agent.agent_name}${winnerBadge}</span>
-                            <span class="text-[10px]">SCORE: ${agentScore}/${data.test_episodes}${csBadge}</span>
+                            <span class="text-[10px] text-right">
+                                SCORE: ${agentScore}/${data.test_episodes}${csBadge}<br>
+                                <span class="opacity-80">Train: ${formatDuration(agent.training_duration_seconds)} &middot; Test: ${formatDuration(agent.test_duration_seconds)}</span>
+                            </span>
                         </div>
                         <div class="p-3 grid grid-cols-3 md:grid-cols-6 gap-2">
                             ${agent.charts.map(chart => `
@@ -628,7 +717,7 @@ let modalContentHtml = `
             <div class="mt-10 pt-6 border-t border-gray-200">
                 <h3 class="text-purple-700 font-black mb-4 uppercase flex items-center gap-2">
                     Communication Activity
-                    <span class="text-xs font-normal text-gray-400 normal-case">(${data.comm_strategy})</span>
+                    <span class="text-xs font-normal text-gray-400 normal-case">(${data.comm_strategy}${Array.isArray(data.comm_strategies) && data.comm_strategies.length ? ' + ' + data.comm_strategies.join(',') : ''})</span>
                     ${resultTipIcon('communication_activity')}
                 </h3>
                 <div id="comm-stats-panel" class="text-sm text-gray-500 italic">Loading communication stats...</div>
@@ -663,6 +752,7 @@ let modalContentHtml = `
                         <p class="text-xs text-gray-600 break-words">${agentNames}</p>
                         <p><span class="font-semibold">Episodes/Steps:</span> ${data.training_episodes} / ${data.max_steps}</p>
                         <p><span class="font-semibold">Accuracy (min/mean/max):</span> ${trainMinAccPct.toFixed(2)}% / ${trainMeanAccPct.toFixed(2)}% / ${trainMaxAccPct.toFixed(2)}%</p>
+                        <p><span class="font-semibold">Avg. training time:</span> ${formatDuration(meanTrainingDuration)}</p>
                     </div>
                 </div>
 
@@ -673,6 +763,7 @@ let modalContentHtml = `
                         <p><span class="font-semibold">Score (min/mean/max):</span> ${data.min_score} / ${data.mean_score} / ${data.max_score}</p>
                         <p><span class="font-semibold">Score % (min/mean/max):</span> ${testMinScorePct.toFixed(2)}% / ${testMeanScorePct.toFixed(2)}% / ${testMaxScorePct.toFixed(2)}%</p>
                         <p><span class="font-semibold">Test charts:</span> ${Array.isArray(data.test_charts) ? data.test_charts.length : 0}</p>
+                        <p><span class="font-semibold">Avg. test time:</span> ${formatDuration(meanTestDuration)}</p>
                         ${mitigationSummary && Number(mitigationSummary.total_under_attack_count || 0) > 0 ? `
                         <p><span class="font-semibold">Mitigation episodes:</span> ${Number(mitigationSummary.episodes_with_mitigation_data || 0)}</p>
                         <p><span class="font-semibold">Under attack (total):</span> ${Number(mitigationSummary.total_under_attack_count || 0)}</p>
@@ -799,9 +890,17 @@ function renderCommStatsPanel(preview) {
         return `<p class="text-gray-400 italic">No communication data recorded for this run.</p>`;
     }
 
-    if (preview.family === 'alert') {
-        return agentNames.map(agentName => {
-            const a = agents[agentName];
+    // Not mutually exclusive: a run combining a Tier A alerting channel with
+    // Tier B mechanisms (e.g. uaq + federated_sync) has both per_host_totals
+    // (alert) and sync_events (policy_coordination) for the same agent — see
+    // results_service.build_result_comm_stats_preview. Render whichever
+    // sections are present per agent, instead of branching on a single
+    // top-level `family`.
+    const sections = agentNames.map(agentName => {
+        const a = agents[agentName];
+        let html = '';
+
+        if (a.per_host_totals) {
             const hosts = Object.keys(a.per_host_totals || {});
             const isUaq = preview.comm_strategy === 'uaq';
             const rows = hosts.map(host => {
@@ -812,7 +911,7 @@ function renderCommStatsPanel(preview) {
                     ${isUaq ? `<td class="py-1 pr-2 text-center">${t.confident}</td><td class="py-1 text-center">${t.uncertain}</td>` : ''}
                 </tr>`;
             }).join('');
-            return `
+            html += `
             <div class="mb-6">
                 <p class="text-xs font-bold uppercase text-gray-600 mb-2">${escapeHtml(agentName)}</p>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -832,12 +931,9 @@ function renderCommStatsPanel(preview) {
                     </div>
                 </div>
             </div>`;
-        }).join('');
-    }
+        }
 
-    if (preview.family === 'policy_coordination') {
-        return agentNames.map(agentName => {
-            const a = agents[agentName];
+        if (a.sync_events) {
             const counts = a.event_counts || {};
             const countsBadges = Object.keys(counts).map(t => `<span class="mr-3">${escapeHtml(t)}: <strong>${counts[t]}</strong></span>`).join('');
             const rows = (a.sync_events || []).map(ev => {
@@ -850,9 +946,9 @@ function renderCommStatsPanel(preview) {
                     <td class="py-1 text-xs text-gray-500">${escapeHtml(detailText)}</td>
                 </tr>`;
             }).join('');
-            return `
+            html += `
             <div class="mb-6">
-                <p class="text-xs font-bold uppercase text-gray-600 mb-1">${escapeHtml(agentName)}</p>
+                <p class="text-xs font-bold uppercase text-gray-600 mb-1">${escapeHtml(agentName)} — peer coordination</p>
                 <p class="text-xs text-gray-500 mb-2">${countsBadges || 'No sync events recorded'}</p>
                 <div class="w-full border rounded-lg overflow-y-auto" style="max-height:260px">
                     <table class="w-full text-xs">
@@ -866,10 +962,12 @@ function renderCommStatsPanel(preview) {
                     </table>
                 </div>
             </div>`;
-        }).join('');
-    }
+        }
 
-    return `<p class="text-gray-400 italic">No communication data recorded for this run.</p>`;
+        return html;
+    }).join('');
+
+    return sections || `<p class="text-gray-400 italic">No communication data recorded for this run.</p>`;
 }
 
 function renderCommEpisodeCharts(preview) {

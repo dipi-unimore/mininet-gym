@@ -61,9 +61,31 @@ const STATE_INPUT_MODES = [
     'normalized', 'raw'
 ];
 
-const COMM_STRATEGY_OPTIONS = [
-    'none', 'naive_broadcast', 'uaq',
-    'federated_sync', 'policy_exchange', 'experience_sharing', 'hierarchical'
+// Tier A — alerting channel (mutually exclusive: single-select). Each option
+// defines an incompatible encoding for the same host→coordinator message
+// channel, so exactly one can be active. 'hierarchical' is intentionally
+// absent here — per paper 7 it's an orthogonal, not-yet-implemented
+// communication *architecture* axis, not a strategy (see constants.py
+// CommStrategy docstring / docs/marl_pz_communication.md).
+const COMM_STRATEGY_TIER_A_OPTIONS = ['none', 'naive_broadcast', 'uaq'];
+
+// Tier B — peer coordination mechanisms (combinable: multi-select). These act
+// on host Q-tables/policy weights directly, independent of the Tier A
+// coordinator channel.
+const COMM_STRATEGY_TIER_B_OPTIONS = ['federated_sync', 'policy_exchange', 'experience_sharing'];
+
+// Tier B combinations flagged as risky (not blocked) — mirrors
+// CommStrategy.TIER_B_WARNINGS in constants.py / the "Combining strategies"
+// table in docs/marl_pz_communication.md.
+const COMM_STRATEGY_TIER_B_WARNINGS = [
+    {
+        pair: ['federated_sync', 'policy_exchange'],
+        message: "S2+S3: redundancy risk — S3's periodic best-peer copy can undo the diversity S2's averaging relies on. Prefer running one or the other unless you are deliberately measuring the interaction.",
+    },
+    {
+        pair: ['policy_exchange', 'experience_sharing'],
+        message: "S3+S4: overwrite conflict — S3 overwrites a lagging agent's Q-table/weights wholesale, while S4 updates them incrementally; S4 updates applied earlier in the same step/episode are lost when S3 fires.",
+    },
 ];
 
 let algoDefaults = {}; // keyed by lowercase algorithm name, loaded from /get_algo_defaults

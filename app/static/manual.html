@@ -954,19 +954,38 @@ agents:
   <em>communication strategy</em> below. When disabled, hosts act as fully independent learners.</li>
 </ul>
 
-<h3>Communication Strategies (<code>env_params.communication.strategy</code>)</h3>
+<h3>Communication Strategies</h3>
+<div class="man-note">
+  Per paper 7 (§Coordination Strategies), communication config splits into two independent tiers:
+  <strong>Tier A</strong> — <code>env_params.communication.strategy</code> (single value, mutually
+  exclusive alerting channel) and <strong>Tier B</strong> —
+  <code>env_params.communication.strategies</code> (list, combinable peer coordination mechanisms).
+</div>
 <table>
-  <thead><tr><th>Strategy</th><th>ID</th><th>Description</th><th>Status</th></tr></thead>
+  <thead><tr><th>Strategy</th><th>Tier</th><th>ID</th><th>Description</th><th>Status</th></tr></thead>
   <tbody>
-    <tr><td>— Independent</td><td><code>none</code></td><td>No coordinator, no messages — hosts learn fully independently.</td><td>Implemented</td></tr>
-    <tr><td>S0 — Naive Broadcast</td><td><code>naive_broadcast</code></td><td>Coordinator relays any attack alert to all hosts, unfiltered. Default; the communication upper bound.</td><td>Implemented</td></tr>
-    <tr><td>S1 — Uncertainty-Aware Querying (UAQ)</td><td><code>uaq</code></td><td>Hosts flag alerts as uncertain or confident via normalised Shannon entropy of their action distribution (<code>communication.uaq.tau</code> / <code>tau_expert</code>); the coordinator relays only confident alerts.</td><td>Implemented</td></tr>
-    <tr><td>S2 — Federated Policy Sync</td><td><code>federated_sync</code></td><td>Every <code>communication.federated_sync.sync_interval</code> steps, Q-tables of all host agents are averaged (FedAvg-style). <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
-    <tr><td>S3 — Periodic Policy Exchange</td><td><code>policy_exchange</code></td><td>After each episode, the best-performing agent's Q-table is copied to any peer lagging by more than <code>communication.policy_exchange.lag_threshold</code>. <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
-    <tr><td>S4 — Experience Replay Sharing</td><td><code>experience_sharing</code></td><td>Every <code>communication.experience_sharing.exchange_interval</code> steps, agents broadcast their highest-TD-error transitions to peers. <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
-    <tr><td>S5 — Hierarchical Coordination</td><td><code>hierarchical</code></td><td>Cluster-head aggregation for large IoT topologies (<code>N ≫ 10</code>), avoiding the <em>O(N²)</em> cost of peer-to-peer coordination.</td><td>Future work</td></tr>
+    <tr><td>— Independent</td><td>A</td><td><code>none</code></td><td>No coordinator, no messages — hosts learn fully independently. Cannot be combined with any Tier B mechanism.</td><td>Implemented</td></tr>
+    <tr><td>S0 — Naive Broadcast</td><td>A</td><td><code>naive_broadcast</code></td><td>Coordinator relays any attack alert to all hosts, unfiltered. Default; the communication upper bound.</td><td>Implemented</td></tr>
+    <tr><td>S1 — Uncertainty-Aware Querying (UAQ)</td><td>A</td><td><code>uaq</code></td><td>Hosts flag alerts as uncertain or confident via normalised Shannon entropy of their action distribution (<code>communication.uaq.tau</code> / <code>tau_expert</code>); the coordinator relays only confident alerts.</td><td>Implemented</td></tr>
+    <tr><td>S2 — Federated Policy Sync</td><td>B</td><td><code>federated_sync</code></td><td>Every <code>communication.federated_sync.sync_interval</code> steps, Q-tables of all host agents are averaged (FedAvg-style). <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
+    <tr><td>S3 — Periodic Policy Exchange</td><td>B</td><td><code>policy_exchange</code></td><td>After each episode, the best-performing agent's Q-table is copied to any peer lagging by more than <code>communication.policy_exchange.lag_threshold</code>. <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
+    <tr><td>S4 — Experience Replay Sharing</td><td>B</td><td><code>experience_sharing</code></td><td>Every <code>communication.experience_sharing.exchange_interval</code> steps, agents broadcast their highest-TD-error transitions to peers. <strong>Tabular agents only.</strong></td><td>Implemented</td></tr>
   </tbody>
 </table>
+<div class="man-note">
+  <code>hierarchical</code> is <strong>not</strong> a selectable Tier A or Tier B value. Per paper 7
+  (§Communication Architecture), peer-to-peer vs. hierarchical message routing — cluster-head
+  aggregation for large IoT topologies (<code>N ≫ 10</code>), avoiding the <em>O(N²)</em> cost of
+  peer-to-peer coordination — is an orthogonal <em>architecture</em> axis that would apply to any
+  Tier B mechanism above, not a strategy of its own. Not implemented yet.
+</div>
+<div class="man-note">
+  Tier B mechanisms are combinable via <code>communication.strategies</code> (a list). Some
+  combinations are flagged with a warning (not blocked): <code>federated_sync</code> +
+  <code>policy_exchange</code> (redundancy risk) and <code>policy_exchange</code> +
+  <code>experience_sharing</code> (overwrite conflict). See
+  <code>docs/marl_pz_communication.md</code> for details.
+</div>
 <div class="man-note">
   If <code>env_params.communication</code> is absent from the config, behaviour is derived from
   the legacy <code>attacks.use_coordinator</code> flag: <code>true</code> → <code>naive_broadcast</code>,

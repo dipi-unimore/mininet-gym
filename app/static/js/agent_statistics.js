@@ -239,9 +239,21 @@ function restoreAgentsChartsFromRawData(rawChartData) {
             console.log(' -> accuracyChart: not found, attempted re-initialization');
         }
         if (accuracyChart && accuracyRaw) {
-            // mark tab as finished and open its charts if visible
+            // Having accuracy chart data only proves this agent has trained at
+            // some point — NOT that it's done (it may still be mid-evaluation).
+            // The server's "current agent" pointer is the only reliable signal
+            // for that during a reload/reconnect: any other agent with data is
+            // a past, fully-completed one (sequential scenarios run agents to
+            // completion — train AND evaluate — before starting the next one).
             if (typeof setAgentMetricsTabStatus === 'function') {
-                setAgentMetricsTabStatus(agent, 'finished');
+                const isCurrentAgent = agent === window.pendingCurrentTrainingAgent;
+                if (isCurrentAgent) {
+                    if (agentTabStatuses[agent] !== 'finished') {
+                        setAgentMetricsTabStatus(agent, 'running');
+                    }
+                } else {
+                    setAgentMetricsTabStatus(agent, 'finished');
+                }
             }
 
             if (applyRestoredHostSeries(accuracyChart, accuracyRaw, true)) {
@@ -313,6 +325,10 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
     if (alreadyBuilt) {
         if (typeof applyPendingChartRestore === 'function') {
             applyPendingChartRestore();
+        }
+        if (window.pendingAgentCommEvents) {
+            replayAgentCommEvents(window.pendingAgentCommEvents);
+            window.pendingAgentCommEvents = null;
         }
         if (typeof restoreTrainingResultsButtonStates === 'function') {
             restoreTrainingResultsButtonStates();
@@ -490,6 +506,10 @@ function initializeAgentsCharts(isMultiAgent, configuredAgents, configuredHosts)
 
     if (typeof applyPendingChartRestore === 'function') {
         applyPendingChartRestore();
+    }
+    if (window.pendingAgentCommEvents) {
+        replayAgentCommEvents(window.pendingAgentCommEvents);
+        window.pendingAgentCommEvents = null;
     }
     if (typeof restoreTrainingResultsButtonStates === 'function') {
         restoreTrainingResultsButtonStates();
@@ -979,8 +999,9 @@ function handleAgentTrainingSummary(agentName, summary) {
     window.lastAgentTrainingSummaries[agentName] = summary;
     updateAgentTrainingPopupButton(agentName);
 
-    // Mark agent tab as finished
-    setAgentMetricsTabStatus(agentName, 'finished');
+    // Tab status is NOT set here: the agent still has evaluation left to run.
+    // It's marked 'finished' only by the backend's explicit STATUS
+    // FINISHED/EVALUATION signal (see web_socket.js's status_update handler).
 
     // Save to sessionStorage for recovery on page reload
     if (typeof saveTrainingSessionData === 'function') {
@@ -1220,6 +1241,32 @@ function appendCommTimelineEntry(agentKey, hostName, payload) {
     }
     log.scrollTop(log[0].scrollHeight);
 }
+
+/**
+ * Repopulates the per-host communication timelines after a reload/reconnect,
+ * from the server-cached policy-coordination events (/get_training_status's
+ * agent_comm_events — see utility/my_log.py's _agent_comm_events). These are
+ * one-shot live events (FedAvg sync, policy copy, experience share) with no
+ * other persistence, so without this the timeline is empty after every
+ * reconnect even though several sync rounds already happened.
+ * Only appends timeline lines (the history), not badge state — badges are a
+ * transient "just happened" pulse that self-refreshes from the next live event.
+ */
+function replayAgentCommEvents(agentCommEventsMap) {
+    if (!agentCommEventsMap || typeof appendCommTimelineEntry !== 'function') return;
+    Object.keys(agentCommEventsMap).forEach(function (agentName) {
+        const events = agentCommEventsMap[agentName] || [];
+        events.forEach(function (ev) {
+            const targets = (ev.participants && ev.participants.length) ? ev.participants : ['ALL'];
+            targets.forEach(function (hostOrAgentId) {
+                const agentKey = `${agentName}_${hostOrAgentId}`;
+                appendCommTimelineEntry(agentKey, hostOrAgentId, ev);
+            });
+        });
+    });
+}
+
+window.replayAgentCommEvents = replayAgentCommEvents;
 
 function getHtmlDivTrafficHost() {
     let html = `<div>`;

@@ -204,6 +204,7 @@ def marl_pz_main(config, am: AgentManager, env: MarlPzEnv):
                     comm_stats = _build_comm_stats_payload(
                         getattr(env, '_comm_strategy', CommStrategy.NONE),
                         alert_comm_rows, comm_events, env.hosts,
+                        comm_strategies=getattr(env, '_comm_strategies', frozenset()),
                     )
                     if comm_stats is not None:
                         save_data_to_file(comm_stats, agent_dir, "comm_stats")
@@ -234,10 +235,23 @@ def marl_pz_main(config, am: AgentManager, env: MarlPzEnv):
                 env.df = list(scenario_evaluation)
                 env._env_initialized = False
 
+                test_start_time = time.time()
                 score, gt, pred, mitigation = _evaluate_marl_agent(
                     agent, env,
                     config.env_params.test_episodes,
                     config.env_params.max_steps,
+                )
+                test_execution_time = time.time() - test_start_time
+
+                # Explicit per-agent completion signal: only now, after training
+                # AND evaluation have both actually finished, should the dashboard
+                # mark this agent's tab "Finished" and move on to the next one.
+                notify_client(
+                    level=SystemLevels.STATUS,
+                    status=SystemStatus.FINISHED,
+                    mode=SystemModes.EVALUATION,
+                    message=f"{agent.name} training and evaluation complete.",
+                    agent_name=agent.name,
                 )
 
                 if len(gt) == 0:
@@ -282,7 +296,8 @@ def marl_pz_main(config, am: AgentManager, env: MarlPzEnv):
                 save_data_to_file(
                     {"ground_truth": gt, "predicted": {agent.name: pred},
                      "metrics": agents_summary[agent.name],
-                     "mitigation_history": mitigation},
+                     "mitigation_history": mitigation,
+                     "test_execution_time": test_execution_time},
                     directory_name, "test",
                 )
                 try:
@@ -428,7 +443,7 @@ def _train_marl_sb3_with_comm(agent, env: MarlPzEnv, scenario_training: list):
       S4 experience_sharing (DQN only) → share high-|reward| replay buffer entries
     PPO / A2C instances are excluded from S4 (no replay buffer).
     """
-    strategy = env._comm_strategy
+    comm_strategies = env._comm_strategies
     comm_cfg  = env._comm_cfg
     comm_events: list = []
 
@@ -437,15 +452,15 @@ def _train_marl_sb3_with_comm(agent, env: MarlPzEnv, scenario_training: list):
     _es_td_thresh  = 1.0
     _es_share_size = 50
 
-    if strategy == CommStrategy.FEDERATED_SYNC:
+    if CommStrategy.FEDERATED_SYNC in comm_strategies:
         fed_cfg = comm_cfg.get('federated_sync', {}) or {}
         # sync_interval for SB3 is in episodes; default every 1 episode
         _fed_interval = max(1, int(fed_cfg.get('sync_interval_episodes',
                                                fed_cfg.get('sync_interval', 1))))
-    elif strategy == CommStrategy.POLICY_EXCHANGE:
+    if CommStrategy.POLICY_EXCHANGE in comm_strategies:
         pe_cfg  = comm_cfg.get('policy_exchange', {}) or {}
         _pe_lag = float(pe_cfg.get('lag_threshold', 10.0))
-    elif strategy == CommStrategy.EXPERIENCE_SHARING:
+    if CommStrategy.EXPERIENCE_SHARING in comm_strategies:
         es_cfg         = comm_cfg.get('experience_sharing', {}) or {}
         _es_td_thresh  = float(es_cfg.get('td_error_threshold', 1.0))
         _es_share_size = int(es_cfg.get('buffer_share_size', 50))
@@ -478,14 +493,15 @@ def _train_marl_sb3_with_comm(agent, env: MarlPzEnv, scenario_training: list):
 
         # ── Post-episode communication hooks ─────────────────────────────
         new_events: list = []
-        if strategy == CommStrategy.FEDERATED_SYNC and (episode + 1) % _fed_interval == 0:
-            new_events = _federated_sync_sb3_weights(agent.instances)
+        if (CommStrategy.FEDERATED_SYNC in comm_strategies
+                and (episode + 1) % _fed_interval == 0):
+            new_events += _federated_sync_sb3_weights(agent.instances)
 
-        if strategy == CommStrategy.POLICY_EXCHANGE:
-            new_events = _policy_exchange_sb3_end_of_episode(agent.instances, episode_rewards, _pe_lag)
+        if CommStrategy.POLICY_EXCHANGE in comm_strategies:
+            new_events += _policy_exchange_sb3_end_of_episode(agent.instances, episode_rewards, _pe_lag)
 
-        if strategy == CommStrategy.EXPERIENCE_SHARING:
-            new_events = _experience_sharing_dqn(agent.instances, _es_td_thresh, _es_share_size)
+        if CommStrategy.EXPERIENCE_SHARING in comm_strategies:
+            new_events += _experience_sharing_dqn(agent.instances, _es_td_thresh, _es_share_size)
 
         for ev in new_events:
             ev['episode'] = episode + 1
@@ -501,26 +517,18 @@ def _train_marl_sb3_with_comm(agent, env: MarlPzEnv, scenario_training: list):
 
 # On-policy algorithms (no replay buffer). DQN (off-policy) now runs every
 # communication strategy through the joint per-step loop
-# (_train_marl_joint_sb3_naive); these constants only matter for PPO/A2C, which
+# (_train_marl_joint_sb3_naive); this constant only matters for PPO/A2C, which
 # have no replay buffer and can't join that loop.
 _ON_POLICY_ALGOS = frozenset({'ppo', 'a2c'})
-# PPO/A2C + these strategies fall back to the episode-interleaved path
-# (_train_marl_sb3_with_comm) since there's no replay buffer to step jointly.
-# EXPERIENCE_SHARING (S4) is included for round-robin training UX parity with
-# the other strategies, even though the sync itself is a no-op for on-policy
-# agents (no replay buffer — see the S4 warning above and
-# _experience_sharing_dqn's internal off-policy filter).
-_COMM_STRATEGIES_REQUIRING_SB3_INTERLEAVE = frozenset({
-    CommStrategy.FEDERATED_SYNC,
-    CommStrategy.POLICY_EXCHANGE,
-    CommStrategy.EXPERIENCE_SHARING,
-})
-# PPO/A2C + these strategies have no communication-aware training path at all
-# (see the sequential fallback branch below) — kept only for the warning
-# message shown when an on-policy agent lands there.
-_JOINT_SB3_ELIGIBLE_STRATEGIES = frozenset({
-    CommStrategy.NONE, CommStrategy.NAIVE_BROADCAST, CommStrategy.UAQ,
-})
+# PPO/A2C + any active Tier B mechanism (S2/S3/S4, possibly combined) fall
+# back to the episode-interleaved path (_train_marl_sb3_with_comm) since
+# there's no replay buffer to step jointly. EXPERIENCE_SHARING (S4) still
+# routes here for round-robin training UX parity with the other mechanisms,
+# even though the sync itself is a no-op for on-policy agents (no replay
+# buffer — see the S4 warning above and _experience_sharing_dqn's internal
+# off-policy filter). When Tier B is empty (Tier A alone: none/naive_broadcast
+# /uaq), PPO/A2C fall back further, to fully sequential per-instance training
+# (see the warning in the else branch below).
 
 
 def _train_marl_joint_sb3_naive(agent, env: MarlPzEnv, scenario_training: list):
@@ -549,7 +557,8 @@ def _train_marl_joint_sb3_naive(agent, env: MarlPzEnv, scenario_training: list):
     """
     instances  = agent.instances
     stop_event = env.stop_event
-    strategy   = env._comm_strategy
+    strategy        = env._comm_strategy
+    comm_strategies = env._comm_strategies
     comm_cfg   = env._comm_cfg
     alert_comm_rows: list = []
     comm_events: list = []
@@ -562,15 +571,15 @@ def _train_marl_joint_sb3_naive(agent, env: MarlPzEnv, scenario_training: list):
     _es_td_thresh  = 1.0
     _es_share_size = 50
 
-    if strategy == CommStrategy.FEDERATED_SYNC:
+    if CommStrategy.FEDERATED_SYNC in comm_strategies:
         _fed_cfg      = comm_cfg.get('federated_sync', {}) or {}
         _fed_interval = int(_fed_cfg.get('sync_interval', 100))
         information(f"[S2 FedSync] sync_interval={_fed_interval} steps\n", agent.name)
-    elif strategy == CommStrategy.POLICY_EXCHANGE:
+    if CommStrategy.POLICY_EXCHANGE in comm_strategies:
         _pe_cfg = comm_cfg.get('policy_exchange', {}) or {}
         _pe_lag = float(_pe_cfg.get('lag_threshold', 10.0))
         information(f"[S3 PolicyEx] lag_threshold={_pe_lag}\n", agent.name)
-    elif strategy == CommStrategy.EXPERIENCE_SHARING:
+    if CommStrategy.EXPERIENCE_SHARING in comm_strategies:
         _es_cfg        = comm_cfg.get('experience_sharing', {}) or {}
         _es_interval   = int(_es_cfg.get('exchange_interval', 50))
         _es_td_thresh  = float(_es_cfg.get('td_error_threshold', 1.0))
@@ -709,18 +718,18 @@ def _train_marl_joint_sb3_naive(agent, env: MarlPzEnv, scenario_training: list):
             step_count += 1
 
             # ── S2: federated policy-weight averaging every N steps ───────
-            if strategy == CommStrategy.FEDERATED_SYNC and step_count % _fed_interval == 0:
+            if CommStrategy.FEDERATED_SYNC in comm_strategies and step_count % _fed_interval == 0:
                 _emit_comm_events(_federated_sync_sb3_weights(instances), episode + 1, step_count)
 
             # ── S4: share high-|reward| replay-buffer transitions every N steps ─
-            if strategy == CommStrategy.EXPERIENCE_SHARING and step_count % _es_interval == 0:
+            if CommStrategy.EXPERIENCE_SHARING in comm_strategies and step_count % _es_interval == 0:
                 _emit_comm_events(
                     _experience_sharing_dqn(instances, _es_td_thresh, _es_share_size),
                     episode + 1, step_count,
                 )
 
         # ── S3: policy exchange at end of episode ─────────────────────────
-        if strategy == CommStrategy.POLICY_EXCHANGE:
+        if CommStrategy.POLICY_EXCHANGE in comm_strategies:
             _emit_comm_events(
                 _policy_exchange_sb3_end_of_episode(instances, episode_rewards, _pe_lag),
                 episode + 1, None,
@@ -771,10 +780,17 @@ def _train_marl_agent(agent, env: MarlPzEnv, scenario_training: list):
     start = time.time()
     algo       = getattr(agent, 'algorithm', '').lower()
     is_tabular = algo in (ALGO_Q_LEARNING, ALGO_SARSA)
-    strategy   = getattr(env, '_comm_strategy', CommStrategy.NONE)
+    strategy        = getattr(env, '_comm_strategy', CommStrategy.NONE)
+    comm_strategies = getattr(env, '_comm_strategies', frozenset())
+
+    # ── Risky Tier B combination warning (S2+S3 / S3+S4 — see
+    # docs/marl_pz_communication.md "Combining strategies") ──────────────
+    for pair, message in CommStrategy.TIER_B_WARNINGS:
+        if all(s in comm_strategies for s in pair):
+            information(f"[WARNING] {message}\n", agent.name)
 
     # ── S4 incompatibility warning for on-policy agents ──────────────────
-    if (strategy == CommStrategy.EXPERIENCE_SHARING
+    if (CommStrategy.EXPERIENCE_SHARING in comm_strategies
             and not is_tabular
             and algo in _ON_POLICY_ALGOS):
         information(
@@ -803,12 +819,12 @@ def _train_marl_agent(agent, env: MarlPzEnv, scenario_training: list):
             )
             alert_comm_rows, comm_events = _train_marl_joint_sb3_naive(agent, env, scenario_training)
 
-        elif strategy in _COMM_STRATEGIES_REQUIRING_SB3_INTERLEAVE:
-            # PPO/A2C (on-policy) + S2/S3/S4: no replay buffer, so the joint
-            # per-step loop isn't available — fall back to the slower
-            # episode-interleaved path. S4 sync is a no-op for these algos
-            # (see the warning above) but they still train here for round-robin
-            # progress UX parity with the other strategies.
+        elif comm_strategies:
+            # PPO/A2C (on-policy) + any active Tier B mechanism: no replay
+            # buffer, so the joint per-step loop isn't available — fall back
+            # to the slower episode-interleaved path. S4 sync is a no-op for
+            # these algos (see the warning above) but they still train here
+            # for round-robin progress UX parity with the other mechanisms.
             information(
                 f"Starting interleaved training "
                 f"(S2/S3/S4 — on-policy, one instance trains a full episode at a time)\n",
@@ -817,7 +833,7 @@ def _train_marl_agent(agent, env: MarlPzEnv, scenario_training: list):
             alert_comm_rows, comm_events = _train_marl_sb3_with_comm(agent, env, scenario_training)
 
         else:
-            if strategy in _JOINT_SB3_ELIGIBLE_STRATEGIES and algo in _ON_POLICY_ALGOS:
+            if algo in _ON_POLICY_ALGOS:
                 information(
                     f"[WARNING] Joint training requires an off-policy model "
                     f"(replay buffer). {algo.upper()} is on-policy — falling back "
@@ -1224,7 +1240,8 @@ def _train_marl_joint_tabular(agent, env: MarlPzEnv, scenario_training: list):
 
     instances  = agent.instances
     stop_event = env.stop_event
-    strategy   = env._comm_strategy
+    strategy        = env._comm_strategy
+    comm_strategies = env._comm_strategies
     comm_cfg   = env._comm_cfg
 
     # ── Per-strategy config extraction ───────────────────────────────────────
@@ -1234,19 +1251,19 @@ def _train_marl_joint_tabular(agent, env: MarlPzEnv, scenario_training: list):
     _es_td_thresh  = 1.0
     _es_share_size = 50
 
-    if strategy == CommStrategy.FEDERATED_SYNC:
+    if CommStrategy.FEDERATED_SYNC in comm_strategies:
         _fed_cfg      = comm_cfg.get('federated_sync', {}) or {}
         _fed_interval = int(_fed_cfg.get('sync_interval', 100))
         information(
             f"[S2 FedSync] sync_interval={_fed_interval} steps\n", agent.name
         )
-    elif strategy == CommStrategy.POLICY_EXCHANGE:
+    if CommStrategy.POLICY_EXCHANGE in comm_strategies:
         _pe_cfg = comm_cfg.get('policy_exchange', {}) or {}
         _pe_lag = float(_pe_cfg.get('lag_threshold', 10.0))
         information(
             f"[S3 PolicyEx] lag_threshold={_pe_lag}\n", agent.name
         )
-    elif strategy == CommStrategy.EXPERIENCE_SHARING:
+    if CommStrategy.EXPERIENCE_SHARING in comm_strategies:
         _es_cfg        = comm_cfg.get('experience_sharing', {}) or {}
         _es_interval   = int(_es_cfg.get('exchange_interval', 50))
         _es_td_thresh  = float(_es_cfg.get('td_error_threshold', 1.0))
@@ -1356,7 +1373,7 @@ def _train_marl_joint_tabular(agent, env: MarlPzEnv, scenario_training: list):
                     sarsa_next[agent_id] = next_action
 
                 # ── S4: collect transition AFTER Q-update ─────────────────
-                if strategy == CommStrategy.EXPERIENCE_SHARING:
+                if CommStrategy.EXPERIENCE_SHARING in comm_strategies:
                     _experience_sharing_collect(
                         exp_pool, agent_id, m,
                         disc_states[agent_id], actions[agent_id],
@@ -1378,18 +1395,18 @@ def _train_marl_joint_tabular(agent, env: MarlPzEnv, scenario_training: list):
             step_count += 1
 
             # ── S2: federated Q-table averaging every N steps ─────────────
-            if strategy == CommStrategy.FEDERATED_SYNC and step_count % _fed_interval == 0:
+            if CommStrategy.FEDERATED_SYNC in comm_strategies and step_count % _fed_interval == 0:
                 _emit_comm_events(_federated_sync_qtables(instances), episode + 1, step_count)
 
             # ── S4: broadcast experience every N steps ────────────────────
-            if strategy == CommStrategy.EXPERIENCE_SHARING and step_count % _es_interval == 0:
+            if CommStrategy.EXPERIENCE_SHARING in comm_strategies and step_count % _es_interval == 0:
                 _emit_comm_events(
                     _experience_sharing_broadcast(instances, exp_pool, _es_td_thresh, _es_share_size),
                     episode + 1, step_count,
                 )
 
         # ── S3: policy exchange at end of episode (before rewards cleared) ─
-        if strategy == CommStrategy.POLICY_EXCHANGE:
+        if CommStrategy.POLICY_EXCHANGE in comm_strategies:
             _emit_comm_events(_policy_exchange_end_of_episode(instances, _pe_lag), episode + 1, None)
 
         # ── Message stats log (sanity check for NAIVE_BROADCAST vs UAQ) ──
@@ -1558,25 +1575,29 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
 # ────────────────────────────────────────────────────────────────────────────
 
 def _build_comm_stats_payload(comm_strategy: str, alert_comm_rows: list,
-                               comm_events: list, hosts: list):
+                               comm_events: list, hosts: list,
+                               comm_strategies: frozenset = frozenset()):
     """Build the comm_stats.json payload for one agent's training run.
 
-    Returns None for CommStrategy.NONE/HIERARCHICAL (nothing to persist) or when
-    the relevant family produced no data at all (e.g. run stopped before any
-    episode completed).
+    `comm_strategy` is the Tier A alerting channel (none/naive_broadcast/uaq);
+    `comm_strategies` is the Tier B set of active peer-coordination mechanisms
+    (federated_sync/policy_exchange/experience_sharing — zero or more). Both
+    families can produce data in the same run (e.g. uaq + federated_sync), so
+    this returns None only when *neither* family has anything to persist.
     """
-    if comm_strategy in (CommStrategy.NONE, CommStrategy.HIERARCHICAL):
+    if comm_strategy == CommStrategy.HIERARCHICAL:
         return None
 
-    if comm_strategy in (CommStrategy.NAIVE_BROADCAST, CommStrategy.UAQ):
-        if not alert_comm_rows:
-            return None
+    payload = None
+
+    if comm_strategy in (CommStrategy.NAIVE_BROADCAST, CommStrategy.UAQ) and alert_comm_rows:
         # Single conversion point to a compact int32 array — mirrors the
         # custom_callback.py episode_statuses precedent (never keep a running
         # list-of-dicts across the whole training run).
         alert_rows = np.array(alert_comm_rows, dtype=np.int32)
-        return {
+        payload = {
             'comm_strategy': comm_strategy,
+            'comm_strategies': sorted(comm_strategies),
             'family': 'alert',
             'alert_columns': list(ALERT_COMM_COLUMNS),
             'alert_rows': alert_rows,
@@ -1586,13 +1607,21 @@ def _build_comm_stats_payload(comm_strategy: str, alert_comm_rows: list,
     # Policy-coordination family (federated_sync / policy_exchange / experience_sharing):
     # event count is bounded by episodes/sync_interval, not by steps — small
     # enough that a plain JSON list-of-dicts is fine, no numpy conversion needed.
-    if not comm_events:
-        return None
-    return {
-        'comm_strategy': comm_strategy,
-        'family': 'policy_coordination',
-        'sync_events': comm_events,
-    }
+    if comm_strategies and comm_events:
+        if payload is None:
+            payload = {
+                'comm_strategy': comm_strategy,
+                'comm_strategies': sorted(comm_strategies),
+                'family': 'policy_coordination',
+                'sync_events': comm_events,
+            }
+        else:
+            # Both families produced data (e.g. uaq + federated_sync) — keep
+            # the alert payload as the primary shape (unchanged consumers)
+            # and attach the sync events alongside it.
+            payload['sync_events'] = comm_events
+
+    return payload
 
 
 # ────────────────────────────────────────────────────────────────────────────
