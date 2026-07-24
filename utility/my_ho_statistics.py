@@ -748,25 +748,92 @@ def plot_qtable_coverage(indicators, coverage_history, dir_name, agent_name=''):
     plt.close()
 
 
-def plot_discrete_feature_bin_coverage(indicators, dir_name, agent_name='', n_bins=4):
+def plot_qtable_coverage_per_host(host_coverage_history, host_indicators, dir_name, agent_name=''):
+    """Multi-host variant of plot_qtable_coverage for marl_pz joint tabular training.
+
+    Same two-subplot layout as plot_qtable_coverage (coverage over global steps,
+    coverage at end of each episode), but with one line per host instead of a
+    single steelblue/darkorange line. Saves to the same filename
+    ("qtable_coverage.png") as the single-host version.
+
+    Args:
+        host_coverage_history: {host_name: [{global_step, episode, step, coverage_pct}, ...]}
+        host_indicators:       {host_name: [per-episode indicator dicts]} (same hosts as above)
+        dir_name:              Directory where the PNG is saved.
+        agent_name:            Agent name for the plot title.
+    """
+    if not host_coverage_history and not host_indicators:
+        return
+
+    palette = plt.cm.tab10.colors
+    fig, axs = plt.subplots(2, 1, figsize=(12, 8))
+
+    # ── Top: coverage over global steps, one line per host ─────────
+    for i, (host_name, coverage_history) in enumerate(host_coverage_history.items()):
+        if not coverage_history:
+            continue
+        steps    = [r['global_step'] for r in coverage_history]
+        coverage = [r['coverage_pct'] for r in coverage_history]
+        axs[0].plot(steps, coverage, color=palette[i % len(palette)],
+                    linewidth=1.5, label=host_name)
+    axs[0].set_xlabel('Global micro-step')
+    axs[0].set_ylabel('Q-table coverage (%)')
+    axs[0].set_title(f'{agent_name} — Q-table Coverage Over Steps (per host)')
+    axs[0].grid(True, alpha=0.4)
+    axs[0].legend()
+
+    # ── Bottom: coverage at end of each episode, one line per host ─
+    for i, (host_name, indicators) in enumerate(host_indicators.items()):
+        ep_covs = [(ind['episode'], ind.get('qtable_coverage_pct', 0))
+                   for ind in indicators
+                   if 'qtable_coverage_pct' in ind]
+        if not ep_covs:
+            continue
+        eps, covs = zip(*ep_covs)
+        axs[1].plot(eps, covs, marker='o', color=palette[i % len(palette)],
+                    linewidth=1.5, markersize=4, label=host_name)
+    axs[1].set_xlabel('Episode')
+    axs[1].set_ylabel('Q-table coverage (%)')
+    axs[1].set_title(f'{agent_name} — Q-table Coverage per Episode (per host)')
+    axs[1].grid(True, alpha=0.4)
+    axs[1].legend()
+
+    plt.tight_layout()
+    plt.savefig(f"{dir_name}/qtable_coverage.png")
+    plt.close()
+
+
+def plot_discrete_feature_bin_coverage(indicators, dir_name, agent_name='', n_bins=4,
+                                        include_pct_var=True):
     """Plot discretized feature/bin coverage with one subplot per action.
 
     Input data comes from ATTACKS_HO training indicators
     (`episode_statuses` produced by PerHostScanWrapper callback).
+
+    When include_pct_var=False only the four raw counters are plotted
+    (received_packets, received_bytes, transmitted_packets, transmitted_bytes).
     """
     if not indicators:
         return
 
-    features = [
-        "received_packets",
-        "received_packets_percentage_change",
-        "received_bytes",
-        "received_bytes_percentage_change",
-        "transmitted_packets",
-        "transmitted_packets_percentage_change",
-        "transmitted_bytes",
-        "transmitted_bytes_percentage_change",
-    ]
+    if include_pct_var:
+        features = [
+            "received_packets",
+            "received_packets_percentage_change",
+            "received_bytes",
+            "received_bytes_percentage_change",
+            "transmitted_packets",
+            "transmitted_packets_percentage_change",
+            "transmitted_bytes",
+            "transmitted_bytes_percentage_change",
+        ]
+    else:
+        features = [
+            "received_packets",
+            "received_bytes",
+            "transmitted_packets",
+            "transmitted_bytes",
+        ]
     n_bins = max(2, int(n_bins))
     packet_byte_features = {
         "received_packets",

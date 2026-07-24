@@ -114,7 +114,27 @@ async function checkAndRecoverTrainingState() {
         if (response.is_training) {
             console.log('Active training detected:', response.message);
             saveTrainingStateToStorage(response.status);
-            
+
+            // Sync systemStatus immediately from the AJAX response (mirrors
+            // syncTrainingStateOnReconnect's mapping) instead of waiting for
+            // the socket to (re)connect — this also locks the Configuration
+            // page right away via setStatus() -> updateConfigLockFromStatus().
+            let recoveredState = SYSTEM_STATUS.TRAINING_RUNNING;
+            if (response.is_paused) {
+                recoveredState = SYSTEM_STATUS.PAUSED;
+            } else if (response.is_stopping) {
+                recoveredState = SYSTEM_STATUS.STOPPED;
+            }
+            setStatus(recoveredState, response.message);
+
+            // Stash which agent the server says is currently training/evaluating
+            // so the tab bar (built later, during navigation) can mark it
+            // 'Running' immediately instead of waiting for the next live metric.
+            window.pendingCurrentTrainingAgent = response.current_agent || null;
+            // Stash cached comm/sync events so the tab bar (built later) can
+            // replay them into the per-host timelines (see agent_statistics.js).
+            window.pendingAgentCommEvents = response.agent_comm_events || null;
+
             // Restore training session data (summaries, stats, etc.)
             const dataRestored = restoreTrainingSessionData();
             
@@ -150,6 +170,8 @@ async function checkAndRecoverTrainingState() {
             return true;
         } else {
             // Clear any stale training state
+            window.pendingCurrentTrainingAgent = null;
+            window.pendingAgentCommEvents = null;
             localStorage.removeItem('trainingStatus');
             sessionStorage.removeItem('trainingSessionData');
             sessionStorage.removeItem('chartDataRaw');
@@ -343,6 +365,220 @@ $(document).ready(async function () {
                 setStatus(SYSTEM_STATUS.ERROR, 'Error stopping training');
             }
         });
+    });
+
+    // --- Threshold Calibration (System tab) ---
+    let calibrationPollTimer = null;
+
+    function renderCalibrationLog(lines) {
+        const $log = $('#calibration-log');
+        $log.removeClass('hidden').text((lines || []).join('\n'));
+        $log.scrollTop($log[0].scrollHeight);
+    }
+
+    function fmtNum(n) {
+        return Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+
+    function renderCalibrationResult(result) {
+        if (!result) return;
+        const rows = ['packets', 'bytes'].map(metric => {
+            const s = result[metric];
+            const ratioColor = s.ok ? 'text-green-600' : 'text-red-600';
+            return `
+                <div class="mt-2">
+                    <div class="font-semibold">${metric === 'packets' ? 'Packets' : 'Bytes'}</div>
+                    <div class="text-xs text-gray-500">
+                        normal p95=${fmtNum(s.normal_p95)} &middot; attack p10=${fmtNum(s.attack_p10)} p50=${fmtNum(s.attack_p50)}
+                    </div>
+                    <div class="text-xs ${ratioColor} font-medium">
+                        separation ratio: ${s.ratio.toFixed(2)}x ${s.ok ? '(clean)' : '(WARNING: overlap — see remedies in log)'}
+                    </div>
+                    <div class="text-sm font-semibold">Recommended: ${fmtNum(s.recommended)}</div>
+                </div>`;
+        }).join('');
+        $('#calibration-result').removeClass('hidden').html(`
+            <div class="text-xs text-gray-500 mb-1">
+                scenario: <code>${result.yaml_path}</code> &middot;
+                link_bw_mbps=${result.link_bw_mbps || 'unshaped'} &middot;
+                normal_bw_mbps=${result.normal_bw_mbps} &middot; n_bins=${result.n_bins}
+            </div>
+            ${rows}
+        `);
+    }
+
+    function setCalibrationRunning(isRunning) {
+        $('#calibrate-thresholds-btn').prop('disabled', isRunning);
+        $('#calibrate-thresholds-btn-text').text(isRunning ? 'Calibrating…' : 'Calibrate Thresholds');
+    }
+
+    // Returns which section of env_params currently holds .thresholds.packets/bytes
+    // (attacks for attack-detection scenarios, classification for the classification
+    // scenario) — mirrors the scenario_env_param.yaml structure already loaded into
+    // currentConfig.env_params.
+    function _thresholdsSectionKey() {
+        const env = currentConfig.env_params || {};
+        if (env.attacks && env.attacks.thresholds) return 'attacks';
+        if (env.classification && env.classification.thresholds) return 'classification';
+        return null;
+    }
+
+    // Builds the "what happened" popup shown once calibration + in-memory apply settle.
+    function showCalibrationModal({ title, result, appliedInMemory, errorMessage }) {
+        $('#calibration-result-modal-title').text(title);
+        $('#save-scenario-thresholds-modal-btn').toggleClass('hidden', !appliedInMemory);
+
+        let html = '';
+        if (result) {
+            const p = result.packets, b = result.bytes;
+            html += `
+                <p>Measured on this server (hosts: ${result.host_names.join(', ')};
+                link_bw_mbps=${result.link_bw_mbps || 'unshaped'}, normal_bw_mbps=${result.normal_bw_mbps},
+                n_bins=${result.n_bins}):</p>
+                <ul class="list-disc list-inside">
+                    <li><b>Packets</b> — normal p95=${fmtNum(p.normal_p95)}, attack p10=${fmtNum(p.attack_p10)}
+                        &rarr; recommended <b>${fmtNum(p.recommended)}</b>
+                        (separation ${p.ratio.toFixed(2)}x ${p.ok ? '✓' : '⚠ overlap'})</li>
+                    <li><b>Bytes</b> — normal p95=${fmtNum(b.normal_p95)}, attack p10=${fmtNum(b.attack_p10)}
+                        &rarr; recommended <b>${fmtNum(b.recommended)}</b>
+                        (separation ${b.ratio.toFixed(2)}x ${b.ok ? '✓' : '⚠ overlap'})</li>
+                </ul>`;
+            if (!p.ok || !b.ok) {
+                html += `<p class="text-amber-600 text-xs">⚠ Normal and attack traffic overlap for at least one
+                    metric on this server — the values below are best-effort. See the log for remedies
+                    (more rounds, lower normal traffic rate, stronger attack burst, fewer bins).</p>`;
+            }
+        }
+
+        if (appliedInMemory) {
+            html += `<p class="text-green-700 font-medium">Applied to the loaded configuration
+                      (packets=${fmtNum(result.packets.recommended)}, bytes=${fmtNum(result.bytes.recommended)})
+                      — in memory only, nothing written to disk yet.</p>
+                      <p class="text-xs text-gray-500">Review under Environment &rarr; Scenario if you want to
+                      tweak the values further, then click "Save to scenario YAML" below (or the button on the
+                      Network tab) to persist them to <code>${result.yaml_path}</code>.</p>`;
+        } else if (errorMessage) {
+            html += `<p class="text-red-600 font-medium">${errorMessage}</p>`;
+        }
+
+        $('#calibration-result-modal-body').html(html);
+        $('#calibration-result-modal').removeClass('hidden');
+    }
+
+    // Apply (memory only): pushes the recommended values into currentConfig + the
+    // rendered form inputs, then syncs to the backend's in-memory config the same
+    // way the top "Save"-page's updateConfigurationInMemory() does. Never touches
+    // the scenario YAML file.
+    function applyCalibratedThresholdsInMemory(result) {
+        const section = _thresholdsSectionKey();
+        if (!section) {
+            showCalibrationModal({
+                title: 'Calibration Complete — could not apply',
+                result,
+                errorMessage: 'No attacks/classification.thresholds section found in the '
+                    + 'current configuration (unexpected gym_type?). Nothing was changed.',
+            });
+            return;
+        }
+
+        const packets = Math.round(result.packets.recommended);
+        const bytes_  = Math.round(result.bytes.recommended);
+
+        currentConfig.env_params[section].thresholds.packets = packets;
+        currentConfig.env_params[section].thresholds.bytes   = bytes_;
+
+        $('#' + CSS.escape(`env_params.${section}.thresholds.packets`)).val(packets);
+        $('#' + CSS.escape(`env_params.${section}.thresholds.bytes`)).val(bytes_);
+
+        if (typeof updateConfigurationInMemory === 'function') {
+            updateConfigurationInMemory();
+        }
+
+        showCalibrationModal({ title: 'Calibration Complete', result, appliedInMemory: true });
+    }
+
+    function saveScenarioThresholdsToDisk() {
+        $.ajax({
+            url: '/save_scenario_thresholds',
+            type: 'POST',
+            success: function (response) {
+                showStatus(response.message || 'Thresholds saved.', 'success');
+            },
+            error: function (xhr) {
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Error saving thresholds: ' + response.message, 'error');
+            }
+        });
+    }
+
+    function pollCalibrationStatus() {
+        $.ajax({
+            url: '/calibration_status',
+            type: 'GET',
+            success: function (response) {
+                renderCalibrationLog(response.log);
+                if (response.status === STATUS.RUNNING || response.status === STATUS.STARTING) {
+                    calibrationPollTimer = setTimeout(pollCalibrationStatus, 1500);
+                    return;
+                }
+                setCalibrationRunning(false);
+                hideLoadingOverlay('calibration');
+                if (response.status === STATUS.FINISHED) {
+                    renderCalibrationResult(response.result);
+                    applyCalibratedThresholdsInMemory(response.result);
+                } else if (response.status === STATUS.ERROR) {
+                    showCalibrationModal({
+                        title: 'Calibration Failed',
+                        errorMessage: response.error || 'Unknown error',
+                    });
+                }
+            },
+            error: function () {
+                setCalibrationRunning(false);
+                hideLoadingOverlay('calibration');
+                showStatus('Lost contact with calibration status endpoint.', 'error');
+            }
+        });
+    }
+
+    $('#calibrate-thresholds-btn').click(function () {
+        if ($(this).prop('disabled')) return;
+        clearTimeout(calibrationPollTimer);
+        $('#calibration-result').addClass('hidden');
+        renderCalibrationLog(['Starting calibration…']);
+        setCalibrationRunning(true);
+        showLoadingOverlay('calibration', 'Calibrating thresholds on this server (builds a throwaway Mininet topology — this can take up to a minute)…');
+
+        $.ajax({
+            url: '/calibrate_thresholds',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                rounds: parseInt($('#calibration-rounds').val(), 10) || 6,
+            }),
+            success: function () {
+                calibrationPollTimer = setTimeout(pollCalibrationStatus, 1000);
+            },
+            error: function (xhr) {
+                setCalibrationRunning(false);
+                hideLoadingOverlay('calibration');
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Error starting calibration: ' + response.message, 'error');
+            }
+        });
+    });
+
+    $('#save-scenario-thresholds-btn').click(function () {
+        saveScenarioThresholdsToDisk();
+    });
+
+    $('#save-scenario-thresholds-modal-btn').click(function () {
+        saveScenarioThresholdsToDisk();
+        $('#calibration-result-modal').addClass('hidden');
+    });
+
+    $('#close-calibration-result-modal-btn').click(() => {
+        $('#calibration-result-modal').addClass('hidden');
     });
 
     // --- Modals ---

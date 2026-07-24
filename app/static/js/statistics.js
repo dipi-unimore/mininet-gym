@@ -52,19 +52,6 @@ function saveChartDataToSession() {
 
 
 
-function extractNumericSeries(rawValue, needPercentageConversion = false) {
-    if (rawValue === null || rawValue === undefined || !Array.isArray(rawValue)) {
-        return null;
-    }
-
-    if (needPercentageConversion) {
-        return rawValue.map(value => Number(value) * 100); // Convert to percentage
-    }
-    return rawValue.map(value => Number(value));
-
-}
-
-
 function repopulateChartsFromRawData() {
     if (typeof window.restoreAgentsChartsFromRawData === 'function') {
         return window.restoreAgentsChartsFromRawData(chartDataRaw);
@@ -84,52 +71,52 @@ function applyPendingChartRestore() {
     return false;
 }
 
+/**
+ * Normalizes a metric value coming from /get_training_status's
+ * agent_chart_data into the canonical { labels, datasets: {key: [...]} }
+ * shape — the same shape updateData() in this file already builds live and
+ * persists to sessionStorage, so both restore paths converge on one format.
+ *
+ * - Flat array (single-agent scenarios): one dataset keyed by the agent name,
+ *   index+1 treated as the episode number.
+ * - Object (multi-host marl_pz/marl scenarios): { host: [v1, v2, ...] },
+ *   each host trains independently so index+1 is that host's own episode
+ *   number, not a shared one.
+ */
+function _toHostShapedSeries(agent, raw) {
+    if (raw === null || raw === undefined) return null;
+    if (Array.isArray(raw)) {
+        if (raw.length === 0) return null;
+        return {
+            labels: raw.map((_, i) => i + 1),
+            datasets: { [agent]: raw },
+        };
+    }
+    if (typeof raw === 'object') {
+        const maxLen = Math.max(0, ...Object.values(raw).map(a => Array.isArray(a) ? a.length : 0));
+        if (maxLen === 0) return null;
+        return {
+            labels: Array.from({ length: maxLen }, (_, i) => i + 1),
+            datasets: raw,
+        };
+    }
+    return null;
+}
+
 function restoreChartDataFromSession(chartDataFromServer) {
     try {
         if (chartDataFromServer) {
-            // Normalize several possible server payload shapes into chartDataRaw
-            const payload = chartDataFromServer;
-            // Case 1: already in desired shape: { accuracy: {...}, reward: {...} }
-            if (payload.accuracy && payload.reward) {
-                chartDataRaw = payload;
-            } else if (payload.agent_chart_data) {
-                // Case 2: payload contains agent_chart_data: { agent: {accuracy, reward} }
-                const normalized = { accuracy: {}, reward: {} };
-                Object.keys(payload.agent_chart_data).forEach(agent => {
-                    const v = payload.agent_chart_data[agent] || {};
-                    // accuracy: could be scalar, array, or nested under metrics
-                    let acc = null;
-                    if (v.accuracy !== undefined) acc = v.accuracy;
-                    else if (v.metrics && v.metrics.accuracy !== undefined) acc = v.metrics.accuracy;
-                    if (acc !== null) {
-                        normalized.accuracy[agent] = Array.isArray(acc) ? acc : [acc];
-                    }
-                    // reward: could be array of numbers, or indicators array with cumulative_reward
-                    let rew = null;
-                    if (v.reward !== undefined) rew = v.reward;
-                    else if (v.indicators && Array.isArray(v.indicators)) {
-                        try { rew = v.indicators.map(i => i.cumulative_reward); } catch (e) { rew = null; }
-                    } else if (v.metrics && v.metrics.reward !== undefined) rew = v.metrics.reward;
-                    if (rew !== null) {
-                        normalized.reward[agent] = Array.isArray(rew) ? rew : [rew];
-                    }
-                });
-                chartDataRaw = normalized;
-            } else {
-                // Case 3: maybe payload is already a plain map { agent: {accuracy, reward} }
-                const normalized = { accuracy: {}, reward: {} };
-                Object.keys(payload).forEach(agent => {
-                    const v = payload[agent] || {};
-                    if (v === null) return;
-                    if (v.accuracy !== undefined) normalized.accuracy[agent] = Array.isArray(v.accuracy) ? v.accuracy : [v.accuracy];
-                    else if (v.metrics && v.metrics.accuracy !== undefined) normalized.accuracy[agent] = Array.isArray(v.metrics.accuracy) ? v.metrics.accuracy : [v.metrics.accuracy];
-                    if (v.reward !== undefined) normalized.reward[agent] = Array.isArray(v.reward) ? v.reward : [v.reward];
-                    else if (v.indicators && Array.isArray(v.indicators)) {
-                        try { normalized.reward[agent] = v.indicators.map(i => i.cumulative_reward); } catch (e) { }
-                    }
-                });
-                chartDataRaw = normalized;
-            }
+            // chartDataFromServer is /get_training_status's agent_chart_data:
+            // { agentName: { accuracy: [...] | {host: [...]}, reward: [...] | {host: [...]} } }
+            const normalized = { accuracy: {}, reward: {} };
+            Object.keys(chartDataFromServer).forEach(agent => {
+                const v = chartDataFromServer[agent] || {};
+                const acc = _toHostShapedSeries(agent, v.accuracy);
+                if (acc) normalized.accuracy[agent] = acc;
+                const rew = _toHostShapedSeries(agent, v.reward);
+                if (rew) normalized.reward[agent] = rew;
+            });
+            chartDataRaw = normalized;
         } else {
             const stored = sessionStorage.getItem('chartDataRaw');
             if (!stored) return false;
@@ -239,6 +226,10 @@ function resetTrainingDashboardForNewRun() {
     sessionStorage.removeItem('trainingSessionData');
     sessionStorage.removeItem('chartDataRaw');
 
+    if (typeof resetAgentMetricsTabState === 'function') {
+        resetAgentMetricsTabState();
+    }
+
     $('#websocket-log').empty();
     $('#host-task-data').empty();
     $('#real-time-status').empty();
@@ -298,6 +289,52 @@ function updateData(data) {
                 updateStatusSpan(realTimeStatus);
             }
         }
+
+        // marl_pz alert-family communication (per-step host<->coordinator messages).
+        // This is env-level (not per top-level agent), so fan out to every
+        // currently-configured agent's panel — each one shows the same host/
+        // coordinator communication state in its own per-host <li> rows.
+        const commData = data.trafficData.commData;
+        if (commData && commData.family === 'alert' && currentConfig.cfg && currentConfig.cfg.agents) {
+            currentConfig.cfg.agents.forEach(function (agentTeamName) {
+                Object.keys(commData.hostAlerts || {}).forEach(function (hostName) {
+                    const agentKey = `${agentTeamName}_${hostName}`;
+                    if (typeof updateCommBadge === 'function') {
+                        updateCommBadge(agentKey, hostName, commData);
+                    }
+                    if (typeof appendCommTimelineEntry === 'function') {
+                        appendCommTimelineEntry(agentKey, hostName, commData);
+                    }
+                });
+                if (commData.coordinatorBroadcast !== null && commData.coordinatorBroadcast !== undefined) {
+                    const coordKey = `${agentTeamName}_${COORDINATOR}`;
+                    if (typeof updateCommBadge === 'function') {
+                        updateCommBadge(coordKey, COORDINATOR, {
+                            family: 'alert',
+                            strategy: commData.strategy,
+                            hostAlerts: { [COORDINATOR]: { value: commData.coordinatorBroadcast, label: commData.coordinatorBroadcast ? 'alert' : 'normal' } },
+                        });
+                    }
+                }
+            });
+        }
+    }
+
+    // marl_pz policy-coordination communication (discrete sync events — S2/S3/S4).
+    // data.agent here IS meaningful: each event is emitted with agent_name=agent.name
+    // (the top-level agent team currently training), unlike the env-level commData above.
+    if (data.commEvent && data.agent) {
+        const ev = data.commEvent;
+        const targets = (ev.participants && ev.participants.length) ? ev.participants : ['ALL'];
+        targets.forEach(function (hostOrAgentId) {
+            const agentKey = `${data.agent}_${hostOrAgentId}`;
+            if (typeof updateCommBadge === 'function') {
+                updateCommBadge(agentKey, hostOrAgentId, ev);
+            }
+            if (typeof appendCommTimelineEntry === 'function') {
+                appendCommTimelineEntry(agentKey, hostOrAgentId, ev);
+            }
+        });
     }
 
     if (data.stepData && data.agent !== null) {
@@ -359,6 +396,10 @@ function updateData(data) {
         // Store chart data for recovery on page reload
         try {
             const agentKey = isMultiAgentMode ? data.agent.replace('_' + host, '') : data.agent;
+            // updateLineChartAccuracy/Reward substitute an empty host with the
+            // agent name when matching/creating datasets — mirror that here so
+            // the stored key matches what's actually rendered live.
+            const datasetKey = host || data.agent;
 
             // Store accuracy data
             if (!chartDataRaw.accuracy[agentKey]) {
@@ -369,10 +410,10 @@ function updateData(data) {
             }
             if (data.metrics.accuracy !== undefined) {
                 chartDataRaw.accuracy[agentKey].labels.push(data.metrics.episode || 0);
-                if (!chartDataRaw.accuracy[agentKey].datasets[host]) {
-                    chartDataRaw.accuracy[agentKey].datasets[host] = [];
+                if (!chartDataRaw.accuracy[agentKey].datasets[datasetKey]) {
+                    chartDataRaw.accuracy[agentKey].datasets[datasetKey] = [];
                 }
-                chartDataRaw.accuracy[agentKey].datasets[host].push(data.metrics.accuracy);
+                chartDataRaw.accuracy[agentKey].datasets[datasetKey].push(data.metrics.accuracy);
             }
 
             // Store reward data
@@ -382,15 +423,22 @@ function updateData(data) {
                     datasets: {}
                 };
             }
-            if (data.metrics.reward !== undefined) {
+            // Backend sends the field as `cumulativeReward`, not `reward`.
+            if (data.metrics.cumulativeReward !== undefined) {
                 chartDataRaw.reward[agentKey].labels.push(data.metrics.episode || 0);
-                if (!chartDataRaw.reward[agentKey].datasets[host]) {
-                    chartDataRaw.reward[agentKey].datasets[host] = [];
+                if (!chartDataRaw.reward[agentKey].datasets[datasetKey]) {
+                    chartDataRaw.reward[agentKey].datasets[datasetKey] = [];
                 }
-                chartDataRaw.reward[agentKey].datasets[host].push(data.metrics.reward);
+                chartDataRaw.reward[agentKey].datasets[datasetKey].push(data.metrics.cumulativeReward);
             }
 
             saveChartDataToSession();
+
+            // Notify tab manager that this agent has live chart data
+            const tabAgentKey = isMultiAgentMode ? data.agent.replace('_' + host, '') : data.agent;
+            if (typeof notifyAgentChartUpdated === 'function') {
+                notifyAgentChartUpdated(tabAgentKey);
+            }
         } catch (e) {
             console.warn('Could not store chart data:', e);
         }

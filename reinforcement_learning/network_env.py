@@ -176,6 +176,9 @@ class NetworkEnv(gym.Env, ABC):
         
         self.read_count += 1
         
+        #save previous state
+        self.global_prev_state = copy.copy(self.global_state)
+        
         # Periodic check for counter overflow (every 100 reads)
         if self.read_count % self.flow_reset_check_interval == 0:
             if check_and_reset_if_needed(
@@ -198,8 +201,7 @@ class NetworkEnv(gym.Env, ABC):
 
         
         start_get_time = time.time() 
-        #save previous state
-        self.global_prev_state = copy.copy(self.global_state)
+
         
         while True:
             flows = get_data_flow(self.net)
@@ -248,21 +250,6 @@ class NetworkEnv(gym.Env, ABC):
         self.global_state.host_states = {}
         self.global_state.host_states_total = {} # Resetting or initializing the total state for current reading
 
-        # for host in self.net.hosts:
-        #     total_transmitted_packets = 0
-        #     total_transmitted_bytes = 0
-        #     total_received_packets = 0
-        #     total_received_bytes = 0
-
-        #     for flow in flows['flows']:
-        #         if flow.get('src_name') == host.name:
-        #             total_transmitted_packets += flow.get('packets', 0)
-        #             total_transmitted_bytes += flow.get('bytes', 0)
-
-        #         elif flow.get('dst_name') == host.name:
-        #             total_received_packets += flow.get('packets', 0)
-        #             total_received_bytes += flow.get('bytes', 0)
-        
         for host in self.net.hosts:
             total_transmitted_packets = 0
             total_transmitted_bytes = 0
@@ -305,11 +292,11 @@ class NetworkEnv(gym.Env, ABC):
             IDX_TX_BYTE_TOTAL = 3
 
             # Indices for agent_states (assumed to hold the previous INCREMENTS, not totals)
-            # [RX_PKT_INC, RX_PKT_PCT_CHG, RX_BYTE_INC, RX_BYTE_PCT_CHG, 0, TX_PKT_INC, TX_PKT_PCT_CHG, TX_BYTE_INC, TX_BYTE_PCT_CHG]
+            # [RX_PKT_INC, RX_PKT_PCT_CHG, RX_BYTE_INC, RX_BYTE_PCT_CHG, TX_PKT_INC, TX_PKT_PCT_CHG, TX_BYTE_INC, TX_BYTE_PCT_CHG]
             IDX_PREV_RX_PKT_INC = 0
             IDX_PREV_RX_BYTE_INC = 2
-            IDX_PREV_TX_PKT_INC = 5
-            IDX_PREV_TX_BYTE_INC = 7 
+            IDX_PREV_TX_PKT_INC = 4  # Before 5
+            IDX_PREV_TX_BYTE_INC = 6 # Before 7
             
              # --- RECEIVED PACKETS ---
             HOST_TOTAL_STATE_SIZE = 4

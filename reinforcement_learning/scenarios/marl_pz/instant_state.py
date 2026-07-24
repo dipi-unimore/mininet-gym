@@ -5,7 +5,7 @@ import numpy as np
 from reinforcement_learning.instant_state import InstantState as BaseInstantState, _serialize_complex_types
 from utility.constants import NORMAL
 
-from .constants import COORDINATOR, COORDINATOR_STATUS_ID_MAPPING, HOST_STATUS_ID_MAPPING
+from .constants import COORDINATOR, COORDINATOR_STATUS_ID_MAPPING, CommStrategy, HOST_STATUS_ID_MAPPING
 
 
 class MarlPzInstantState(BaseInstantState):
@@ -96,6 +96,42 @@ class MarlPzInstantState(BaseInstantState):
             self.messages[agent_name][sender_name] = message
         else:
             self.messages[agent_name] = {sender_name: message}
+
+    # ------------------------------------------------------------------
+    # Live communication snapshot (alert family: NONE/NAIVE_BROADCAST/UAQ)
+    # ------------------------------------------------------------------
+
+    _UAQ_LABELS = {0: 'normal', 1: 'uncertain', 2: 'confident'}
+
+    def get_comm_snapshot(self, comm_strategy: str) -> Dict[str, Any]:
+        """Per-step communication snapshot for the alert family, read fresh off
+        `self.messages` (never accumulated — safe to call every step).
+        Returns {} for CommStrategy.NONE (no coordinator, nothing to show) and
+        for the policy-coordination strategies (those are surfaced as discrete
+        `commEvent` messages instead, not a per-step snapshot).
+        """
+        if comm_strategy not in (CommStrategy.NAIVE_BROADCAST, CommStrategy.UAQ):
+            return {}
+
+        coordinator_inbox = self.messages.get(COORDINATOR, {})
+        host_alerts: Dict[str, Any] = {}
+        coordinator_broadcast = None
+        for host_name in self.host_statuses.keys():
+            value = coordinator_inbox.get(host_name, 0)
+            if comm_strategy == CommStrategy.UAQ:
+                label = self._UAQ_LABELS.get(value, 'normal')
+            else:
+                label = 'alert' if value else 'normal'
+            host_alerts[host_name] = {'value': value, 'label': label}
+            if coordinator_broadcast is None:
+                coordinator_broadcast = self.messages.get(host_name, {}).get(COORDINATOR)
+
+        return {
+            'family': 'alert',
+            'strategy': comm_strategy,
+            'hostAlerts': host_alerts,
+            'coordinatorBroadcast': coordinator_broadcast,
+        }
 
     # ------------------------------------------------------------------
     # Serialization

@@ -207,9 +207,10 @@ def host_task(host: Host, net_env, options):
                 #net_env.host_tasks = host_tasks
                         
                 if task_type == NORMAL and task_duration>0:
-                    color = Fore.GREEN if show_normal_traffic else Fore.BLACK                    
-                    generate_normal_traffic(host, destination, traffic_type, duration = task_duration, color = color)
-                elif task_type == SHORT_ATTACK or task_type == LONG_ATTACK: 
+                    color = Fore.GREEN if show_normal_traffic else Fore.BLACK
+                    bw_mbps = getattr(net_env.params.net_params, 'normal_traffic_bw_mbps', 1)
+                    generate_normal_traffic(host, destination, traffic_type, duration = task_duration, color = color, bw_mbps = bw_mbps)
+                elif task_type == SHORT_ATTACK or task_type == LONG_ATTACK:
                     success = launch_attack_smart(
                         attacker=host,
                         victim=destination,
@@ -219,8 +220,11 @@ def host_task(host: Host, net_env, options):
                     if not success:
                         error(f"Error while {host.name} is assigned {task_type} targeting {destination.name}.")
                     else:
-                        debug(f"{host.name} has finished attacking {destination.name} after duration {task_duration}")
-                        time.sleep(0.5)  # Ensure attack process has finished to propagate
+                        # Attack is fire-and-forget: hping3 runs in background for task_duration seconds.
+                        # Wait the full duration so host_tasks keeps showing the attack status.
+                        debug(f"{host.name} attacking {destination.name} for {task_duration}s")
+                        time.sleep(task_duration)
+                        debug(f"{host.name} finished attacking {destination.name}")
                     # Reset task both for error and success
                     task_duration = 0
                     host_tasks[host.name] = {
@@ -348,10 +352,11 @@ def host_task_async(host: Host, net_env, options):
                         "start_time": start_time,  # Add start_time for debugging
                     }
                     net_env.host_tasks = host_tasks
-                    
-                    color = Fore.GREEN if show_normal_traffic else Fore.BLACK                    
-                    generate_normal_traffic(host, destination, traffic_type, duration=task_duration, color=color)
-                    
+
+                    color = Fore.GREEN if show_normal_traffic else Fore.BLACK
+                    bw_mbps = getattr(net_env.params.net_params, 'normal_traffic_bw_mbps', 1)
+                    generate_normal_traffic(host, destination, traffic_type, duration=task_duration, color=color, bw_mbps=bw_mbps)
+
                 elif task_type == SHORT_ATTACK or task_type == LONG_ATTACK:
                     # For attacks, start the attack FIRST, then store task info
                     attack_started = launch_udp_flood_async(
@@ -631,7 +636,7 @@ def is_host_busy(host):
         return True  # Assume busy if we can't determine
 
 
-def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, color = None):
+def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, color = None, bw_mbps = 1):
     """
     Generate normal traffic between two hosts.
     Args:
@@ -640,6 +645,10 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
         traffic_type: Type of traffic ("tcp", "udp", "ping", "http").
         duration: Duration of traffic generation in seconds.
         color: Color for logging (optional).
+        bw_mbps: iperf -b target rate (Mbit/s) for udp/tcp clients — see
+            net_params.normal_traffic_bw_mbps in config/default.yaml. Keeps
+            "normal" traffic well below attack-level pkt/s and byte/s
+            regardless of server speed or link shaping.
     """
     server_output = ''
     client_output = ''
@@ -717,7 +726,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             client_log_file = f"/tmp/iperf_client_{src_host.name}_{port_number}.log"
             
             try:
-                _host_cmd(src_host, f"bash -c 'timeout {duration+1}s iperf -c {dst_ip} -u -p {port_number} -t {duration} >{client_log_file} 2>&1 & echo $! >{client_pid_file}'", wait_timeout=0)
+                _host_cmd(src_host, f"bash -c 'timeout {duration+1}s iperf -c {dst_ip} -u -p {port_number} -b {bw_mbps}M -t {duration} >{client_log_file} 2>&1 & echo $! >{client_pid_file}'", wait_timeout=0)
             except AssertionError:
                 error(f"Failed to start client on {src_host.name} - host still busy")
                 # Clean up server
@@ -814,7 +823,7 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
                 # Start client with better error handling
                 client_cmd = (
                     f"bash -c 'timeout {duration+1}s iperf -c {dst_ip} "
-                    f"-p {port_number} -t {duration} -i 1 "
+                    f"-p {port_number} -b {bw_mbps}M -t {duration} -i 1 "
                     f">{client_log_file} 2>&1 & echo $! >{client_pid_file}'"
                 )
                 _host_cmd(src_host, client_cmd, wait_timeout=0)
@@ -938,12 +947,12 @@ def generate_normal_traffic(src_host, dst_host, traffic_type, duration: int, col
             release_port(port_number)
 
 
-def _generate_normal_traffic_once(host, destination, traffic_type, duration):
+def _generate_normal_traffic_once(host, destination, traffic_type, duration, bw_mbps=1):
     """Generate normal traffic for ~duration seconds (fire and forget)."""
     from reinforcement_learning.agents.adversarial_agent import generate_normal_traffic
     try:
         generate_normal_traffic(host, destination, traffic_type,
-                                duration=duration, color=None)
+                                duration=duration, color=None, bw_mbps=bw_mbps)
     except Exception:
         pass
  

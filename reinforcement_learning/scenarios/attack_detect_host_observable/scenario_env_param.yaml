@@ -9,8 +9,9 @@ attacks:
   unblock_required_normal_streak: 2
   apply_drop_rules: false
   include_percentage_variations: false
+  use_reward_scaling: true
   thresholds:
-    packets: 80000
+    packets: 6194  # saved 2026-07-18 from web UI (Environment > Network)
     var_packets: 50
-    bytes: 250000000
+    bytes: 699557  # saved 2026-07-18 from web UI (Environment > Network)
     var_bytes: 30

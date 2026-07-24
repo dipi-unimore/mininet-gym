@@ -160,6 +160,7 @@ def attack_detect_ho_main(config, am: AgentManager,
                     status=SystemStatus.RUNNING,
                     mode=SystemModes.TRAINING,
                     message=f"Training {agent.name}...",
+                    agent_name=agent.name,
                 )
 
                 # ── Train ──────────────────────────────────────────────────
@@ -199,14 +200,28 @@ def attack_detect_ho_main(config, am: AgentManager,
                     status=SystemStatus.RUNNING,
                     mode=SystemModes.EVALUATION,
                     message=f"Evaluating {agent.name}...",
+                    agent_name=agent.name,
                 )
                 _configure_wrapper_for_agent_state(agent, wrapped_env)
                 base_env.statuses = []
                 base_env.df = list(scenario_evaluation)
+                test_start_time = time.time()
                 score, gt, pred, mitigation_history = _evaluate_single_agent(
                     agent, wrapped_env, base_env,
                     config.env_params.test_episodes,
                     config.env_params.max_steps,
+                )
+                test_execution_time = time.time() - test_start_time
+
+                # Explicit per-agent completion signal: only now, after training
+                # AND evaluation have both actually finished, should the dashboard
+                # mark this agent's tab "Finished" and move on to the next one.
+                notify_client(
+                    level=SystemLevels.STATUS,
+                    status=SystemStatus.FINISHED,
+                    mode=SystemModes.EVALUATION,
+                    message=f"{agent.name} training and evaluation complete.",
+                    agent_name=agent.name,
                 )
 
                 acc = accuracy_score(gt, pred)
@@ -248,7 +263,8 @@ def attack_detect_ho_main(config, am: AgentManager,
                 save_data_to_file(
                     {"ground_truth": gt, "predicted": {agent.name: pred},
                     "metrics": agents_summary[agent.name],
-                    "mitigation_history": mitigation_history},
+                    "mitigation_history": mitigation_history,
+                    "test_execution_time": test_execution_time},
                     directory_name, "test"
                 )
                 try:
@@ -683,6 +699,10 @@ def plot_and_save_data_agent(agent, config):
                 directory_name,
                 agent_name=agent.name,
                 n_bins=getattr(config.env_params, "n_bins", 4),
+                include_pct_var=getattr(
+                    getattr(config.env_params, 'attacks', None),
+                    'include_percentage_variations', True,
+                ),
             )
         except Exception as e:
             error(Fore.RED

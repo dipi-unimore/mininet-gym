@@ -48,8 +48,9 @@ class AgentManager:
             else:
                 time.sleep(1.5)
         elif self.gym_type.startswith(MARL_PZ):
-            # MarlPzEnv check_env is deferred until SingleAgentViews are created
-            information("Marl PZ environment — check deferred to SingleAgentView creation\n")
+            # parallel_api_test + check_env(SingleAgentView) run in marl_pz_main
+            # after the scenario is loaded so env.reset() has data to work with.
+            information("Marl PZ environment — PZ/SB3 checks deferred to after scenario load\n")
             time.sleep(1.5)
         else:
             if config.env_params.must_check_env:

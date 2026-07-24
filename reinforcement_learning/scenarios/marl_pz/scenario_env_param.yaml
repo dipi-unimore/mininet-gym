@@ -1,8 +1,8 @@
 attacks:
   # Attack probability during normal and scenario generation
   likely: 0.45
-  likely_train: 0.5
-  likely_eval: 0.3
+  likely_train: 0.6
+  likely_eval: 0.5
 
   # Duration (in steps) of short and long attacks
   short_attack_duration: 5
@@ -37,8 +37,127 @@ attacks:
   # true  → obs adds 4 pct-change features (+4 each case)
   include_percentage_variations: false
 
+  # Whether to scale attack-related host rewards by the class-imbalance factor
+  # min(8.0, (num_hosts - 1) / 2). false keeps the raw constants fixed.
+  use_reward_scaling: true
+
   thresholds:
-    packets: 80000
+    packets: 2429  # saved 2026-07-16 from web UI (Environment > Network)
     var_packets: 50
-    bytes: 250000000
+    bytes: 659083  # saved 2026-07-16 from web UI (Environment > Network)
     var_bytes: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Communication strategy between agents
+# ─────────────────────────────────────────────────────────────────────────────
+# Per paper 7 (§Coordination Strategies), this splits into two independent
+# tiers rather than one flat list:
+#
+# Tier A — `strategy` (single value, mutually exclusive): the host→coordinator
+# alerting channel. Each choice defines an incompatible encoding for the same
+# channel, so exactly one can be active.
+#   none              → no messages, no coordinator agent in possible_agents.
+#                       Agents act independently. Obs has NO message feature.
+#   naive_broadcast   → coordinator relays any attack alert to all hosts (S0).
+#                       Obs: msg_count ∈ {0, 1} (from coordinator broadcast).
+#   uaq               → Uncertainty-Aware Querying (S1).
+#                       Hosts flag their alert as uncertain (H>tau) or confident
+#                       (H<=tau_expert). Coordinator relays ONLY confident alerts.
+#                       Uncertain hosts learn to defer to the coordinator signal.
+#
+# Tier B — `strategies` (list, combinable): peer coordination mechanisms that
+# act directly on host Q-tables/policy weights, independent of the Tier A
+# channel above. Zero or more can be active at once; requires strategy to be
+# naive_broadcast or uaq (not none — see docs/marl_pz_communication.md).
+#   federated_sync    → Federated Policy Synchronization (S2).
+#                       Every sync_interval steps, the training loop averages the
+#                       Q-tables of all tabular host agents. Tabular only.
+#   policy_exchange   → Periodic Policy Exchange (S3).
+#                       After each episode, the agent with the highest cumulative
+#                       reward copies its Q-table to any peer whose reward lags by
+#                       more than lag_threshold. Tabular only.
+#   experience_sharing→ Experience Replay Sharing (S4).
+#                       Every exchange_interval steps, each agent broadcasts its
+#                       highest-TD-error transitions to peers, which apply
+#                       them via off-policy Q-learning updates. Tabular only.
+#
+# Some Tier B combinations are flagged (not blocked) as risky — see
+# CommStrategy.TIER_B_WARNINGS in constants.py / the "Combining strategies"
+# table in docs/marl_pz_communication.md (S2+S3 redundancy, S3+S4 overwrite
+# conflict).
+#
+# Note on `hierarchical`: per paper 7 (§Communication Architecture),
+# peer-to-peer vs. hierarchical message routing is an orthogonal
+# *architecture* axis that would apply to any Tier B mechanism above — it is
+# NOT a strategy/list entry of its own, and is NOT IMPLEMENTED YET.
+#
+# Backward compat: if this section is absent, behaviour is derived from
+# attacks.use_coordinator (true → naive_broadcast, false → none). A single
+# Tier B value found directly in `strategy` (the pre-split flat model) is
+# also accepted and folded into `strategies` automatically.
+communication:
+  strategy: naive_broadcast
+  strategies: []
+
+  # ── UAQ (S1) parameters — used only when strategy: uaq ─────────────────────
+  uaq:
+    # tau: entropy threshold (normalised [0..1]) above which a host considers
+    # itself uncertain and flags its alert as uncertain.
+    # H_max = log(3) ≈ 1.099 for 3-action agents.  tau=0.8 → 80% of H_max.
+    tau: 0.8
+
+    # tau_expert: entropy threshold below which a host is considered "confident".
+    # Only confident hosts contribute to the coordinator's consensus signal.
+    # Hosts with tau_expert < H <= tau (moderate confidence) send no message
+    # at all — not certain enough to be trusted, not uncertain enough to flag.
+    tau_expert: 0.3
+
+    # cooldown_steps: reserved for future per-host query-rate limiting.
+    cooldown_steps: 5
+
+  # ── Federated Policy Sync (S2) — used only when 'federated_sync' is in strategies ───
+  federated_sync:
+    # sync_interval: number of env steps between Q-table averaging rounds.
+    # Lower values synchronise agents more frequently (more communication overhead).
+    sync_interval: 100
+
+  # ── Policy Exchange (S3) — used only when 'policy_exchange' is in strategies ─────────
+  policy_exchange:
+    # lag_threshold: minimum reward gap (episode sum) required to trigger a copy.
+    # If best_agent_reward - peer_reward > lag_threshold, the peer copies the
+    # best agent's Q-table. Prevents unnecessary copying when agents are close.
+    lag_threshold: 10.0
+
+  # ── Experience Replay Sharing (S4) — used only when 'experience_sharing' is in strategies
+  experience_sharing:
+    # exchange_interval: steps between broadcast rounds.
+    exchange_interval: 50
+
+    # td_error_threshold: minimum absolute TD-error (|r + γ*maxQ(s') - Q(s,a)|)
+    # required for a transition to be shared. Filters low-information transitions.
+    td_error_threshold: 1.0
+
+    # buffer_share_size: max transitions shared per agent per broadcast round.
+    buffer_share_size: 50
+
+# PettingZoo Parallel API parameters
+# ─────────────────────────────────────────────────────────────────────────────
+# local_ratio  ∈ [0.0, 1.0]
+#   1.0 → fully individual rewards  (each agent optimises its own traffic only)
+#   0.0 → fully shared team reward  (all agents receive mean(team rewards))
+#   0.5 → equal mix (default)
+#
+# shared_reward: bool
+#   If true, overrides local_ratio and gives all agents the same mean reward.
+#
+# max_cycles: int
+#   PettingZoo name for the episode length (maps to env_params.max_steps).
+#   If set, takes precedence over env_params.max_steps.
+#
+# render_mode: null | human | rgb_array
+#   PettingZoo standard render mode.
+pettingzoo:
+  local_ratio: 1.0
+  shared_reward: false
+  max_cycles: null
+  render_mode: null

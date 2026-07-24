@@ -139,6 +139,8 @@ def build_standalone_net(net_params):
 
     num_hosts = getattr(net_params, 'num_hosts', 5)
     num_iots  = getattr(net_params, 'num_iots',  0)
+    link_bw_mbps = getattr(net_params, 'link_bw_mbps', None)
+    link_kwargs  = {'bw': link_bw_mbps} if link_bw_mbps else {}
 
     StandaloneOVS = partial(OVSKernelSwitch,
                             failMode='standalone',
@@ -149,12 +151,12 @@ def build_standalone_net(net_params):
 
     for i in range(1, num_hosts + 1):
         h = net.addHost(f'h{i}', ip=f'10.0.0.{i}/24')
-        net.addLink(h, sw)
+        net.addLink(h, sw, **link_kwargs)
 
     for i in range(1, num_iots + 1):
         iot = net.addHost(f'iot{i}',
                           ip=f'10.0.0.{num_hosts + i}/24')
-        net.addLink(iot, sw)
+        net.addLink(iot, sw, **link_kwargs)
 
     # Attributes the framework expects on the net object
     net.hosts_links          = {h.name: {} for h in net.hosts}

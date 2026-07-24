@@ -187,7 +187,7 @@ ul#host-task-data li span {
 }
 
 /* ── Manual prose ─────────────────────────── */
-.manual-prose { color: #374151; line-height: 1.7; font-size: .95rem; }
+.manual-prose { color: #cdbfbf; line-height: 1.7; font-size: .95rem; }
 .manual-prose h2 {
     font-size: 1.35rem; font-weight: 700; color: #1e1b4b;
     margin: 2rem 0 .6rem; padding-bottom: .35rem;
@@ -201,8 +201,8 @@ ul#host-task-data li span {
 .manual-prose ul { margin: .5rem 0 .5rem 1.4rem; list-style: disc; }
 .manual-prose ol { margin: .5rem 0 .5rem 1.4rem; list-style: decimal; }
 .manual-prose li { margin: .25rem 0; }
-.manual-prose strong { font-weight: 700; color: #1f2937; }
-.manual-prose em    { font-style: italic; color: #374151; }
+.manual-prose strong { font-weight: 700; color: #b0b1b4; }
+.manual-prose em    { font-style: italic; color: #6c6c6c; }
 .manual-prose code {
     background: #f3f4f6; border: 1px solid #e5e7eb;
     border-radius: 4px; padding: 1px 6px;
@@ -224,7 +224,7 @@ ul#host-task-data li span {
     border: 1px solid #ddd6fe;
 }
 .manual-prose td { padding: .4rem .75rem; border: 1px solid #e5e7eb; }
-.manual-prose tr:nth-child(even) td { background: #faf5ff; }
+.manual-prose tr:nth-child(even) td { background: #4a4a4b; }
 .man-note {
     background: #eff6ff; border-left: 4px solid #3b82f6;
     border-radius: 0 8px 8px 0; padding: .7rem 1rem; margin: .8rem 0;
@@ -797,6 +797,16 @@ ul#host-task-data li span {
 [data-theme="cyber"] .gauge-fill  { stroke: var(--c-accent); }
 [data-theme="cyber"] .gauge-text  { color: var(--c-text-1); }
 [data-theme="cyber"] .gauge-label { color: var(--c-text-3); }
+
+/* ── Popup fullscreen toggle ─────────────────────────────────────────────── */
+.popup-fullscreen-overlay { padding: 0 !important; }
+.popup-fullscreen-card {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+}
 
 /* ── Load-dir modal list ─────────────────────────────────────────────────── */
 [data-theme="cyber"] .load-dir-item { color: var(--c-text-1); }

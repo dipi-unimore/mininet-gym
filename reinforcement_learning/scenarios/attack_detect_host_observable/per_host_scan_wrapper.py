@@ -149,10 +149,14 @@ class PerHostScanWrapper(gym.Wrapper):
         self._attack_reward_scale: float = _compute_attack_reward_scale(
             self._num_hosts
         )
+        self._use_attack_reward_scaling = bool(
+            getattr(getattr(self.env.params, 'attacks', None), 'use_reward_scaling', True)
+        )
         from utility.my_log import information
         information(
             f"PerHostScanWrapper: num_hosts={self._num_hosts}, "
-            f"attack_reward_scale={self._attack_reward_scale:.2f}\n"
+            f"attack_reward_scale={self._attack_reward_scale:.2f}, "
+            f"use_reward_scaling={self._use_attack_reward_scaling}\n"
         )
 
         # Blocked hosts now keep receiving live dump-ports counters.
@@ -272,12 +276,15 @@ class PerHostScanWrapper(gym.Wrapper):
     def _effective_ground_truth(self, host_idx: int, host_status_id: int, host_status_text: str):
         """
         Convert UNDER_ATTACK to INCOMING_BLOCKED_ATTACK when incoming attack is mitigated.
-        
+
         Mapping rules:
+        - idle / unknown (id < 0) → treated as NORMAL (class 0)
         - OUT_ATTACK_BLOCKED (status 2) → stays as ATTACKING (class 2)
         - UNDER_ATTACK with all attackers blocked → INCOMING_BLOCKED_ATTACK (status 3)
         - Everything else → unchanged
         """
+        if host_status_id < 0:
+            return 0, HostStatus.NORMAL, False
         if host_status_text == HostStatus.OUT_ATTACK_BLOCKED:
             return 2, HostStatus.ATTACKING, False
         if host_status_text == HostStatus.UNDER_ATTACK and self._is_incoming_attack_mitigated(host_idx):
@@ -339,7 +346,7 @@ class PerHostScanWrapper(gym.Wrapper):
         g_t    = _ID_TO_HOST_STATUS.get(host_status_id, HostStatus.NORMAL)
         link_up = self.env.status_links[host_idx]
         reward  = 0.0
-        scale   = self._attack_reward_scale
+        scale   = self._attack_reward_scale if self._use_attack_reward_scaling else 1.0
 
         if not link_up and g_t == HostStatus.NORMAL:
             reward += REWARDS.LINK_OFF

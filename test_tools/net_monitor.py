@@ -117,6 +117,18 @@ def run(cmd: str, timeout: int = 5) -> str:
         return ""
 
 
+def _load_yaml_link_bw(config_path: str = "config/default.yaml"):
+    """Read net_params.link_bw_mbps from the base config (None if unset/unreadable)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import yaml
+        with open(os.path.join(root, config_path)) as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get("env_params", {}).get("net_params", {}).get("link_bw_mbps")
+    except Exception:
+        return None
+
+
 def detect_bridge() -> str:
     out = run("ovs-vsctl list-br")
     bridges = [b.strip() for b in out.splitlines() if b.strip()]
@@ -235,26 +247,31 @@ def _extract_hosts_from_statuses(data: list) -> list:
     return sorted(names)
 
 
-def start_mininet(host_names: list, bridge: str = "s1") -> tuple:
+def start_mininet(host_names: list, bridge: str = "s1", link_bw_mbps=None) -> tuple:
     """
     Create and start a single-switch Mininet topology with the given hosts.
     Returns (net, {host_name: ip}).
     Caller must call net.stop() when done.
+
+    link_bw_mbps: if set, caps every host<->switch link at this rate via
+    tc/HTB (see net_params.link_bw_mbps in config/default.yaml).
     """
     from mininet.net import Mininet
     from mininet.node import OVSController, OVSSwitch
+    from mininet.link import TCLink
     from mininet.log import setLogLevel
     setLogLevel("warning")
 
-    net = Mininet(controller=OVSController, switch=OVSSwitch, autoSetMacs=True)
+    net = Mininet(controller=OVSController, switch=OVSSwitch, link=TCLink, autoSetMacs=True)
     net.addController("c0")
     sw = net.addSwitch(bridge)
 
+    link_kwargs = {"bw": link_bw_mbps} if link_bw_mbps else {}
     host_ips = {}
     for i, name in enumerate(host_names, start=1):
         ip = f"10.0.0.{i}/8"
         h  = net.addHost(name, ip=ip)
-        net.addLink(h, sw)
+        net.addLink(h, sw, **link_kwargs)
         host_ips[name] = f"10.0.0.{i}"
 
     net.start()
@@ -353,7 +370,8 @@ def _match_symbol(obs: float, exp: float) -> str:
 def replay_mode(statuses_file: str, bridge: str,
                 thr_pkts: int, thr_bytes: int, n_bins: int,
                 step_start: int, step_end: int, pause: bool,
-                per_host: bool = False, launch: bool = False):
+                per_host: bool = False, launch: bool = False,
+                link_bw_mbps=None):
 
     with open(statuses_file) as f:
         data = json.load(f)
@@ -369,10 +387,11 @@ def replay_mode(statuses_file: str, bridge: str,
         if not host_names:
             print(f"{RED}Cannot extract host names from statuses.json.{RESET}")
             sys.exit(1)
+        bw_label = f"{link_bw_mbps} Mbit/s" if link_bw_mbps else "unshaped"
         print(f"{BOLD}Launching Mininet{RESET} with hosts: {host_names}  "
-              f"bridge: {bridge}")
+              f"bridge: {bridge}  links: {bw_label}")
         try:
-            mn_net, host_ips = start_mininet(host_names, bridge=bridge)
+            mn_net, host_ips = start_mininet(host_names, bridge=bridge, link_bw_mbps=link_bw_mbps)
             print(f"{GREEN}Mininet started.{RESET}  IPs: {host_ips}\n")
         except Exception as exc:
             print(f"{RED}Failed to start Mininet: {exc}{RESET}")
@@ -664,6 +683,9 @@ if __name__ == "__main__":
     parser.add_argument("--pause",      action="store_true",       help="pause between steps (press Enter)")
     parser.add_argument("--launch",     action="store_true",
                         help="auto-launch Mininet from statuses.json host list (no separate mn needed)")
+    parser.add_argument("--link-bw",    default=None, type=float, metavar="MBPS",
+                        help="(--launch only) cap host links at this rate via tc/HTB "
+                             "(default: net_params.link_bw_mbps in config/default.yaml, or unshaped)")
 
     args = parser.parse_args()
     bridge = args.bridge or detect_bridge()
@@ -680,6 +702,8 @@ if __name__ == "__main__":
             pause=args.pause,
             per_host=args.per_host,
             launch=args.launch,
+            link_bw_mbps=(args.link_bw if args.link_bw is not None
+                         else _load_yaml_link_bw()),
         )
     else:
         monitor(

@@ -3,7 +3,7 @@ from app.socket_handler import send_live_data
 import datetime, logging, re
 from colorama import Fore
 
-from utility.constants import SYSTEM, SystemLevels
+from utility.constants import SYSTEM, SystemLevels, SystemModes, SystemStatus
 from utility.utils import convert_ansi_to_html
 
 logger = None
@@ -128,12 +128,34 @@ _is_from_dataset = False
 # Cached summaries for reconnect recovery — keyed by agent_name
 _agent_summaries: dict = {}
 
+# Cached discrete comm/sync events (FedAvg sync, policy copy, experience share,
+# ...) for reconnect recovery — keyed by agent_name. These are otherwise
+# pushed live (force_immediate=True) and never kept anywhere queryable, so a
+# reconnecting client would see an empty comm timeline even though several
+# sync rounds already happened. Bounded per agent to match the frontend's own
+# timeline cap (_COMM_TIMELINE_MAX_ENTRIES in agent_statistics.js).
+_agent_comm_events: dict = {}
+_COMM_EVENTS_MAX_PER_AGENT = 200
+
+# Name/mode of the agent currently training or evaluating, for reconnect
+# recovery — the dashboard uses this to mark the right agent tab "Running"
+# right after a page reload, before any new live metric arrives.
+_current_training_agent: dict = {}
+
 def clear_agent_summaries():
-    global _agent_summaries
+    global _agent_summaries, _current_training_agent, _agent_comm_events
     _agent_summaries = {}
+    _current_training_agent = {}
+    _agent_comm_events = {}
 
 def get_agent_summaries() -> dict:
     return _agent_summaries
+
+def get_agent_comm_events() -> dict:
+    return _agent_comm_events
+
+def get_current_training_agent() -> dict:
+    return _current_training_agent
 
 def set_is_from_dataset(value: bool):
     """
@@ -242,12 +264,13 @@ def stop_buffer_flush():
         _flush_thread.join(timeout=5)
         log_message("info", "Buffer flush thread stopped", author="notify_client")
 
-def notify_client(level=None, agent_name=None, message=None, 
+def notify_client(level=None, agent_name=None, message=None,
                   config=None, traffic_data=None, final_data=None, host_tasks=None,
                   global_state=None, metrics=None, final_metrics=None, step_data=None,
                   status=None, mode=None, force_immediate=False,
                   agent_training_summary=None, qtable_coverage=None,
-                  exploration_metric=None, agent_evaluation_summary=None):
+                  exploration_metric=None, agent_evaluation_summary=None,
+                  comm_event=None):
     """
     Function to notify the web client about various events or data.
     Messages are buffered and sent every 2 seconds unless force_immediate=True.
@@ -258,25 +281,39 @@ def notify_client(level=None, agent_name=None, message=None,
             final_data is None and final_metrics is None and host_tasks is None and \
                 mode is None and agent_training_summary is None and \
                 qtable_coverage is None and exploration_metric is None and \
-                agent_evaluation_summary is None:
+                agent_evaluation_summary is None and comm_event is None:
         return
     
     global _client_status_notifier_func
     global _client_data_notifier_func
-    global _message_buffer, _buffer_lock, _agent_summaries
+    global _message_buffer, _buffer_lock, _agent_summaries, _current_training_agent, _agent_comm_events
 
     # Cache summaries for reconnect recovery (transparent to callers)
     if agent_name and agent_training_summary is not None:
         _agent_summaries.setdefault(agent_name, {})['training'] = agent_training_summary
     if agent_name and agent_evaluation_summary is not None:
         _agent_summaries.setdefault(agent_name, {})['evaluation'] = agent_evaluation_summary
+    if agent_name and comm_event is not None:
+        bucket = _agent_comm_events.setdefault(agent_name, [])
+        bucket.append(comm_event)
+        if len(bucket) > _COMM_EVENTS_MAX_PER_AGENT:
+            del bucket[0]
 
     # I messaggi di STATUS vengono sempre inviati immediatamente
-    if level == SystemLevels.STATUS and mode is not None and _client_status_notifier_func: 
+    if level == SystemLevels.STATUS and mode is not None and _client_status_notifier_func:
+        # Track which agent is currently training/evaluating so a reconnecting
+        # client can immediately show its tab as "Running" (see get_training_status).
+        # A per-agent FINISHED (as well as the global end-of-run FINISHED/IDLE)
+        # clears the pointer — otherwise a reconnecting client would see the
+        # just-finished agent as still "current" and re-mark its tab "Running".
+        if status in (SystemStatus.FINISHED, SystemStatus.IDLE):
+            _current_training_agent = {}
+        elif agent_name and mode in (SystemModes.TRAINING, SystemModes.EVALUATION):
+            _current_training_agent = {'name': agent_name, 'mode': mode}
         try:
-            _client_status_notifier_func(status=status, mode=mode, message=message)            
+            _client_status_notifier_func(status=status, mode=mode, message=message, agent_name=agent_name)
         except Exception as e:
-            log_message("error", f"Error sending status to client: {e}", author="notify_client") 
+            log_message("error", f"Error sending status to client: {e}", author="notify_client")
         return
     
     # Prepara il messaggio da bufferizzare
@@ -315,7 +352,8 @@ def notify_client(level=None, agent_name=None, message=None,
                 'agentEvaluationSummary': agent_evaluation_summary,
                 'qtableCoverage': qtable_coverage,
                 'explorationMetric': exploration_metric,
-            }                
+                'commEvent': comm_event,
+            }
             
         
         # In dataset mode, only send host_tasks immediately when at least one host

@@ -117,18 +117,20 @@ def _emit_status(status_data):
             except Exception as e:
                 print(f"Error emitting training status in background task: {e}")
                
-def send_status(status: str, mode: str, message: str = None):
+def send_status(status: str, mode: str, message: str = None, agent_name: str = None):
     """
     Send to client the training status update (event 'status_update').
 
     :param status: Training status (es. 'RUNNING', 'PAUSED', 'COMPLETED', 'ERROR').
     :param details: addon details.
+    :param agent_name: agent this status refers to, if any (drives per-agent tab state client-side).
     """
     if socketio is not None and flask_app is not None:
         status_data = {
-            'status': status, 
+            'status': status,
             'message': message,
-            'mode': mode
+            'mode': mode,
+            'agent_name': agent_name,
         }
         try:
             _emit_status(status_data)

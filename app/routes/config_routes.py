@@ -7,7 +7,10 @@ import yaml
 from flask import Blueprint, jsonify, render_template, request, send_file, send_from_directory
 
 from utility.config_sanitizer import clean_load_dir
-from utility.scenario_params import load_scenario_env_params
+from utility.scenario_params import (
+    load_scenario_env_params, gym_type_to_scenario_folder,
+    SCENARIOS_BASE_DIR, SCENARIO_PARAM_FILE,
+)
 
 ALGO_DEFAULTS_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -84,7 +87,13 @@ def create_config_blueprint(state, config_path, app_root):
         if not gym_type:
             return jsonify({"status": "error", "message": "gym_type is required"}), 400
         params = load_scenario_env_params(gym_type)
-        return jsonify(params)
+
+        yaml_path = None
+        folder = gym_type_to_scenario_folder(gym_type)
+        if folder:
+            yaml_path = os.path.join(SCENARIOS_BASE_DIR, folder, SCENARIO_PARAM_FILE)
+
+        return jsonify({"scenario_params": params, "yaml_path": yaml_path})
 
     @bp.route('/download_results', methods=['POST'])
     def download_results():

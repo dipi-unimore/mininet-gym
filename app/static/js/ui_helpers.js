@@ -96,6 +96,46 @@ function trackContainerImagesLoading(containerSelector, reason = 'images', messa
     });
 }
 
+// Reusable fullscreen toggle button for popup/modal headers. `cardSelector` is the
+// popup's inner card (the element resized to fullscreen), `overlaySelector` is the
+// optional backdrop wrapper (its padding is cleared so the card can reach the edges).
+function popupFullscreenToggleHtml(cardSelector, overlaySelector = '') {
+    return `
+        <button type="button" class="popup-fullscreen-btn text-gray-400 hover:text-gray-700 transition p-1"
+            data-target="${cardSelector}" data-overlay="${overlaySelector}"
+            title="Fullscreen" aria-label="Toggle fullscreen">
+            <svg class="fs-icon-expand w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9M20.25 20.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            </svg>
+            <svg class="fs-icon-compress w-5 h-5 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+            </svg>
+        </button>`;
+}
+
+function resetPopupFullscreen(cardSelector, overlaySelector = '') {
+    const $card = $(cardSelector);
+    $card.removeClass('popup-fullscreen-card');
+    if (overlaySelector) $(overlaySelector).removeClass('popup-fullscreen-overlay');
+    $card.find('.fs-icon-expand').removeClass('hidden');
+    $card.find('.fs-icon-compress').addClass('hidden');
+    $card.find('.popup-fullscreen-btn').attr('title', 'Fullscreen');
+}
+
+$(document).on('click', '.popup-fullscreen-btn', function () {
+    const $btn = $(this);
+    const $card = $($btn.data('target'));
+    const overlaySelector = $btn.data('overlay');
+    if (!$card.length) return;
+
+    const goingFullscreen = !$card.hasClass('popup-fullscreen-card');
+    $card.toggleClass('popup-fullscreen-card', goingFullscreen);
+    if (overlaySelector) $(overlaySelector).toggleClass('popup-fullscreen-overlay', goingFullscreen);
+    $btn.find('.fs-icon-expand').toggleClass('hidden', goingFullscreen);
+    $btn.find('.fs-icon-compress').toggleClass('hidden', !goingFullscreen);
+    $btn.attr('title', goingFullscreen ? 'Restore size' : 'Fullscreen');
+});
+
 function ensureInfoPopup(title = 'Info', icon = '/static/images/icon/info.png') {
     if ($('#info-popup-overlay').length) {
         $('#info-popup-title').text(title);
@@ -111,7 +151,10 @@ function ensureInfoPopup(title = 'Info', icon = '/static/images/icon/info.png') 
                         <img id="info-popup-icon" src="${icon}" alt="Info" class="w-5 h-5">
                         <h4 id="info-popup-title" class="text-base font-semibold text-blue-800">${title}</h4>
                     </div>
-                    <button id="info-popup-close" class="px-2 py-1 text-sm font-semibold text-gray-600 hover:text-gray-900" aria-label="Close">X</button>
+                    <div class="flex items-center gap-1">
+                        ${popupFullscreenToggleHtml('#info-popup-card', '#info-popup-overlay')}
+                        <button id="info-popup-close" class="px-2 py-1 text-sm font-semibold text-gray-600 hover:text-gray-900" aria-label="Close">X</button>
+                    </div>
                 </div>
                 <div class="px-4 py-4 flex-1 min-h-0 overflow-y-auto">
                     <div id="info-popup-text" class="text-sm text-gray-800 break-words"></div>
@@ -128,6 +171,7 @@ function ensureInfoPopup(title = 'Info', icon = '/static/images/icon/info.png') 
 
 function closeInfoPopup() {
     $('#info-popup-overlay').addClass('hidden');
+    resetPopupFullscreen('#info-popup-card', '#info-popup-overlay');
 }
 
 function openInfoPopup(message) {
@@ -146,8 +190,12 @@ function openInfoPopupHtml(htmlContent, title = 'Info', icon = '/static/images/i
 $(document).on('click', 'img[src$="/static/images/icon/info.png"][title]', function (event) {
     event.preventDefault();
     event.stopPropagation();
-    const titleText = $(this).attr('title') || '';
-    openInfoPopup(titleText);
+    const htmlNote = $(this).attr('data-html-note');
+    if (htmlNote) {
+        openInfoPopupHtml(htmlNote);
+    } else {
+        openInfoPopup($(this).attr('title') || '');
+    }
 });
 
 $(document).on('click', '#info-popup-close, #info-popup-ok', function () {
@@ -271,6 +319,43 @@ function setStatus(newSystemStatus, message) {
         $('#training-status-text span').removeClass('blink_me');
     }
     systemStatus = newSystemStatus;
+    updateConfigLockFromStatus();
+}
+
+// ====================================================================\
+// CONFIGURATION LOCK (read-only while an experiment is active)
+// ====================================================================\
+
+// Config editing is only safe when nothing is running server-side: IDLE
+// (never started), STOPPED (thread joined — confirmed dead) and FINISHED.
+// Every other status (starting/running/paused/evaluating/plotting/resumed,
+// and the ambiguous disconnected/error/unknown states, out of caution)
+// keeps the Configuration page locked to avoid editing a config object
+// that no longer matches what the server is actually training with.
+const CONFIG_UNLOCKED_STATUSES = [SYSTEM_STATUS.IDLE, SYSTEM_STATUS.STOPPED, SYSTEM_STATUS.FINISHED];
+
+// Buttons that mutate configuration state (add/remove/save/load agents or
+// the whole config). Field inputs are handled generically below; these are
+// disabled explicitly since disabling all <button> elements would also
+// block harmless navigation controls (agent tabs, config sub-tabs, etc.).
+const CONFIG_MUTATING_BUTTON_SELECTOR = [
+    '#save-config-btn', '#load-configs-btn',
+    '#add-agent-btn', '#select-all-agents-btn', '#deselect-all-agents-btn',
+    '.remove-agent-btn', '.duplicate-agent-btn',
+].join(', ');
+
+let configLocked = false;
+
+function updateConfigLockFromStatus() {
+    setConfigLocked(!CONFIG_UNLOCKED_STATUSES.includes(systemStatus));
+}
+
+function setConfigLocked(locked) {
+    configLocked = locked;
+    const page = $('#config-page');
+    page.find('input, select, textarea').prop('disabled', locked);
+    page.find(CONFIG_MUTATING_BUTTON_SELECTOR).prop('disabled', locked);
+    $('#config-locked-banner').toggleClass('hidden', !locked).toggleClass('flex', locked);
 }
 
 // ====================================================================\
@@ -420,11 +505,21 @@ function renderTrainingCaption() {
         green:  'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800',
         amber:  'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800',
         indigo: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800',
+        purple: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800',
     };
     const badge = (cls, text) => `<span class="${cls}" title="${escapeHtml(text)}">${escapeHtml(text)}</span>`;
 
     // Scenario
     if (env.gym_type) badges.push(badge(B.blue, env.gym_type));
+
+    // Communication strategy (marl_pz only): Tier A (alerting channel) + Tier B
+    // (peer coordination mechanisms, combinable — see CommStrategy in constants.py)
+    const commStrategy = env.communication && env.communication.strategy;
+    const commStrategies = (env.communication && env.communication.strategies) || [];
+    if (commStrategy && commStrategy !== 'none') {
+        const tail = commStrategies.length ? ` + ${commStrategies.join(', ')}` : '';
+        badges.push(badge(B.purple, `comm: ${commStrategy}${tail}`));
+    }
 
     // Network topology
     const topoparts = [];
@@ -523,6 +618,16 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
+function stripHtmlTags(html) {
+    return String(html ?? '')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+}
+
 function resolveConfigComment(path) {
     if (!path || !window.configComments) return '';
     if (window.configComments[path]) return window.configComments[path];
@@ -555,6 +660,53 @@ function loadConfigComments() {
     });
 }
 
+// Tier A — alerting channel (single-select). Only 'uaq' has its own config
+// sub-section (tau/tau_expert/cooldown_steps); none/naive_broadcast don't.
+function _updateCommStrategyVisibility(strategy) {
+    const $uaqSection = $(`#${CSS.escape('env_params.communication.uaq-section')}`);
+    if (strategy === 'uaq') {
+        $uaqSection.removeClass('hidden');
+    } else {
+        $uaqSection.addClass('hidden');
+    }
+}
+
+// Tier B — peer coordination mechanisms (multi-select). Each mechanism's
+// section is independently visible based on whether its checkbox is checked
+// — unlike Tier A, more than one can be visible/active at once.
+function _updateCommStrategiesVisibility(strategies) {
+    const active = new Set(strategies || []);
+    for (const s of COMM_STRATEGY_TIER_B_OPTIONS) {
+        const $sec = $(`#${CSS.escape(`env_params.communication.${s}-section`)}`);
+        if (active.has(s)) {
+            $sec.removeClass('hidden');
+        } else {
+            $sec.addClass('hidden');
+        }
+    }
+    _renderCommStrategiesWarningBanner(active);
+}
+
+// Surfaces the risky-combination notes from COMM_STRATEGY_TIER_B_WARNINGS
+// (S2+S3, S3+S4 — see docs/marl_pz_communication.md) as an inline banner.
+// Informational only: selection stays free, nothing is blocked.
+function _renderCommStrategiesWarningBanner(activeSet) {
+    const $banner = $('#comm-strategies-warning-banner');
+    if ($banner.length === 0) return;
+    const matched = COMM_STRATEGY_TIER_B_WARNINGS.filter(w => w.pair.every(s => activeSet.has(s)));
+    if (matched.length === 0) {
+        $banner.addClass('hidden').html('');
+        return;
+    }
+    $banner.removeClass('hidden').html(
+        matched.map(w => `
+            <p class="text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 text-xs mb-1">
+                ⚠️ ${escapeHtml(w.message)}
+            </p>
+        `).join('')
+    );
+}
+
 /**
  * Creates an input field or select element HTML.
  * @param {string} key - The property name (e.g., 'packets')
@@ -582,9 +734,17 @@ function createInputField(key, value, fullId, isAgent) {
         noteElement = 'For \'from_dataset\' options, remember the json dataset file.'
         $(document).on('change', `#${CSS.escape(fullId)}`, async function () {
             currentConfig.env_params.gym_type = $(this).val();
+            enforceMarlPzAgentCompatibility();
             try {
-                const scenarioParams = await getScenarioEnvParams(currentConfig.env_params.gym_type);
+                const scenarioResponse = await getScenarioEnvParams(currentConfig.env_params.gym_type);
+                const scenarioParams = scenarioResponse.scenario_params || {};
+                updateCalibrationCardForScenario(currentConfig.env_params.gym_type, scenarioResponse.yaml_path);
                 if (scenarioParams && Object.keys(scenarioParams).length > 0) {
+                    // Remove scenario-specific keys absent from the new scenario's YAML
+                    // (prevents stale communication/pettingzoo from showing on unrelated scenarios)
+                    for (const k of ['communication', 'pettingzoo']) {
+                        if (!(k in scenarioParams)) delete currentConfig.env_params[k];
+                    }
                     Object.assign(currentConfig.env_params, scenarioParams);
                     const sectionKey = Object.keys(scenarioParams)[0]; // 'attacks' or 'classification'
                     const sectionExists = $(`#${CSS.escape('env_params.' + sectionKey)}-section`).length > 0;
@@ -607,6 +767,22 @@ function createInputField(key, value, fullId, isAgent) {
                         } else {
                             $(`#${CSS.escape('env_params.attacks')}-section`).removeClass('hidden');
                             $(`#${CSS.escape('env_params.classification')}-section`).addClass('hidden');
+                        }
+                        // Re-render Communication panel (communication + pettingzoo, present in marl_pz only)
+                        const commEnv = {};
+                        for (const k of ['communication', 'pettingzoo']) {
+                            if (k in currentConfig.env_params) commEnv[k] = currentConfig.env_params[k];
+                        }
+                        const hasCommSections = Object.keys(commEnv).length > 0;
+                        $('#env-communication-list').html(hasCommSections ? renderFieldsRecursively(commEnv, 'env_params') : '');
+                        if (hasCommSections) {
+                            $('.env-subtab-communication').removeClass('hidden');
+                            const strategy = (currentConfig.env_params.communication && currentConfig.env_params.communication.strategy) || 'naive_broadcast';
+                            _updateCommStrategyVisibility(strategy);
+                            const strategies = (currentConfig.env_params.communication && currentConfig.env_params.communication.strategies) || [];
+                            _updateCommStrategiesVisibility(strategies);
+                        } else {
+                            $('.env-subtab-communication').addClass('hidden');
                         }
                     }
                 }
@@ -655,6 +831,28 @@ function createInputField(key, value, fullId, isAgent) {
                 }
                 updateAgentTabStyle(agentIndex, this.checked);
                 updateAgentsEnabledCount();
+                if (this.checked) {
+                    enforceMarlPzAgentCompatibility();
+                }
+            });
+        }
+        //  Load (Agents only)
+        if (key === 'load' && isAgent) {
+            inputElement = `<input type="checkbox" id="${fullId}" data-path="${fullId}" class="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 config-checkbox  ${isHidden ? 'hidden' : ''}" ${value ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>`;
+            $(document).on('change', `#${CSS.escape(fullId)}`, function () {
+                const agentIndex = parseInt(fullId.split('.')[1]);
+                const agentCard = $(`#agent-card-${agentIndex}`);
+                if (Array.isArray(currentConfig.agents) && currentConfig.agents[agentIndex]) {
+                    currentConfig.agents[agentIndex].load = this.checked;
+                }
+                const load_dir_input = $(`#${CSS.escape(`agents.${agentIndex}.load_dir`)}`);
+                if (!this.checked) {
+                    load_dir_input.prop('value', "null").prop('disabled', true);
+                }
+                else{
+                    // open modal to select load_dir
+                    openLoadDirModal(fullId+"_dir");
+                }
             });
         }        
     }
@@ -665,7 +863,54 @@ function createInputField(key, value, fullId, isAgent) {
             `<option value="${opt}" ${value.toLowerCase() === opt.toLowerCase() ? 'selected' : ''}>${opt}</option>`
         ).join('')}
                 </select>`;
-    }    
+    }
+    // 5b. Communication strategy Select (Tier A — alerting channel, single-select)
+    else if (key === 'strategy' && fullId.includes('communication')) {
+        const strVal = String(value || '').toLowerCase();
+        inputElement = `<select id="${fullId}" data-path="${fullId}" class="config-select">
+                    ${COMM_STRATEGY_TIER_A_OPTIONS.map(opt =>
+            `<option value="${opt}" ${strVal === opt ? 'selected' : ''}>${opt}</option>`
+        ).join('')}
+                </select>`;
+        $(document).off('change', `#${CSS.escape(fullId)}.comm-strategy-select`)
+                   .on('change',  `#${CSS.escape(fullId)}`, function() {
+            _updateCommStrategyVisibility($(this).val());
+        });
+    }
+    // 5c. Communication strategies checkboxes (Tier B — peer coordination
+    // mechanisms, combinable). Deliberately has no data-path on the checkbox
+    // inputs themselves: collectConfigFromUI() scans every input/select by
+    // data-path and would otherwise clobber the array with whichever
+    // checkbox happened to be read last. Instead this maintains
+    // currentConfig.env_params.communication.strategies directly, the same
+    // way the gym_type select above mutates currentConfig in its own handler.
+    else if (key === 'strategies' && fullId.includes('communication')) {
+        const activeSet = new Set(Array.isArray(value) ? value : []);
+        const checkboxesHtml = COMM_STRATEGY_TIER_B_OPTIONS.map(opt => `
+            <label class="inline-flex items-center gap-1.5 mr-4 mb-1 text-sm">
+                <input type="checkbox" class="comm-strategies-checkbox w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                       data-strategy="${opt}" ${activeSet.has(opt) ? 'checked' : ''}>
+                ${escapeHtml(opt)}
+            </label>
+        `).join('');
+        inputElement = `
+            <div id="${fullId}">
+                ${checkboxesHtml}
+                <div id="comm-strategies-warning-banner" class="mt-2 hidden"></div>
+            </div>`;
+
+        $(document).off('change', '.comm-strategies-checkbox')
+                   .on('change', '.comm-strategies-checkbox', function () {
+            const strategy = $(this).data('strategy');
+            const comm = currentConfig.env_params.communication = currentConfig.env_params.communication || {};
+            const list = Array.isArray(comm.strategies) ? comm.strategies : [];
+            const idx = list.indexOf(strategy);
+            if (this.checked && idx === -1) list.push(strategy);
+            if (!this.checked && idx !== -1) list.splice(idx, 1);
+            comm.strategies = list;
+            _updateCommStrategiesVisibility(list);
+        });
+    }
     // 6. Array (read-only text display)
     else if (Array.isArray(value)) {
         inputElement = `<input type="text" id="${fullId}" data-path="${fullId}" value="${value.join(', ')}" class="config-input" readonly>`;
@@ -694,13 +939,11 @@ function createInputField(key, value, fullId, isAgent) {
     }
 
     const mergedNote = [noteElement, commentFromYaml].filter(Boolean).join(' | ');
-    // const noteBelowHtml = mergedNote
-    //     ? `<p class="text-xs text-gray-500">${escapeHtml(mergedNote)}</p>`
-    //     : '';
-    const icoInfo = mergedNote ? `<img src="/static/images/icon/info.png" alt="Info" title="${escapeHtml(mergedNote)}" class="inline-block w-4 h-4 ml-1 opacity-50">` : '';
+    const mergedNotePlain = stripHtmlTags(mergedNote);
+    const icoInfo = mergedNote ? `<img src="/static/images/icon/info.png" alt="Info" title="${escapeHtml(mergedNotePlain)}" data-html-note="${escapeHtml(mergedNote)}" class="inline-block w-4 h-4 ml-1 opacity-50">` : '';
     let fieldHtml = `
                 <div class="${isHidden ? 'hidden' : ''} ${typeof value === 'boolean' ? 'flex items-center space-x-3' : 'space-y-1'}">
-                    <label for="${fullId}" class="block text-sm font-medium text-gray-700 flex-shrink-0" title="${escapeHtml(mergedNote)} ">${label} ${mergedNote ? icoInfo : ''}</label>
+                    <label for="${fullId}" class="block text-sm font-medium text-gray-700 flex-shrink-0" title="${escapeHtml(mergedNotePlain)}">${label} ${mergedNote ? icoInfo : ''}</label>
                     ${inputElement}
                 </div>
             `;
@@ -870,14 +1113,19 @@ function renderList(list) {
     }
     _applyLoadDirSort(list).forEach(dir => {
         const binsLabel = (dir.n_bins != null) ? dir.n_bins : '—';
+        const commStrategiesTail = Array.isArray(dir.comm_strategies) && dir.comm_strategies.length
+            ? ` + ${dir.comm_strategies.join(',')}` : '';
+        const commLabel = dir.comm_strategy ? `${dir.comm_strategy}${commStrategiesTail}` : '—';
         const dirItemHtml = `
-            <li class="p-2 border-b cursor-pointer hover:bg-gray-100 load-dir-item grid grid-cols-3" title="${escapeHtml(dir.path)}"
+            <li class="p-2 border-b cursor-pointer hover:bg-gray-100 load-dir-item grid grid-cols-4" title="${escapeHtml(dir.path)}"
                 data-n-bins="${dir.n_bins != null ? dir.n_bins : ''}"
                 data-episodes="${dir.episodes != null ? dir.episodes : ''}"
-                data-algorithm="${escapeHtml(dir.algorithm || '')}">
+                data-algorithm="${escapeHtml(dir.algorithm || '')}"
+                data-comm-strategy="${escapeHtml(commLabel === '—' ? '' : commLabel)}">
                 <span>${_formatDirDatetime(dir.datetime)}</span>
                 <span>${dir.accuracy.toFixed(4)}</span>
                 <span>${binsLabel}</span>
+                <span>${commLabel}</span>
                 <input type="hidden" value="${dir.path}">
             </li>`;
         dirListEl.append(dirItemHtml);
@@ -920,15 +1168,17 @@ $(document).on('click', '.load-dir-item', function () {
     $(`#${CSS.escape(targetCheckId)}`).prop('checked', true);
     $('#load-dir-modal').addClass('hidden');
 
-    const nBins     = $(this).data('n-bins');
-    const episodes  = $(this).data('episodes');
-    const algorithm = $(this).data('algorithm');
+    const nBins        = $(this).data('n-bins');
+    const episodes     = $(this).data('episodes');
+    const algorithm    = $(this).data('algorithm');
+    const commStrategy = $(this).data('comm-strategy');
 
     const rows = [
         ['Path', escapeHtml(selectedPath)],
         ['Algorithm', escapeHtml(algorithm || '—')],
         ['Bins (n_bins)', nBins !== '' ? nBins : '—'],
         ['Episodes', episodes !== '' ? episodes : '—'],
+        ['Communication', escapeHtml(commStrategy || '—')],
     ];
     const tableRows = rows.map(([k, v]) => `
         <tr class="border-b last:border-0">
@@ -953,7 +1203,12 @@ $(document).on('click', '.load-dir-item', function () {
 
 
 $(document).on('click', '.load-dir-input', async function () {
-    const fullId = $(this).data('path');
+    const fullId = $(this).data('path') ;
+    await openLoadDirModal(fullId);
+});
+
+async function openLoadDirModal(fullId) {
+
     $('#load-dir-modal').data('target-input', fullId).removeClass('hidden');
 
     const network_config = $(`#${CSS.escape('env_params.net_params.num_switches')}`).val() + '_' +
@@ -970,7 +1225,7 @@ $(document).on('click', '.load-dir-input', async function () {
     } catch (err) {
         console.error('Failed to load directory list:', err);
     }
-});
+}    
 
 function get_load_dir_list(gym_type, network_config, agent_name) {
     return new Promise((resolve, reject) => {
@@ -1048,7 +1303,7 @@ function renderFieldsRecursively(obj, path, isAgent = false, agentIndex = null) 
 
 function _renderEnvParamSections() {
     const UI_SELECTOR_KEYS = new Set(['data_traffic_file', 'scenario_source', 'scenario_file']);
-    const SECTION_KEYS = new Set(['attacks', 'classification', 'net_params']);
+    const SECTION_KEYS = new Set(['attacks', 'classification', 'net_params', 'communication', 'pettingzoo']);
 
     // General: flat scalar fields of env_params
     const generalEnv = {};
@@ -1075,6 +1330,23 @@ function _renderEnvParamSections() {
     const networkEnv = currentConfig.env_params.net_params ? { net_params: currentConfig.env_params.net_params } : {};
     $('#env-network-list').html(renderFieldsRecursively(networkEnv, 'env_params'));
 
+    // Communication: communication + pettingzoo sections (marl_pz scenarios only)
+    const commEnv = {};
+    for (const k of ['communication', 'pettingzoo']) {
+        if (k in currentConfig.env_params) commEnv[k] = currentConfig.env_params[k];
+    }
+    const hasCommSections = Object.keys(commEnv).length > 0;
+    $('#env-communication-list').html(hasCommSections ? renderFieldsRecursively(commEnv, 'env_params') : '');
+    if (hasCommSections) {
+        $('.env-subtab-communication').removeClass('hidden');
+        const strategy = (currentConfig.env_params.communication && currentConfig.env_params.communication.strategy) || 'naive_broadcast';
+        _updateCommStrategyVisibility(strategy);
+        const strategies = (currentConfig.env_params.communication && currentConfig.env_params.communication.strategies) || [];
+        _updateCommStrategiesVisibility(strategies);
+    } else {
+        $('.env-subtab-communication').addClass('hidden');
+    }
+
     updateEnvScenarioTabLabel();
 }
 
@@ -1091,9 +1363,17 @@ function renderConfig() {
     // 2. Render Environment Parameters split into sub-tabs
     _renderEnvParamSections();
     renderDataSourceSelectors();
+    getScenarioEnvParams(currentConfig.env_params.gym_type)
+        .then(response => updateCalibrationCardForScenario(currentConfig.env_params.gym_type, response.yaml_path))
+        .catch(err => console.error('Failed to resolve initial scenario YAML path:', err));
 
     // 3. Render Agents
     renderAgents();
+    enforceMarlPzAgentCompatibility();
+    // Defensive: renderAgents() already re-applies the lock over the whole
+    // #config-page, but re-assert here too in case this closure is ever
+    // reordered so agents no longer render last.
+    updateConfigLockFromStatus();
     };
 
     if (!window.configCommentsLoaded) {
@@ -2019,6 +2299,26 @@ function reorderEnvParamsForDisplay(envParams) {
     return ordered;
 }
 
+// Keeps the Threshold Calibration card (Environment > Network) in sync with
+// whatever scenario is currently selected (Environment > General): hidden
+// entirely for 'classification' (no attack traffic to calibrate against —
+// there's nothing for hping3 attack rounds to measure), otherwise pointed at
+// the right scenario_env_param.yaml. Called both at initial render and on
+// every gym_type change, since calibrate/save always act on the live scenario.
+function updateCalibrationCardForScenario(gymType, yamlPath) {
+    const isClassification = isClassificationEnv();
+    $('#threshold-calibration-card').toggleClass('hidden', isClassification);
+    if (isClassification) return;
+
+    const $el = $('#calibration-scenario-pointer');
+    if (!$el.length) return;
+    if (yamlPath) {
+        $el.html(`Target scenario: <b>${escapeHtml(gymType || '')}</b> &rarr; <code>${escapeHtml(yamlPath)}</code>`);
+    } else {
+        $el.html(`<span class="text-red-500">Could not resolve a scenario_env_param.yaml for gym_type '${escapeHtml(gymType || '')}'.</span>`);
+    }
+}
+
 function getScenarioEnvParams(gymType) {
     return new Promise((resolve, reject) => {
         $.ajax({
@@ -2180,6 +2480,7 @@ function renderAgents() {
     if (!currentConfig.agents.length) {
         agentsListEl.html('<p class="text-sm text-gray-400 italic p-2">No agents configured. Add one above.</p>');
         updateAgentsEnabledCount();
+        updateConfigLockFromStatus();
         return;
     }
 
@@ -2224,6 +2525,7 @@ function renderAgents() {
     switchAgentTab(validIdx);
 
     updateAgentsEnabledCount();
+    updateConfigLockFromStatus();
 }
 
 function switchAgentTab(index) {
@@ -2291,8 +2593,13 @@ function setConfigValue(obj, path, value) {
 function collectConfigFromUI() {
     let newConfig = JSON.parse(JSON.stringify(currentConfig)); // Deep copy
 
-    // Collect all inputs and update the config based on the data-path attribute
-    $('input, select').each(function () {
+    // Collect all inputs and update the config based on the data-path attribute.
+    // Scoped to #config-page only: unrelated inputs elsewhere (e.g. the Results
+    // Panel's per-experiment selection checkboxes, whose data-path is a result
+    // folder path with no dots) would otherwise be picked up by setConfigValue
+    // and written as bogus root-level keys (path has no '.', so it falls through
+    // to newConfig[path] = value at the top level).
+    $('#config-page').find('input, select').each(function () {
         const $input = $(this);
         const path = $input.data('path');
         let value;
@@ -2315,6 +2622,75 @@ function collectConfigFromUI() {
 }
 
 // ====================================================================\
+// SCENARIO / AGENT COMPATIBILITY VALIDATION
+// ====================================================================\
+
+// SB3's PPO and A2C are on-policy algorithms. The marl_pz scenario's joint
+// training loop only supports off-policy (replay-buffer) models that can
+// share one env.step() per round across all hosts; PPO/A2C fall back to a
+// slow sequential per-host path with no validated multi-agent (MAPPO)
+// support yet. See app/static/manual.html "Gym Type" section for details.
+const MARL_PZ_UNSUPPORTED_ALGORITHMS = ['ppo', 'a2c'];
+
+function isMarlPzGymType(gymType) {
+    return String(gymType || '').toLowerCase().startsWith('marl_pz');
+}
+
+function isMarlPzUnsupportedAlgorithm(algorithm) {
+    return MARL_PZ_UNSUPPORTED_ALGORITHMS.includes(String(algorithm || '').toLowerCase());
+}
+
+/**
+ * Scans currentConfig for enabled PPO/A2C agents while the active scenario
+ * is marl_pz (or marl_pz_from_dataset), disables them, refreshes the agent
+ * list UI, and shows a blocking warning explaining why. Safe to call
+ * anytime (config load, scenario switch, agent add/enable/algorithm change)
+ * — it's a no-op when there's nothing to fix.
+ * @returns {boolean} true if one or more agents were disabled.
+ */
+function enforceMarlPzAgentCompatibility() {
+    if (!currentConfig || !currentConfig.env_params) {
+        return false;
+    }
+    if (!isMarlPzGymType(currentConfig.env_params.gym_type)) {
+        return false;
+    }
+    if (!Array.isArray(currentConfig.agents)) {
+        return false;
+    }
+
+    const blocked = currentConfig.agents.filter(
+        agent => agent && agent.enabled && isMarlPzUnsupportedAlgorithm(agent.algorithm)
+    );
+    if (blocked.length === 0) {
+        return false;
+    }
+
+    blocked.forEach(agent => { agent.enabled = false; });
+    renderAgents();
+
+    const names = blocked.map(a => `<code>${escapeHtml(a.name || a.algorithm)}</code>`).join(', ');
+    openInfoPopupHtml(`
+        <p><strong>PPO and A2C (Stable-Baselines3) are not supported in the <code>marl_pz</code> scenario.</strong></p>
+        <p>MininetGym's <code>marl_pz</code> joint training loop only supports off-policy
+        (replay-buffer) algorithms that can share one <code>env.step()</code> per round across
+        all hosts. SB3's PPO and A2C are on-policy and fall back to a slow, sequential per-host
+        training path with no validated multi-agent (MAPPO) support yet.</p>
+        <p>The following agent(s) have been <strong>disabled</strong>: ${names}.</p>
+        <p>A proper multi-agent PPO implementation (MAPPO) is on the roadmap. In the meantime,
+        see:</p>
+        <ul>
+            <li><a href="https://docs.ray.io/en/latest/rllib/rllib-examples.html#multi-agent-rl" target="_blank" rel="noopener">MARLlib / RLlib — multi-agent RL examples</a></li>
+            <li><a href="https://docs.pytorch.org/rl/stable/tutorials/multiagent_ppo.html" target="_blank" rel="noopener">TorchRL — Multi-Agent PPO tutorial</a></li>
+            <li><a href="https://docs.pytorch.org/rl/stable/tutorials/multiagent_competitive_ddpg.html" target="_blank" rel="noopener">TorchRL — Multi-Agent DDPG tutorial</a></li>
+        </ul>
+    `, 'Incompatible agent(s) for marl_pz');
+
+    showStatus(`PPO/A2C are not supported in marl_pz — disabled: ${blocked.map(a => a.name).join(', ')}`, 'error');
+    return true;
+}
+
+// ====================================================================\
 // AGENT MANAGEMENT
 // ====================================================================\
 
@@ -2325,7 +2701,9 @@ function addAgent() {
     const newAgent = Object.assign({}, defaults, { name: newAgentName, enabled: true });
     currentConfig.agents.push(newAgent);
     renderAgents();
-    showStatus(`Agent "${newAgentName}" added with ${selectedAlgo} defaults.`, 'info');
+    if (!enforceMarlPzAgentCompatibility()) {
+        showStatus(`Agent "${newAgentName}" added with ${selectedAlgo} defaults.`, 'info');
+    }
 }
 
 function duplicateAgent(agentName) {
@@ -2335,7 +2713,9 @@ function duplicateAgent(agentName) {
     copy.name = agentName + '_copy';
     currentConfig.agents.push(copy);
     renderAgents();
-    showStatus(`Agent "${agentName}" duplicated as "${copy.name}".`, 'success');
+    if (!enforceMarlPzAgentCompatibility()) {
+        showStatus(`Agent "${agentName}" duplicated as "${copy.name}".`, 'success');
+    }
 }
 
 function applyAlgorithmDefaults(agentIndex, newAlgo) {
@@ -2349,7 +2729,9 @@ function applyAlgorithmDefaults(agentIndex, newAlgo) {
     const enabled = current.enabled;
     currentConfig.agents[agentIndex] = Object.assign({}, defaults, { name, enabled });
     renderAgents();
-    showStatus(`Agent "${name}": switched to ${newAlgo} — defaults applied.`, 'info');
+    if (!enforceMarlPzAgentCompatibility()) {
+        showStatus(`Agent "${name}": switched to ${newAlgo} — defaults applied.`, 'info');
+    }
 }
 
 function removeAgent(agentName) {
@@ -2366,6 +2748,9 @@ function selectAllAgents(enabled) {
         agent.enabled = enabled;
     });
     renderAgents();
+    if (enabled && enforceMarlPzAgentCompatibility()) {
+        return;
+    }
     showStatus(enabled ? 'All agents enabled.' : 'All agents disabled.', 'info');
 }
 
@@ -2612,6 +2997,9 @@ function switchConfigTab(tabName) {
     $('.config-tab').removeClass('cfg-tab-active');
     $(`.config-tab[data-tab="${tabName}"]`).addClass('cfg-tab-active');
     try { localStorage.setItem('activeConfigTab', tabName); } catch (_) {}
+    if (tabName === 'env') {
+        switchEnvSubTab('general');
+    }
 }
 
 function initConfigTabs() {

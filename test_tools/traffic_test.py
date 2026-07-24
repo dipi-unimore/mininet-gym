@@ -61,11 +61,15 @@ from reinforcement_learning.scenarios.attack_detect_host_observable.\
 # Mininet helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_network(host_names: list, bridge: str = "s1"):
+def build_network(host_names: list, bridge: str = "s1", link_bw_mbps=None):
     """
     Create a single-switch Mininet topology without a remote controller.
     The switch runs in standalone/failsafe mode and uses 'actions=normal'
     so packets are forwarded without any controller.
+
+    link_bw_mbps: if set, caps every host<->switch link at this rate via
+    Mininet's TCLink (tc/HTB) — see net_params.link_bw_mbps in
+    config/default.yaml for why this matters for cross-server consistency.
     """
     from mininet.net import Mininet
     from mininet.node import OVSKernelSwitch
@@ -80,10 +84,11 @@ def build_network(host_names: list, bridge: str = "s1"):
 
     net = Mininet(controller=None, switch=StandaloneOVS, link=TCLink)
 
+    link_kwargs = {"bw": link_bw_mbps} if link_bw_mbps else {}
     sw = net.addSwitch(bridge)
     for i, name in enumerate(host_names, start=1):
         h = net.addHost(name, ip=f"10.0.0.{i}/24")
-        net.addLink(h, sw)
+        net.addLink(h, sw, **link_kwargs)
 
     net.hosts_links  = {h.name: {} for h in net.hosts}
     net.blocked_hosts = []
@@ -367,6 +372,17 @@ def _load_yaml_thresholds(scenario: str) -> dict:
         return {}
 
 
+def _load_yaml_link_bw(config_path: str = "config/default.yaml"):
+    """Read net_params.link_bw_mbps from the base config (None if unset/unreadable)."""
+    try:
+        import yaml
+        with open(os.path.join(_ROOT, config_path)) as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get("env_params", {}).get("net_params", {}).get("link_bw_mbps")
+    except Exception:
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Framework pipeline test (no external controller)",
@@ -387,8 +403,13 @@ def main():
     ap.add_argument("--thr-bytes",     default=None, type=int)
     ap.add_argument("--thr-var-bytes", default=None, type=int)
     ap.add_argument("--bridge",   default="s1")
+    ap.add_argument("--link-bw",  default=None, type=float, metavar="MBPS",
+                    help="cap host links at this rate via tc/HTB (default: "
+                         "net_params.link_bw_mbps in config/default.yaml, or unshaped)")
     ap.add_argument("--pause",    action="store_true", help="pause between steps (Enter=next, Ctrl-C=stop)")
     args = ap.parse_args()
+
+    link_bw_mbps = args.link_bw if args.link_bw is not None else _load_yaml_link_bw()
 
     # ── resolve thresholds: CLI > YAML > built-in fallback ──────────────────
     yaml_thr = _load_yaml_thresholds(args.scenario)
@@ -433,8 +454,9 @@ def main():
                              thr_bytes, thr_var_bytes, num_hosts)
 
     # ── build Mininet ────────────────────────────────────────────────────────
-    print(f"{BOLD}Building Mininet{RESET} (no controller)  hosts: {host_names}")
-    net = build_network(host_names, bridge=args.bridge)
+    bw_label = f"{link_bw_mbps} Mbit/s" if link_bw_mbps else "unshaped"
+    print(f"{BOLD}Building Mininet{RESET} (no controller)  hosts: {host_names}  links: {bw_label}")
+    net = build_network(host_names, bridge=args.bridge, link_bw_mbps=link_bw_mbps)
     print(f"{GREEN}Network started.{RESET}")
 
     print(f"{BOLD}Initializing monitoring…{RESET}")

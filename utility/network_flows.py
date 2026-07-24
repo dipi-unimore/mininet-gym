@@ -226,7 +226,7 @@ def _get_port_to_host_map(net: Mininet, bridge_name: str) -> Dict[str, str]:
     return port_to_host
 
 def parse_flow_ovs_ofctl(flow_data: str, net: Mininet) -> Dict[str, Any]:
-    """Parses ovs-ofctl dump-flows output."""
+    """Parses ovs-ofctl dump-flows output. NOT USED in current implementation, but kept for reference."""
     mac_to_name = _get_mac_to_name_map(net)
     
     FLOW_PATTERN = re.compile(
@@ -294,7 +294,7 @@ def parse_flow_ovs_ofctl(flow_data: str, net: Mininet) -> Dict[str, Any]:
     }
 
 def parse_flow_ovs_dpctl(flow_data: str, net: Mininet) -> Dict[str, Any]:
-    """Parses ovs-dpctl dump-flows output."""
+    """Parses ovs-dpctl dump-flows output. NOT USED in current implementation, but kept for reference."""
     mac_to_name = _get_mac_to_name_map(net)
     
     FLOW_PATTERN = re.compile(
@@ -387,13 +387,17 @@ def parse_flow_ovs_ports(flow_data: str, net: Mininet, bridge_name: str) -> Dict
             data = rx_match.groupdict()
             port_name = data['port_name']
             
-            if port_name == 'local':
+            if port_name.lower() == 'local':
                 current_port_data = {}
                 continue
                  
             rx_pkts = int(data['rx_pkts'])
             rx_bytes = int(data['rx_bytes'])
-
+            
+            #check if parsed values are too high, if so reset to 0
+            if rx_pkts > 18000000000000000000:
+                rx_pkts, rx_bytes = 0, 0
+            
             host_name = net.port_to_host_map.get(port_name, 'Unknown')
             
             current_port_data = {
@@ -411,6 +415,10 @@ def parse_flow_ovs_ports(flow_data: str, net: Mininet, bridge_name: str) -> Dict
             data = tx_match.groupdict()
             tx_pkts = int(data['tx_pkts'])
             tx_bytes = int(data['tx_bytes'])
+            
+            #check if parsed values are too high, if so reset to 0
+            if tx_pkts > 18000000000000000000:
+                tx_pkts, tx_bytes = 0, 0
             
             current_port_data["tx_pkts"] = tx_pkts
             current_port_data["tx_bytes"] = tx_bytes

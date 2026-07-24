@@ -144,11 +144,11 @@ Examples: 3 hosts → ×1.0 | 6 hosts → ×2.5 | 10 hosts → ×4.5
 | Correct victim detection (`ATTACK_IN`) | +3.0 | Scaled |
 | Correct attacker detection (`ATTACK_OUT`) | +3.0 | Scaled |
 | False positive (normal classified as attack) | −1.5 | Scaled |
-| False negative (attack classified as normal) | −1.5 | Scaled |
+| False negative (attack classified as normal) | −2.0 | Scaled |
 | Wrong attack direction (IN↔OUT swapped) | −2.0 | Scaled — penalised more than FP to prevent hedging |
 | Unnecessary link block (`LINK_OFF`) | −0.1 | Unscaled |
 
-The asymmetric penalty for wrong direction (`-2.0` vs `-1.5`) discourages the agent from "guessing" attack presence without correctly distinguishing victim from attacker.
+The asymmetric penalty for wrong direction (`-2.0` vs `-1.5`) discourages the agent from "guessing" attack presence without correctly distinguishing victim from attacker, while the stronger false-negative penalty (`-2.0`) makes missed attacks more costly than false positives.
 
 ---
 

@@ -58,19 +58,24 @@ def create_network(params = {
     information(f'*** Adding IoT {params.num_iots} devices\n')
     iot_devices = [net.addHost(f'iot{i+1}', ip=f'10.0.0.{params.num_hosts + i + 1}/24') for i in range(params.num_iots)]  # Same subnet
 
+    link_bw_mbps = getattr(params, 'link_bw_mbps', None)
+    link_kwargs = {'bw': link_bw_mbps} if link_bw_mbps else {}
+    if link_bw_mbps:
+        information(f'*** Shaping host links to {link_bw_mbps} Mbit/s (net_params.link_bw_mbps)\n')
+
     information(f'*** Creating links on {params.num_switches} switches \n')
     links = {}
     for switch in switches:
         for host in hosts:
-            link  = net.addLink(host, switch)  # Connect each host to a switch
+            link  = net.addLink(host, switch, **link_kwargs)  # Connect each host to a switch
             #links[host.name] = { "link" : link, "switch": switch, "sw_port" : 0}
             links[host.name] = { "link" : link } #link.intf2.name is sw_port
         for iot_device in iot_devices:
-            link = net.addLink(iot_device, switch)  # Connect each IoT device to a switch
+            link = net.addLink(iot_device, switch, **link_kwargs)  # Connect each IoT device to a switch
             #links[iot_device.name] = { "link" : link, "switch": switch, "sw_port" : 0}
             links[iot_device.name] = { "link" : link }
-    net.hosts_links = links 
-    net.blocked_hosts = []       
+    net.hosts_links = links
+    net.blocked_hosts = []
 
     information('*** Starting network\n')
     net.start()

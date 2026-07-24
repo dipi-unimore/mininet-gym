@@ -346,9 +346,10 @@ class NetworkEnvAttackDetectPerHostObservable(NetworkEnv):
                 continue
 
             if task_type == NORMAL:
+                bw_mbps = getattr(self.params.net_params, 'normal_traffic_bw_mbps', 1)
                 self._host_futures[host.name] = self._traffic_executor.submit(
                     _generate_normal_traffic_once,
-                    host, destination, traffic_type, 1.0,
+                    host, destination, traffic_type, 1.0, bw_mbps,
                 )
 
             elif task_type in (SHORT_ATTACK, LONG_ATTACK):

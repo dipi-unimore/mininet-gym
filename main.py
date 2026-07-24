@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", message=".*shimmy.*", category=UserWarning)
 import os
 import sys
 import shutil
@@ -22,6 +24,7 @@ from utility.params import Params, read_config_file
 from utility.my_log import initialize_client_notifier, notify_client, set_is_from_dataset, set_log_level, set_log_file, information, error, clear_agent_summaries
 from app.socket_handler import get_socketio_instance, register_handlers, send_live_data, send_status
 import random, threading
+import hashlib
 from app.app_api import start_api
 import json as js
 
@@ -50,13 +53,50 @@ def ensure_default_config_file():
     return True
 
 
+def _resolve_scenario_random_seed(config) -> int:
+    """
+    Derive the seed used to reseed Python's global `random` module.
+
+    When no agent loads a prior checkpoint, this is just config.random_seed,
+    preserving the existing reproducible-scenario behavior for fresh/batch runs
+    (fair comparison across agents trained in the same run).
+
+    When at least one enabled agent has load=True, scenario_source='generate'
+    would otherwise regenerate the *exact same* scenario.json as the run it
+    loads from (same global seed each process start), silently turning
+    "continue training with N more episodes" into "retrain N episodes on
+    identical data". We instead derive the seed from the loaded checkpoint
+    path(s), so each continuation gets fresh, still-deterministic traffic.
+    """
+    load_dirs = sorted(
+        str(getattr(agent, "load_dir", "") or "")
+        for agent in getattr(config, "agents", [])
+        if getattr(agent, "enabled", False) and getattr(agent, "load", False)
+    )
+    load_dirs = [d for d in load_dirs if d and d != "null"]
+    if not load_dirs:
+        return config.random_seed
+
+    digest = hashlib.sha256("|".join(load_dirs).encode("utf-8")).hexdigest()
+    return config.random_seed ^ int(digest[:8], 16)
+
+
 def start_experiment(config_dict, pause_event=None, stop_event=None):
+    config_dict.pop("training_execution_directory", None)  # clear stale path from previous run
     config = js.loads(js.dumps(config_dict), object_hook=Params)
 
     set_log_level(config.log_level)
     server_user = config.server_user
     if config.random_seed > 0:
-        random.seed(config.random_seed)
+        scenario_seed = _resolve_scenario_random_seed(config)
+        if scenario_seed != config.random_seed:
+            information(
+                f"[start_experiment] Continuation run detected (agent load=True): "
+                f"reseeding scenario generation with {scenario_seed} "
+                f"(base random_seed={config.random_seed}) to avoid replaying "
+                f"the identical scenario.json of the loaded checkpoint(s).\n"
+            )
+        random.seed(scenario_seed)
     config.net_config_filter = (
         f"{config.env_params.net_params.num_switches}_"
         f"{config.env_params.net_params.num_hosts}_"
@@ -123,6 +163,8 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
             "hosts":        [h.name for h in env.hosts],
             "agents":       [agent.name for agent in config.agents if agent.enabled],
             "isMultiAgent": isMultiAgent,
+            "commStrategy": getattr(env, "_comm_strategy", None),
+            "commStrategies": sorted(getattr(env, "_comm_strategies", []) or []),
         }
         notify_client(level=SystemLevels.CONFIG, config=cfg)
         socketio.cfg = cfg
@@ -219,7 +261,7 @@ def main(port=None):
     if config.enable_web_interface:
         start_experiment.env = {"param": 123}
         api_thread = threading.Thread(
-            target=start_api, args=(start_experiment, config_dict, '0.0.0.0', web_port)
+            target=start_api, args=(start_experiment, config_dict, '127.0.0.1', web_port)
         )
         api_thread.start()
         api_thread.join()

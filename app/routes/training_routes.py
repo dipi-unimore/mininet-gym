@@ -3,7 +3,7 @@ from threading import Thread
 from flask import Blueprint, jsonify
 
 from utility.constants import SystemStatus
-from utility.my_log import set_drop_rule_message_visibility, get_agent_summaries
+from utility.my_log import set_drop_rule_message_visibility, get_agent_summaries, get_current_training_agent, get_agent_comm_events
 
 
 def create_training_blueprint(state):
@@ -24,6 +24,10 @@ def create_training_blueprint(state):
 
         if state.get('training_thread') is not None and state['training_thread'].is_alive():
             return jsonify({"status": SystemStatus.ERROR, "message": "Just running"}), 409
+
+        if state.get('calibration_thread') is not None and state['calibration_thread'].is_alive():
+            return jsonify({"status": SystemStatus.ERROR,
+                            "message": "Cannot start training while threshold calibration is running."}), 409
 
         if state.get('main_ref') is None:
             return jsonify({"status": SystemStatus.ERROR, "message": "The main function has not been referenced"}), 500
@@ -84,26 +88,54 @@ def create_training_blueprint(state):
                 agent_manager = state.get('agent_manager')
                 if agent_manager is None:
                     config = state.get('current_config', {})
-                    agent_manager = config.get('agent_manager')
+                    agent_manager = config.get('agent_manager') if isinstance(config, dict) else None
                 if agent_manager and hasattr(agent_manager, 'agents_params'):
                     for agent_param in agent_manager.agents_params:
                         agent_name = getattr(agent_param, 'name', None)
                         if not agent_name:
                             continue
-                        # Metrics (accuracy, ecc)
-                        metrics = None
-                        indicators = None
+                        # Metrics (accuracy, reward). Single-agent scenarios expose
+                        # them directly on `.instance` (flat list, one point per
+                        # episode). marl_pz/marl multi-host scenarios expose them
+                        # per host under `.instances[host]['custom_callback']` —
+                        # each host trains independently (sequential per-instance
+                        # for on-policy PPO/A2C), so history is kept per host and
+                        # returned as {host: [...]} instead of a single flat list.
                         try:
-                            if hasattr(agent_param, 'instance') and hasattr(agent_param.instance, 'metrics'):
-                                metrics = agent_param.instance.metrics
-                            if hasattr(agent_param, 'instance') and hasattr(agent_param.instance, 'indicators'):
-                                indicators = agent_param.instance.indicators
+                            single_instance = getattr(agent_param, 'instance', None)
+                            instances = getattr(agent_param, 'instances', None) or {}
+                            if instances:
+                                accuracy_by_host = {}
+                                reward_by_host = {}
+                                for host_name, inst_info in instances.items():
+                                    candidate = (
+                                        inst_info.get('custom_callback')
+                                        or inst_info.get('instance')
+                                    )
+                                    host_metrics = getattr(candidate, 'metrics', None)
+                                    if host_metrics and host_metrics.get('accuracy'):
+                                        accuracy_by_host[host_name] = host_metrics['accuracy']
+                                    host_indicators = getattr(candidate, 'indicators', None)
+                                    if host_indicators:
+                                        reward_by_host[host_name] = [
+                                            indicator.get('cumulative_reward')
+                                            for indicator in host_indicators
+                                        ]
+                                agent_chart_data[agent_name] = {
+                                    'accuracy': accuracy_by_host or None,
+                                    'reward': reward_by_host or None,
+                                }
+                            elif single_instance is not None:
+                                metrics = getattr(single_instance, 'metrics', None)
+                                indicators = getattr(single_instance, 'indicators', None)
+                                agent_chart_data[agent_name] = {
+                                    'accuracy': metrics['accuracy'] if metrics and 'accuracy' in metrics else None,
+                                    'reward': [i['cumulative_reward'] for i in indicators] if indicators else None,
+                                }
+                            else:
+                                agent_chart_data[agent_name] = {'accuracy': None, 'reward': None}
                         except Exception:
-                            pass
-                        agent_chart_data[agent_name] = {
-                            'accuracy': metrics['accuracy'] if metrics and 'accuracy' in metrics else None,
-                            'reward': [indicator['cumulative_reward'] for indicator in indicators] if indicators else None
-                        }
+                            agent_chart_data[agent_name] = {'accuracy': None, 'reward': None}
                         # Button state: actual summary data for reconnect recovery
                         cached = get_agent_summaries().get(agent_name, {})
                         agent_button_state[agent_name] = {
@@ -113,6 +145,8 @@ def create_training_blueprint(state):
             except Exception as e:
                 print(f"[get_training_status] Could not extract agent chart/button data: {e}")
 
+            current_agent_info = get_current_training_agent() if is_training else {}
+
             return jsonify({
                 "status": status,
                 "message": message,
@@ -120,7 +154,10 @@ def create_training_blueprint(state):
                 "is_paused": pause_set,
                 "is_stopping": stop_set,
                 "agent_chart_data": agent_chart_data,
-                "agent_button_state": agent_button_state
+                "agent_button_state": agent_button_state,
+                "agent_comm_events": get_agent_comm_events(),
+                "current_agent": current_agent_info.get('name'),
+                "current_agent_mode": current_agent_info.get('mode'),
             }), 200
         except Exception as e:
             print(f"Error in get_training_status: {e}")

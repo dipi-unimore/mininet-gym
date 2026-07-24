@@ -254,10 +254,9 @@ def plot_and_save_data_agent(parent_agent, config):
             plot_metrics(train_metrics, directory_name, title=f"{parent_agent.name}_{host_name} Train metrics", host=host_name)
         except Exception as e:
             error(Fore.RED+f"Error plotting training metrics for {parent_agent.name}_{host_name} !\n{e}\n{traceback.format_exc()}\n"+Fore.WHITE)
-        if hasattr(data, 'train_types'):
-            #TODO verify host_name in data.train_types
+        if hasattr(data, 'train_types') and host_name in data.train_types:
             train_types = data.train_types[host_name]
-            if 'explorations' in data.train_types.keys() and len(train_types["explorations"]) > 0 and len(train_types["exploitations"]) > 0: 
+            if 'explorations' in train_types and len(train_types["explorations"]) > 0 and len(train_types["exploitations"]) > 0:
                 try:
                     plot_train_types(train_types, data.train_execution_time, directory_name, title=f"{parent_agent.name}_{host_name} Train types over time", host=host_name)
                 except Exception as e:
@@ -292,7 +291,9 @@ def start_testing_agents(am, config):
     return test_attack_detect_agents(am, directory_name, config)  
                         
 def test_attack_detect_agents(am, directory_name, config):
+    start_time = time.time()
     score, ground_truth, predicted = evaluate_attack_detect_agent(am)
+    test_execution_time = time.time() - start_time
     notify_client(level=SystemLevels.STATUS, status=SystemStatus.RUNNING, mode=SystemModes.PLOTTING, message="Plotting evaluation data...")
     metrics =  {agent.name: {'accuracy': [], 'precision': [], 'recall': [], 'f1_score': []} for agent in config.agents}
 
@@ -340,9 +341,10 @@ def test_attack_detect_agents(am, directory_name, config):
     data = type('', (), {})()
     data.score = score
     data.ground_truth = ground_truth
-    data.predicted = predicted    
+    data.predicted = predicted
     data.metrics = metrics
-    
+    data.test_execution_time = test_execution_time
+
     save_data_to_file(data.__dict__, directory_name,"test")
     # plot test
     try:

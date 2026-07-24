@@ -178,6 +178,7 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
     test_charts = []
     detected_test_episodes = []
     mitigation_entries = []
+    test_durations = {}
     is_marl = gym_type_in_config.startswith(MARL_ATTACKS)
     is_classification = gym_type_in_config.startswith(CLASSIFICATION)
 
@@ -218,6 +219,18 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
                 if test_agent_name:
                     merged_test_scores[test_agent_name] = score_value
 
+        test_execution_time = test_data.get("test_execution_time")
+        if test_execution_time is not None:
+            duration_agent_names = list(predicted.keys()) if isinstance(predicted, dict) and predicted else []
+            if not duration_agent_names:
+                test_folder_name = os.path.basename(test_dir_path)
+                if test_folder_name.startswith(f"{test_dir}_"):
+                    duration_agent_names = [test_folder_name[len(f"{test_dir}_"):]]
+                elif len(agent_names) == 1:
+                    duration_agent_names = [agent_names[0]]
+            for duration_agent_name in duration_agent_names:
+                test_durations[duration_agent_name] = test_execution_time
+
         # Accumulate gt/pred for composite winner scoring (attack scenarios only)
         if not is_classification and gt is not None and isinstance(predicted, dict):
             for agent_name, pred_for_agent in predicted.items():
@@ -250,7 +263,7 @@ def _collect_test_results(candidate_test_dirs, dir_path, test_dir, gym_type_in_c
             merged_composite_scores[agent_name] = cs
 
     mitigation_summary = _summarize_mitigation_entries(mitigation_entries)
-    return merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores
+    return merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores, test_durations
 
 
 def _summarize_mitigation_entries(mitigation_entries):
@@ -379,6 +392,7 @@ def _collect_agents_data(
             "accuracy": accuracy,
             "charts": charts,
             "print_training_chart": print_training_chart,
+            "training_duration_seconds": data.get("train_execution_time"),
         })
 
         if accuracy < min_accuracy:
@@ -733,6 +747,29 @@ def build_result_pdf_response(current_config, gym_type, result_path, data):
 RESULT_GYM_TYPES = [MARL_PZ, MARL_ATTACKS, ATTACKS, ATTACKS_HO, CLASSIFICATION, MARL_PZ_FROM_DATASET, MARL_ATTACKS_FROM_DATASET, ATTACKS_FROM_DATASET, CLASSIFICATION_FROM_DATASET]
 
 
+def _build_load_source_info(load, load_dir):
+    """Derive the source experiment's (gym_type, path) from an agent's load_dir.
+
+    load_dir is rooted at training_directory as "<gym_type>/<run_dir>/...", the same
+    scheme used for each result's own "path" field, so the first two segments identify
+    the source experiment that a loaded agent is extending.
+    """
+    load = bool(load)
+    load_dir = load_dir or ""
+    source_gym_type, source_path = "", ""
+    if load and load_dir:
+        parts = [p for p in load_dir.split("/") if p]
+        if len(parts) >= 2 and parts[0] in RESULT_GYM_TYPES:
+            source_gym_type = parts[0]
+            source_path = "/".join(parts[:2])
+    return {
+        "load": load,
+        "load_dir": load_dir,
+        "source_gym_type": source_gym_type,
+        "source_path": source_path,
+    }
+
+
 def build_results_dir_list(current_config):
     from utility.my_log import information, debug, error as log_error
     
@@ -791,9 +828,23 @@ def build_results_dir_list(current_config):
                 training_episodes = env_params.get("episodes", 0)
                 max_steps = env_params.get("max_steps", 0)
                 test_episodes = env_params.get("test_episodes", 0)
+                n_bins = env_params.get("n_bins", None)
+                _comm_raw = env_params.get("communication", {}) or {}
+                if hasattr(_comm_raw, '__dict__'):
+                    _comm_raw = _comm_raw.__dict__
+                _cs = _comm_raw.get("strategy", None) if isinstance(_comm_raw, dict) else None
+                comm_strategy = None if (not _cs or _cs == "none") else _cs
+                _css = _comm_raw.get("strategies", None) if isinstance(_comm_raw, dict) else None
+                comm_strategies = list(_css) if _css else []
+                _attacks_raw = env_params.get("attacks", {}) or {}
+                if hasattr(_attacks_raw, '__dict__'):
+                    _attacks_raw = _attacks_raw.__dict__
+                apply_drop_rules = _attacks_raw.get("apply_drop_rules", None) if isinstance(_attacks_raw, dict) else None
+                include_percentage_variations = _attacks_raw.get("include_percentage_variations", None) if isinstance(_attacks_raw, dict) else None
+                use_reward_scaling = _attacks_raw.get("use_reward_scaling", None) if isinstance(_attacks_raw, dict) else None
                 # Convert Params object to dict to access net_params values
                 net_params_dict = net_params.__dict__ if hasattr(net_params, '__dict__') else net_params
-                # Use helper for backward compatibility: try num_iots first, then num_iot                
+                # Use helper for backward compatibility: try num_iots first, then num_iot
                 network_config = f"{_get_net_param(net_params_dict, 'num_switches', 0)}_{_get_net_param(net_params_dict, 'num_hosts', 0)}_{_get_net_param(net_params_dict, 'num_iots',  'num_iot',0)}"
                 agents = config_yaml.get("agents", [])
                 agent_names = [
@@ -803,6 +854,20 @@ def build_results_dir_list(current_config):
                     and not agent.get("skip_learn", True)
                     and not agent.get("name", "").startswith(ALGO_SUPERVISED)
                 ]
+                agent_algo_map = {
+                    agent.get("name"): agent.get("algorithm", "")
+                    for agent in agents
+                    if agent.get("enabled", False)
+                    and not agent.get("skip_learn", True)
+                    and not agent.get("name", "").startswith(ALGO_SUPERVISED)
+                }
+                agent_load_map = {
+                    agent.get("name"): _build_load_source_info(agent.get("load", False), agent.get("load_dir", ""))
+                    for agent in agents
+                    if agent.get("enabled", False)
+                    and not agent.get("skip_learn", True)
+                    and not agent.get("name", "").startswith(ALGO_SUPERVISED)
+                }
                 if not agent_names:
                     _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "No enabled learning agents found in config")
                     continue
@@ -813,6 +878,12 @@ def build_results_dir_list(current_config):
                     "training_episodes": training_episodes,
                     "max_steps": max_steps,
                     "test_episodes": test_episodes,
+                    "n_bins": n_bins,
+                    "comm_strategy": comm_strategy,
+                    "comm_strategies": comm_strategies,
+                    "apply_drop_rules": apply_drop_rules,
+                    "include_percentage_variations": include_percentage_variations,
+                    "use_reward_scaling": use_reward_scaling,
                 }
 
                 agents_ok, agents_reason, agents_summary = _collect_agents_data(
@@ -836,6 +907,13 @@ def build_results_dir_list(current_config):
                 data_gym_type["name_min_accuracy"] = agents_summary["name_min_accuracy"]
                 data_gym_type["max_accuracy"] = agents_summary["max_accuracy"]
                 data_gym_type["name_max_accuracy"] = agents_summary["name_max_accuracy"]
+                for agent_d in agents_summary["agents_data"]:
+                    agent_d["algorithm"] = agent_algo_map.get(agent_d["agent_name"], "")
+                    load_info = agent_load_map.get(agent_d["agent_name"], {})
+                    agent_d["load"] = load_info.get("load", False)
+                    agent_d["load_dir"] = load_info.get("load_dir", "")
+                    agent_d["load_source_gym_type"] = load_info.get("source_gym_type", "")
+                    agent_d["load_source_path"] = load_info.get("source_path", "")
                 data_gym_type["agents_data"] = agents_summary["agents_data"]
 
                 candidate_test_dirs = _get_candidate_test_dirs(dir_path, test_dir)
@@ -843,7 +921,7 @@ def build_results_dir_list(current_config):
                     _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "Missing test directory: expected TEST or TEST_<algorithm>")
                     continue
 
-                merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores = _collect_test_results(
+                merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores, test_durations = _collect_test_results(
                     candidate_test_dirs=candidate_test_dirs,
                     dir_path=dir_path,
                     test_dir=test_dir,
@@ -853,6 +931,9 @@ def build_results_dir_list(current_config):
                 if not merged_test_scores:
                     _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "No valid test scores found in test.json files")
                     continue
+
+                for agent_d in data_gym_type["agents_data"]:
+                    agent_d["test_duration_seconds"] = test_durations.get(agent_d["agent_name"])
 
                 if detected_test_episodes:
                     test_episodes = max(detected_test_episodes)
@@ -962,6 +1043,9 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
 
                     env_p, agents_cfg = _read_run_config_yaml(path)
                     agent_cfg = next((a for a in agents_cfg if a.get("name") == agent_name), {})
+                    _lc = env_p.get("communication", {}) or {}
+                    _lcs = _lc.get("strategy") if isinstance(_lc, dict) else None
+                    _lcss = _lc.get("strategies") if isinstance(_lc, dict) else None
                     load_dir_list.append({
                         "accuracy": float(np.mean(accuracy)) if accuracy else 0,
                         "datetime": path.split('/')[2].split('_')[0],
@@ -969,6 +1053,8 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                         "n_bins": env_p.get("n_bins"),
                         "episodes": env_p.get("episodes"),
                         "algorithm": agent_cfg.get("algorithm"),
+                        "comm_strategy": None if (not _lcs or _lcs == "none") else _lcs,
+                        "comm_strategies": list(_lcss) if _lcss else [],
                     })
                 else:
                     if not os.path.isfile(f"{path}/{agent_name}.{extension}") or not os.path.isfile(f"{path}/data.json"):
@@ -982,6 +1068,9 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                             acc_val = 0.0
                         env_p, agents_cfg = _read_run_config_yaml(path)
                         agent_cfg = next((a for a in agents_cfg if a.get("name") == agent_name), {})
+                        _lc = env_p.get("communication", {}) or {}
+                        _lcs = _lc.get("strategy") if isinstance(_lc, dict) else None
+                        _lcss = _lc.get("strategies") if isinstance(_lc, dict) else None
                         load_dir_list.append({
                             "accuracy": acc_val,
                             "datetime": path.split('/')[2].split('_')[0],
@@ -989,6 +1078,8 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                             "n_bins": env_p.get("n_bins"),
                             "episodes": env_p.get("episodes"),
                             "algorithm": agent_cfg.get("algorithm"),
+                            "comm_strategy": None if (not _lcs or _lcs == "none") else _lcs,
+                            "comm_strategies": list(_lcss) if _lcss else [],
                         })
                     except Exception as exc:
                         error(f"Error reading data.json for {path}: {exc}")
@@ -1523,6 +1614,113 @@ def build_result_statuses_preview(current_config, result_path, sample_size=20):
     return preview, 200
 
 
+def _resolve_comm_stats_paths(result_abs_path):
+    """Return {agent_name: comm_stats.json abs path} for every immediate
+    agent subdirectory of a marl_pz run directory that has one."""
+    paths = {}
+    if not os.path.isdir(result_abs_path):
+        return paths
+    for entry in sorted(os.listdir(result_abs_path)):
+        agent_dir = os.path.join(result_abs_path, entry)
+        candidate = os.path.join(agent_dir, "comm_stats.json")
+        if os.path.isdir(agent_dir) and os.path.isfile(candidate):
+            paths[entry] = candidate
+    return paths
+
+
+def build_result_comm_stats_preview(current_config, result_path):
+    """Aggregate marl_pz communication data (comm_stats.json, one file per
+    agent subdirectory) for the results modal's "Communication Activity"
+    section. Returns a graceful error body (not a 500) for runs that predate
+    this feature or used CommStrategy.NONE (no comm_stats.json written)."""
+    if not result_path:
+        return {"status": "error", "message": "Missing result path"}, 400
+
+    try:
+        result_abs_path = _resolve_result_abs_path(current_config, result_path)
+    except ValueError:
+        return {"status": "error", "message": "Invalid result path"}, 400
+
+    agent_paths = _resolve_comm_stats_paths(result_abs_path)
+    if not agent_paths:
+        return {"status": "error", "message": "No communication data recorded for this run."}, 404
+
+    agents_payload = {}
+    comm_strategy = None
+    comm_strategies: list = []
+    family = None
+
+    for agent_name, path in agent_paths.items():
+        data = _safe_load_json_file(path)
+        if not data:
+            continue
+        comm_strategy = comm_strategy or data.get("comm_strategy")
+        comm_strategies = comm_strategies or (data.get("comm_strategies") or [])
+        family = family or data.get("family")
+        agent_payload = {}
+
+        if data.get("family") == "alert":
+            columns = data.get("alert_columns", [])
+            rows = data.get("alert_rows", [])
+            host_names = data.get("host_names", [])
+            col_idx = {c: i for i, c in enumerate(columns)}
+
+            per_host_totals = {}
+            per_episode_by_host = {}
+            for row in rows:
+                host_idx = int(row[col_idx["host_idx"]])
+                if host_idx < 0 or host_idx >= len(host_names):
+                    continue
+                host_name = host_names[host_idx]
+                episode = int(row[col_idx["episode"]])
+                totals = per_host_totals.setdefault(
+                    host_name, {"total": 0, "confident": 0, "uncertain": 0}
+                )
+                totals["total"] += int(row[col_idx["total"]])
+                totals["confident"] += int(row[col_idx["confident"]])
+                totals["uncertain"] += int(row[col_idx["uncertain"]])
+                per_episode_by_host.setdefault(host_name, {})[episode] = int(row[col_idx["total"]])
+
+            episodes = sorted({ep for series in per_episode_by_host.values() for ep in series})
+            agent_payload.update({
+                "family": "alert",
+                "per_host_totals": per_host_totals,
+                "episodes": episodes,
+                "per_episode_series": {
+                    host: [series.get(ep, 0) for ep in episodes]
+                    for host, series in per_episode_by_host.items()
+                },
+            })
+
+        # Not `elif`: a run combining a Tier A alerting channel with Tier B
+        # mechanisms (e.g. uaq + federated_sync) carries both an "alert"
+        # payload and sync_events in the same comm_stats.json (see
+        # marl_pz_main._build_comm_stats_payload) — surface both.
+        if data.get("sync_events"):
+            events = data.get("sync_events", [])
+            event_counts = {}
+            for ev in events:
+                event_type = ev.get("eventType", "unknown")
+                event_counts[event_type] = event_counts.get(event_type, 0) + 1
+            agent_payload.setdefault("family", data.get("family", "policy_coordination"))
+            agent_payload["sync_events"] = events
+            agent_payload["event_counts"] = event_counts
+
+        if agent_payload:
+            agents_payload[agent_name] = agent_payload
+
+    if not agents_payload:
+        return {"status": "error", "message": "Unable to read communication data for this run."}, 500
+
+    return {
+        "status": "ok",
+        "comm_strategy": comm_strategy,
+        "comm_strategies": comm_strategies,
+        "family": family,
+        "agents": agents_payload,
+    }, 200
+
+
 def build_dataset_list(current_config, gym_type, network_config):
     training_directory = current_config.get("training_directory", None)
     if not training_directory or not os.path.isdir(training_directory):
@@ -1725,9 +1923,13 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
     """
     Regenerate all metric charts for a result directory using the current plot functions.
 
-    Reprints per-agent charts (metrics.png, metrics_combined.png) and root-level
-    charts (metrics_comparison.png, radar_chart.png).  For MARL scenarios the
-    per-host breakdown is also regenerated.
+    For marl_pz: reprints training plots (cumulative rewards, confusion matrix, episode
+    statuses, metrics, combined performance, discrete bin coverage), test plots from
+    TEST_{agent} subdirs (test confusion matrix, agent test, errors, mitigation stats),
+    env statuses, and root-level comparison + radar charts.
+
+    For marl_attacks: per-host metrics + team aggregates + comparison charts.
+    For attacks_ho / others: per-agent metrics + comparison charts.
     """
     try:
         result_abs_path = _resolve_result_abs_path(current_config, relative_result_path)
@@ -1757,6 +1959,7 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
         and not str(a.get("name", "")).startswith(ALGO_SUPERVISED)
     ]
 
+    is_marl_pz = detected_gym_type.startswith(MARL_PZ)
     is_marl = detected_gym_type.startswith(MARL_ATTACKS)
 
     if is_marl:
@@ -1769,6 +1972,26 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
             plot_metrics_kfold as _plot_kfold,
             plot_metrics_violin as _plot_violin,
             plot_agent_training_confusion_matrix as _plot_train_cm,
+        )
+    elif is_marl_pz:
+        from utility.my_ho_statistics import (
+            plot_discrete_feature_bin_coverage as _plot_bin_coverage,
+            plot_ho_agent_execution_confusion_matrix as _plot_train_cm,
+            plot_ho_agent_execution_statuses as _plot_statuses,
+            plot_ho_attack_mitigation_stats as _plot_mitigation,
+            plot_ho_agent_test as _plot_agent_test,
+            plot_ho_agent_test_errors as _plot_agent_test_errors,
+            plot_ho_enviroment_execution_statutes as _plot_env_statuses,
+            plot_ho_test_confusion_matrix as _plot_test_cm,
+        )
+        from utility.my_statistics import (
+            plot_metrics as _plot_metrics,
+            plot_combined_performance_over_time as _plot_combined,
+            plot_comparison_bar_charts as _plot_comparison,
+            plot_radar_chart as _plot_radar,
+            plot_metrics_kfold as _plot_kfold,
+            plot_metrics_violin as _plot_violin,
+            plot_agent_cumulative_rewards as _plot_cumulative,
         )
     elif detected_gym_type.startswith(ATTACKS_HO):
         from utility.my_ho_statistics import (
@@ -1852,6 +2075,8 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
                 if is_marl:
                     # MARL uses plot_agent_training_confusion_matrix signature
                     _plot_train_cm(train_indicators, agent_dir, agent_name, title=agent_name)
+                elif is_marl_pz:
+                    _plot_train_cm(train_indicators, agent_dir)
                 else:
                     # HO and others use must_print and title parameters
                     _plot_train_cm(train_indicators, agent_dir, must_print=True, title=agent_name)
@@ -1859,8 +2084,10 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
             except Exception as exc:
                 errors.append(f"Error reprinting confusion matrix for {agent_name}: {exc}")
 
-        # Reprint episode statuses (for ATTACKS_HO and others)
-        if detected_gym_type.startswith(ATTACKS_HO) or not is_marl and detected_gym_type not in [ATTACKS, CLASSIFICATION, CLASSIFICATION_FROM_DATASET]:
+        # Reprint episode statuses (HO and marl_pz share the same function)
+        if detected_gym_type.startswith(ATTACKS_HO) or is_marl_pz or (
+                not is_marl and not is_marl_pz
+                and detected_gym_type not in [ATTACKS, CLASSIFICATION, CLASSIFICATION_FROM_DATASET]):
             if train_indicators:
                 try:
                     _plot_statuses(train_indicators, agent_dir, title=agent_name)
@@ -1868,7 +2095,65 @@ def reprint_result_charts(current_config, gym_type, relative_result_path):
                 except Exception as exc:
                     errors.append(f"Error reprinting episode statuses for {agent_name}: {exc}")
 
+        # marl_pz: cumulative rewards and discrete feature bin coverage
+        if is_marl_pz and train_indicators:
+            try:
+                _plot_cumulative(train_indicators, agent_dir, agent_name)
+                reprinted.append(f"{agent_name}/rewards")
+            except Exception as exc:
+                errors.append(f"Error reprinting cumulative rewards for {agent_name}: {exc}")
+            n_bins = env_params.get("n_bins", 4)
+            attacks_cfg = env_params.get("attacks", {}) or {}
+            include_pct_var = attacks_cfg.get("include_percentage_variations", True)
+            try:
+                _plot_bin_coverage(
+                    train_indicators, agent_dir, agent_name,
+                    n_bins=n_bins, include_pct_var=include_pct_var,
+                )
+                reprinted.append(f"{agent_name}/discrete_feature_bin_coverage")
+            except Exception as exc:
+                errors.append(f"Error reprinting bin coverage for {agent_name}: {exc}")
+
+        # marl_pz: test charts from TEST_{agent_name}/test.json
+        if is_marl_pz:
+            test_dir = os.path.join(result_abs_path, f"TEST_{agent_name}")
+            test_file = os.path.join(test_dir, "test.json")
+            if os.path.isfile(test_file):
+                try:
+                    test_data = read_data_file(test_file)
+                    gt = test_data.get("ground_truth", [])
+                    pred = (test_data.get("predicted", {}) or {}).get(agent_name, [])
+                    mitigation = test_data.get("mitigation_history", [])
+                    _plot_test_cm(test_dir, gt, pred, agent_name)
+                    _plot_agent_test(
+                        {"ground_truth": gt, "predicted": {agent_name: pred}}, test_dir
+                    )
+                    _plot_agent_test_errors(
+                        {"ground_truth": gt, "predicted": {agent_name: pred}},
+                        test_dir,
+                        title=f"{agent_name} Evaluation Errors",
+                    )
+                    if mitigation:
+                        _plot_mitigation(
+                            mitigation, test_dir, title=f"{agent_name} Attack Mitigation"
+                        )
+                    reprinted.append(f"TEST_{agent_name}")
+                except Exception as exc:
+                    errors.append(f"Error reprinting test charts for {agent_name}: {exc}")
+
         agents_metrics[agent_name] = agent_plot_metrics
+
+    # marl_pz: environment-level statuses plot
+    if is_marl_pz:
+        statuses_file = os.path.join(result_abs_path, "statuses.json")
+        if os.path.isfile(statuses_file):
+            try:
+                statuses = read_data_file(statuses_file)
+                if len(statuses) > 2:
+                    _plot_env_statuses(statuses, result_abs_path, "Statuses")
+                    reprinted.append("statuses")
+            except Exception as exc:
+                errors.append(f"Error reprinting env statuses: {exc}")
 
     if agents_metrics:
         try:

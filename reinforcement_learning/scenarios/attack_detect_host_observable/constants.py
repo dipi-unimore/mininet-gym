@@ -27,8 +27,8 @@ class Rewards:
     CORRECT_UNDER_ATTACK_DETECTION = 3.0
     LINK_OFF = -0.1
     WRONG_ATTACK_DIRECTION_DETECTED = -2.0  # worse than FP to prevent direction hedging
-    FALSE_POSITIVE = -1.5                   # scaled in wrapper — symmetric with FALSE_NEGATIVE
-    FALSE_NEGATIVE = -1.5                   # scaled in wrapper
+    FALSE_POSITIVE = -1.5                   # scaled in wrapper
+    FALSE_NEGATIVE = -2.0                   # scaled in wrapper — harsher than FP
     
 # Create instances of the classes for easy import
 # These are the objects you'll import and use
