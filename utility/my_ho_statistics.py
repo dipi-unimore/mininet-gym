@@ -52,6 +52,10 @@ import matplotlib.patches as mpatches
 from sklearn import metrics as sk_metrics
 from colorama import Fore
 
+from reinforcement_learning.scenarios.attack_detect_host_observable.constants import (
+    HOST_STATUS_ID_MAPPING,
+)
+
 from utility.my_log import error
 
 
@@ -83,13 +87,15 @@ def map_ho_status_id_to_class(value):
     except (TypeError, ValueError):
         return 0
 
-    if value == 3:
-        return 0
-    if value == 4:
-        return 2
-    if value in (0, 1, 2):
+    if value == HOST_STATUS_ID_MAPPING.get("incoming_blocked_attack"):
+        return HOST_STATUS_ID_MAPPING["normal"]
+    if value == HOST_STATUS_ID_MAPPING.get("out_attack_blocked"):
+        return HOST_STATUS_ID_MAPPING["attacking"]
+
+    if value in (HOST_STATUS_ID_MAPPING["normal"], HOST_STATUS_ID_MAPPING["under_attack"],
+                 HOST_STATUS_ID_MAPPING["attacking"]):
         return value
-    return 0
+    return HOST_STATUS_ID_MAPPING["normal"]
 
 
 def _get_colors_for_ho_types(items):
@@ -173,18 +179,16 @@ def plot_ho_agent_execution_confusion_matrix(indicators, dir_name,
     ground_truth = []
     predicted = []
     for item in indicators:
-        ep_data = item['episode_statuses']
-        if isinstance(ep_data, np.ndarray):
+        ep_data = item.get('episode_statuses')
+        if ep_data is None:
+            continue
+        if isinstance(ep_data, np.ndarray): #for sb3 agents
             ground_truth.extend(map_ho_status_id_to_class(int(v)) for v in ep_data[:, 0])
             predicted.extend(int(v) for v in ep_data[:, 1])
-        else:
-            for s in ep_data:
-                if isinstance(s, (list, tuple)):
-                    ground_truth.append(map_ho_status_id_to_class(int(s[0])))
-                    predicted.append(int(s[1]))
-                else:
-                    ground_truth.append(map_ho_status_id_to_class(s['traffic_type']))
-                    predicted.append(int(s['action_choosen']))
+        elif ep_data: #for custom agents
+            for s in ep_data: 
+                ground_truth.append(map_ho_status_id_to_class(s.get('traffic_type', 0)))
+                predicted.append(int(s.get('action_choosen', 0)))
 
     if not ground_truth:
         error(Fore.RED + "plot_ho_agent_execution_confusion_matrix: "

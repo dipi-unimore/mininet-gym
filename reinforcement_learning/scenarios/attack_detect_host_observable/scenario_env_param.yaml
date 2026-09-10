@@ -1,17 +1,16 @@
 attacks:
   likely: 0.45
-  likely_train: 0.5
-  likely_eval: 0.3
+  likely_train: 0.6
+  likely_eval: 0.5
   short_attack_duration: 5
   long_attack_duration: 25
   no_attack_timeout: 3
-  unblock_min_hold_rounds: 2
   unblock_required_normal_streak: 2
   apply_drop_rules: false
-  include_percentage_variations: false
+  include_percentage_variations: true
   use_reward_scaling: true
   thresholds:
-    packets: 6194  # saved 2026-07-18 from web UI (Environment > Network)
-    var_packets: 50
-    bytes: 699557  # saved 2026-07-18 from web UI (Environment > Network)
-    var_bytes: 30
+    packets: 6193  
+    var_packets: 500
+    bytes: 595412  
+    var_bytes: 300

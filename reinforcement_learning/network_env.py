@@ -35,7 +35,6 @@ class NetworkEnv(gym.Env, ABC):
         if self.net is None:
             from_dataset = [constants.GYM_TYPE[constants.CLASSIFICATION_FROM_DATASET],
                             constants.GYM_TYPE[constants.ATTACKS_FROM_DATASET],
-                            constants.GYM_TYPE[constants.MARL_ATTACKS_FROM_DATASET],
                             constants.GYM_TYPE[constants.MARL_PZ_FROM_DATASET]]
             self.net = create_network(params.net_params, server_user) if self.gym_type not in from_dataset else self.create_empty(params.net_params)
         self.n_hosts = len(self.net.hosts)
@@ -208,9 +207,11 @@ class NetworkEnv(gym.Env, ABC):
             if flows:
                 break
             debug("No flows data retrieved, retrying...")
-            
-        total_packets = flows['packets']['transmitted']
-        total_bytes = flows['bytes']['transmitted']
+        
+        # Use the sum of received packets/bytes across all ports as the global total.
+        # This is a more consistent measure of total traffic through the switch.
+        total_packets = flows['packets']['received']
+        total_bytes = flows['bytes']['received']
 
         if self.gym_type is not GYM_TYPE[constants.CLASSIFICATION]:
             if total_packets == 0 and total_bytes == 0:
@@ -306,22 +307,44 @@ class NetworkEnv(gym.Env, ABC):
             
             # Check for counter reset on received packets
             if total_received_packets < total_prev_received_packets:
-                debug(f"Host {host.name}: Received packet counter reset detected.")
-                total_prev_received_packets = 0 # Reset the previous total to calculate the full current total as the difference
-            
+                # Heuristic to detect a counter wrap-around (overflow) vs. a temporary read failure
+                if total_prev_received_packets > 1_000_000_000 and total_received_packets < 1_000_000: # Overflow
+                    debug(f"Host {host.name}: Received packet counter overflow detected. Resetting baseline.")
+                    # The new delta is the current value. The new baseline for the *next* step is this current value.
+                    received_packets = total_received_packets
+                    total_prev_received_packets = total_received_packets # Recalibrate for next step
+                elif total_received_packets == 0 and total_prev_received_packets > 1000: # Read failure
+                    total_received_packets = total_prev_received_packets
+                elif (total_prev_received_packets - total_received_packets) < 100: # Minor fluctuation
+                    debug(f"Host {host.name}: Ignored minor decrease in received packets ({total_received_packets} vs {total_prev_received_packets}).")
+                    total_received_packets = total_prev_received_packets # Treat as no change
+                else: # Significant reset
+                    debug(f"Host {host.name}: Received packet counter reset detected.")
+                    total_prev_received_packets = 0
+                    
             received_packets = total_received_packets - total_prev_received_packets
             received_packets_percentage_change = self.eval_percentage_change(received_packets, prev_received_packets, self.threshold_var_packets)
 
             # --- RECEIVED BYTES ---
-            total_prev_received_bytes = self.global_prev_state.host_states_total.get(host.name, np.zeros(HOST_TOTAL_STATE_SIZE))[IDX_RX_BYTE_TOTAL]
-            prev_received_bytes = self.global_prev_state.host_states.get(host.name, np.zeros(HOST_STATE_SIZE))[IDX_PREV_RX_BYTE_INC]
+            total_prev_received_bytes = self.global_prev_state.host_states_total.get(host.name, np.zeros(HOST_TOTAL_STATE_SIZE))[IDX_RX_BYTE_TOTAL] if self.global_prev_state.host_states_total.get(host.name) is not None else 0
+            prev_received_bytes = self.global_prev_state.host_states.get(host.name, np.zeros(HOST_STATE_SIZE))[IDX_PREV_RX_BYTE_INC] if self.global_prev_state.host_states.get(host.name) is not None else 0
             
             # Check for counter reset on received bytes
             if total_received_bytes < total_prev_received_bytes:
-                debug(f"Host {host.name}: Received byte counter reset detected.")
-                total_prev_received_bytes = 0 
+                if total_prev_received_bytes > 1_000_000_000_000 and total_received_bytes < 1_000_000: # Overflow
+                    debug(f"Host {host.name}: Received byte counter overflow detected. Resetting baseline.")
+                    received_bytes = total_received_bytes
+                    total_prev_received_bytes = total_received_bytes
+                elif total_received_bytes == 0 and total_prev_received_bytes > 10000: # Read failure
+                    total_received_bytes = total_prev_received_bytes
+                elif (total_prev_received_bytes - total_received_bytes) < 1000: # Minor fluctuation
+                    debug(f"Host {host.name}: Ignored minor decrease in received bytes ({total_received_bytes} vs {total_prev_received_bytes}).")
+                    total_received_bytes = total_prev_received_bytes # Treat as no change
+                else: # Significant reset
+                    debug(f"Host {host.name}: Received byte counter reset detected.")
+                    total_prev_received_bytes = 0
             
-            received_bytes = total_received_bytes - total_prev_received_bytes
+            received_bytes = max(0, total_received_bytes - total_prev_received_bytes)
             received_bytes_percentage_change = self.eval_percentage_change(received_bytes, prev_received_bytes, self.threshold_var_bytes)
 
             # --- TRANSMITTED PACKETS ---
@@ -330,10 +353,20 @@ class NetworkEnv(gym.Env, ABC):
             
             # Check for counter reset on transmitted packets
             if total_transmitted_packets < total_prev_transmitted_packets:
-                debug(f"Host {host.name}: Transmitted packet counter reset detected.")
-                total_prev_transmitted_packets = 0
+                if total_prev_transmitted_packets > 1_000_000_000 and total_transmitted_packets < 1_000_000: # Overflow
+                    debug(f"Host {host.name}: Transmitted packet counter overflow detected. Resetting baseline.")
+                    transmitted_packets = total_transmitted_packets
+                    total_prev_transmitted_packets = total_transmitted_packets
+                elif total_transmitted_packets == 0 and total_prev_transmitted_packets > 1000: # Read failure
+                    total_transmitted_packets = total_prev_transmitted_packets
+                elif (total_prev_transmitted_packets - total_transmitted_packets) < 100: # Minor fluctuation
+                    debug(f"Host {host.name}: Ignored minor decrease in transmitted packets ({total_transmitted_packets} vs {total_prev_transmitted_packets}).")
+                    total_transmitted_packets = total_prev_transmitted_packets # Treat as no change
+                else: # Significant reset
+                    debug(f"Host {host.name}: Transmitted packet counter reset detected.")
+                    total_prev_transmitted_packets = 0
             
-            transmitted_packets = total_transmitted_packets - total_prev_transmitted_packets
+            transmitted_packets = max(0, total_transmitted_packets - total_prev_transmitted_packets)
             transmitted_packets_percentage_change = self.eval_percentage_change(transmitted_packets, prev_transmitted_packets, self.threshold_var_packets)
 
             # --- TRANSMITTED BYTES ---
@@ -342,10 +375,20 @@ class NetworkEnv(gym.Env, ABC):
             
             # Check for counter reset on transmitted bytes
             if total_transmitted_bytes < total_prev_transmitted_bytes:
-                debug(f"Host {host.name}: Transmitted byte counter reset detected.")
-                total_prev_transmitted_bytes = 0
+                if total_prev_transmitted_bytes > 1_000_000_000_000 and total_transmitted_bytes < 1_000_000: # Overflow
+                    debug(f"Host {host.name}: Transmitted byte counter overflow detected. Resetting baseline.")
+                    transmitted_bytes = total_transmitted_bytes
+                    total_prev_transmitted_bytes = total_transmitted_bytes
+                elif total_transmitted_bytes == 0 and total_prev_transmitted_bytes > 10000: # Read failure
+                    total_transmitted_bytes = total_prev_transmitted_bytes
+                elif (total_prev_transmitted_bytes - total_transmitted_bytes) < 1000: # Minor fluctuation
+                    debug(f"Host {host.name}: Ignored minor decrease in transmitted bytes ({total_transmitted_bytes} vs {total_prev_transmitted_bytes}).")
+                    total_transmitted_bytes = total_prev_transmitted_bytes # Treat as no change
+                else: # Significant reset
+                    debug(f"Host {host.name}: Transmitted byte counter reset detected.")
+                    total_prev_transmitted_bytes = 0
                 
-            transmitted_bytes = total_transmitted_bytes - total_prev_transmitted_bytes
+            transmitted_bytes = max(0, total_transmitted_bytes - total_prev_transmitted_bytes)
             transmitted_bytes_percentage_change = self.eval_percentage_change(transmitted_bytes, prev_transmitted_bytes, self.threshold_var_bytes)
                                        
             # 3. Assemble new state arrays
@@ -561,12 +604,33 @@ def find_in_stack(target_type=None, target_function=None):
     return None
 
   
-  
-def get_normalized_state(state, low_to_normalize, high_to_normalize):
-    tmp_state = np.array(state, dtype=np.float32)  # ensure it's a NumPy array
-    clipped_state = np.clip(tmp_state, low_to_normalize, high_to_normalize) #limit the values in an array.
-    normalized = (clipped_state - low_to_normalize) / (high_to_normalize - low_to_normalize + 1e-8)
-    return np.array(normalized, dtype=np.float32)
+#old linear normalization, now we use log normalization to handle wide ranges of values  
+# def get_normalized_state(state, low_to_normalize, high_to_normalize):
+#     """
+    # Normalize the state using linear transformation and clipping to handle wide ranges of values.
+    # """
+#     tmp_state = np.array(state, dtype=np.float32)  # ensure it's a NumPy array
+#     clipped_state = np.clip(tmp_state, low_to_normalize, high_to_normalize) #limit the values in an array.
+#     normalized = (clipped_state - low_to_normalize) / (high_to_normalize - low_to_normalize + 1e-8)
+#     return np.array(normalized, dtype=np.float32)
+
+def get_normalized_state(state: np.ndarray, low_to_normalize: np.ndarray, high_to_normalize: np.ndarray) -> np.ndarray:
+    """
+    Normalize the state using linear min-max scaling.
+    This is robust to both positive-only counters and features that can be negative
+    (like percentage variations).
+    """
+    # Ensure inputs are numpy arrays
+    state = np.asarray(state, dtype=np.float32)
+    low = np.asarray(low_to_normalize, dtype=np.float32)
+    high = np.asarray(high_to_normalize, dtype=np.float32)
+
+    # Calculate range, avoiding division by zero
+    range_val = high - low
+    range_val[range_val == 0] = 1e-8  # Avoid division by zero
+
+    normalized_state = (state - low) / range_val
+    return np.clip(normalized_state, 0.0, 1.0).astype(np.float32)
     
 def get_linear_bin_index( val, low, high, n_bins):
         # Create dynamic bins based on the range of observation space

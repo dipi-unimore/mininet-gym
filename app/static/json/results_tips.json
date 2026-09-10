@@ -17,5 +17,7 @@
 
   "test_summary": "Recap of evaluation results: raw score and normalized score % (min/mean/max across agents), plus the attack-mitigation ratio when available (marl_pz attack scenarios only).",
 
-  "winner_score": "Composite winner score = weighted sum of recall on outgoing attacks, incoming attacks, and normal/no-cross-contamination traffic. Weights are inversely proportional to class frequency so rare classes (e.g. attacks) aren't drowned out by the abundant 'normal' class. Highest score wins."
+  "winner_score": "Composite winner score = weighted sum of recall on outgoing attacks, incoming attacks, and normal/no-cross-contamination traffic. Weights are inversely proportional to class frequency so rare classes (e.g. attacks) aren't drowned out by the abundant 'normal' class. Highest score wins.",
+
+  "advanced_parameters": "Fine-grained configuration values that don't fit in the summary columns: the run's random seed, attack likelihood settings (base/train/eval) and detection thresholds (packets/bytes with tolerance), attack timing parameters, and — for MARL runs — the per-strategy parameters of the communication mechanisms actually enabled for this run."
 }

@@ -611,6 +611,46 @@ def get_data_flow(net: Mininet, bridge_name: str = "s1", max_retries: int = 3) -
             # Parse the output
             parsed_data = parse_flow_ovs_ports(flows_raw, net, bridge_name)
             
+            # --- START: Consistency Check (v5 - Bidirectional) ---
+            # Verify that the sum of per-host stats is consistent with the global total.
+            # A large discrepancy suggests a partial or corrupted read from OVS.
+            # Note: `global_total_pkts` is the sum of port counters, which can be > total switch traffic.
+            global_total_pkts = parsed_data.get('packets', {}).get('received', 0)
+            
+            per_host_sum_pkts = 0
+            for flow in parsed_data.get('flows', []):
+                # We only sum the RX packets from the switch's perspective (host TX)
+                # to avoid double-counting and compare against the global RX total.
+                if flow.get('direction') == 'RX':
+                    per_host_sum_pkts += flow.get('packets', 0)
+
+            # Check for major inconsistencies in either direction.
+            # A discrepancy > 2x or < 0.5x suggests a corrupted read.
+            if global_total_pkts > 1000 and (per_host_sum_pkts > global_total_pkts * 2 or per_host_sum_pkts < global_total_pkts * 0.5):
+                error(f"Inconsistent data: global pkts ({global_total_pkts}) >> per-host sum ({per_host_sum_pkts}). Retrying...")
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            # --- END: Consistency Check (v5 - Bidirectional) ---
+
+            # --- START: Robustness Improvement (v3 - Final) ---
+            # Verify that data for all hosts was parsed. If not, the output was likely truncated.
+            # The parser returns flows with 'src_name' or 'dst_name', not 'host_name'.
+            # We need to collect host names from both fields.
+            num_hosts = len(net.hosts)
+            parsed_hosts = set()
+            for flow in parsed_data.get('flows', []):
+                # A flow can have a source or a destination host. Add whichever is valid.
+                if flow.get('src_name') and flow.get('src_name') != 'Unknown':
+                    parsed_hosts.add(flow['src_name'])
+                if flow.get('dst_name') and flow.get('dst_name') != 'Unknown':
+                    parsed_hosts.add(flow['dst_name'])
+            
+            if len(parsed_hosts) < num_hosts:
+                error(f"Incomplete data: parsed stats for {len(parsed_hosts)}/{num_hosts} hosts. Retrying...")
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            # --- END: Robustness Improvement (v3 - Final) ---
+            
             if 'error' in parsed_data:
                 error(f"Parsing failed (attempt {attempt + 1}/{max_retries})")
                 if attempt < max_retries - 1:

@@ -226,10 +226,6 @@
                         <div id="env-sub-communication" class="env-sub-panel hidden">
                             <div id="env-communication-list" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
                         </div>
-                        <!-- Communication: communication + pettingzoo (marl_pz only) -->
-                        <div id="env-sub-communication" class="env-sub-panel hidden">
-                            <div id="env-communication-list" class="grid grid-cols-1 md:grid-cols-5 gap-3"></div>
-                        </div>
                         <!-- Extra: scenario generation/loading (attacks_ho / marl) -->
                         <div id="env-sub-extra" class="env-sub-panel hidden">
                             <div id="env-extra-selectors"></div>
@@ -292,6 +288,14 @@
         <!-- 2. TRAINING PAGE -->
         <!-- ============================================== -->
         <div id="training-page" class="hidden space-y-2">
+
+            <!-- Batch runner progress: shown while utility/run_batch.py drives a folder of configs -->
+            <div id="batch-progress-banner"
+                class="hidden items-center gap-2 bg-sky-50 border border-sky-300 text-sky-800 text-sm font-medium px-4 py-2 rounded-xl">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                <span id="batch-progress-text"></span>
+            </div>
+
             <div
                 class="bg-white p-1 rounded-xl shadow-xl  flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0 sm:space-x-4">
                 <h2 class="text-2xl font-bold text-gray-800">Training Control Panel</h2>

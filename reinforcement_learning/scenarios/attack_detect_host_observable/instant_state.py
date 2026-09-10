@@ -52,14 +52,14 @@ class InstantState(BaseInstantState):
                 self.host_statuses[host] = {
                     "id" : status_id,
                     "status" : status,
-                    "received_packets": host_state[0], 
-                    "received_packets_percentage_change": host_state[1], 
-                    "received_bytes": host_state[2], 
-                    "received_bytes_percentage_change": host_state[3],
-                    "transmitted_packets": host_state[4], 
-                    "transmitted_packets_percentage_change": host_state[5], 
-                    "transmitted_bytes": host_state[6],
-                    "transmitted_bytes_percentage_change": host_state[7]
+                    "received_packets": float(host_state[0]),
+                    "received_packets_percentage_change": float(host_state[1]),
+                    "received_bytes": float(host_state[2]),
+                    "received_bytes_percentage_change": float(host_state[3]),
+                    "transmitted_packets": float(host_state[4]),
+                    "transmitted_packets_percentage_change": float(host_state[5]),
+                    "transmitted_bytes": float(host_state[6]),
+                    "transmitted_bytes_percentage_change": float(host_state[7])
                 }
                 
     

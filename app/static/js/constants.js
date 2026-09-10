@@ -8,8 +8,6 @@
 const GYM_TYPE_OPTIONS = [
     "marl_pz",
     "marl_pz_from_dataset",
-    "marl_attacks",
-    "marl_attacks_from_dataset",
     "classification",
     "classification_from_dataset",
     "attacks",
@@ -20,7 +18,6 @@ const GYM_TYPE_OPTIONS = [
 
 const CLASSIFICATION = "classification";
 const SINGLE_AGENT_HOST_OBSERVABLE = "attacks_ho";
-const MARL = "marl";
 
 const COORDINATOR = "coordinator";
 

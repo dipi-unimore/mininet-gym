@@ -1,6 +1,6 @@
 from mininet.log import setLogLevel as mininet_setLogLevel, info as mininet_info, debug as mininet_debug, error as mininet_error
 from app.socket_handler import send_live_data
-import datetime, logging, re
+import datetime, logging, re, traceback
 from colorama import Fore
 
 from utility.constants import SYSTEM, SystemLevels, SystemModes, SystemStatus
@@ -264,13 +264,40 @@ def stop_buffer_flush():
         _flush_thread.join(timeout=5)
         log_message("info", "Buffer flush thread stopped", author="notify_client")
 
+def _push_mobile_run_finished(message=None):
+    """Best-effort mobile push when an experiment run completes. Never raises."""
+    try:
+        from utility.mobile_notifier import notify, build_run_summary, is_enabled
+        if not is_enabled():
+            return
+        body = message or "Experiment run completed."
+        summary = build_run_summary()
+        if summary:
+            body = f"{body}\n\n{summary}"
+        notify("mininet-gym: experiment finished", body, event="finish")
+    except Exception as e:
+        log_message("error", f"mobile notify (finish) failed: {e}", author="notify_client")
+
+
+def notify_mobile_error(message):
+    """Best-effort mobile push when a run aborts with an error. Never raises."""
+    try:
+        from utility.mobile_notifier import notify, is_enabled
+        if not is_enabled():
+            return
+        notify("mininet-gym: experiment FAILED", str(message), event="error")
+    except Exception as e:
+        log_message("error", f"mobile notify (error) failed: {e}", author="notify_mobile_error")
+
+
 def notify_client(level=None, agent_name=None, message=None,
                   config=None, traffic_data=None, final_data=None, host_tasks=None,
                   global_state=None, metrics=None, final_metrics=None, step_data=None,
                   status=None, mode=None, force_immediate=False,
                   agent_training_summary=None, qtable_coverage=None,
                   exploration_metric=None, agent_evaluation_summary=None,
-                  comm_event=None):
+                  comm_event=None,
+                  training_caption=None):
     """
     Function to notify the web client about various events or data.
     Messages are buffered and sent every 2 seconds unless force_immediate=True.
@@ -280,8 +307,8 @@ def notify_client(level=None, agent_name=None, message=None,
             and metrics is None and status is None and step_data is None and \
             final_data is None and final_metrics is None and host_tasks is None and \
                 mode is None and agent_training_summary is None and \
-                qtable_coverage is None and exploration_metric is None and \
-                agent_evaluation_summary is None and comm_event is None:
+                qtable_coverage is None and exploration_metric is None and agent_evaluation_summary is None and \
+                comm_event is None and training_caption is None:
         return
     
     global _client_status_notifier_func
@@ -299,6 +326,17 @@ def notify_client(level=None, agent_name=None, message=None,
         if len(bucket) > _COMM_EVENTS_MAX_PER_AGENT:
             del bucket[0]
 
+    # End-of-run mobile push (opt-in via config_notify_mobile.yaml). The whole
+    # experiment is over exactly once, when a global (agent_name is None)
+    # FINISHED status is emitted from a scenario's `finally` block — that is
+    # mode TRAINING for classification / attack_detect and mode PLOTTING for
+    # attacks_ho / marl_pz. Kept before the _client_status_notifier_func check
+    # so it also fires in headless (no web interface) runs.
+    if (level == SystemLevels.STATUS and status == SystemStatus.FINISHED
+            and mode in (SystemModes.TRAINING, SystemModes.PLOTTING)
+            and agent_name is None):
+        _push_mobile_run_finished(message)
+
     # I messaggi di STATUS vengono sempre inviati immediatamente
     if level == SystemLevels.STATUS and mode is not None and _client_status_notifier_func:
         # Track which agent is currently training/evaluating so a reconnecting
@@ -313,7 +351,8 @@ def notify_client(level=None, agent_name=None, message=None,
         try:
             _client_status_notifier_func(status=status, mode=mode, message=message, agent_name=agent_name)
         except Exception as e:
-            log_message("error", f"Error sending status to client: {e}", author="notify_client")
+            tb_str = traceback.format_exc()
+            log_message("error", f"Error sending status to client: {e}\n{tb_str}", author="notify_client")
         return
     
     # Prepara il messaggio da bufferizzare
@@ -335,6 +374,11 @@ def notify_client(level=None, agent_name=None, message=None,
                 'level': 'config',
                 'config': config
             }                
+        elif training_caption is not None:
+            message_data = {
+                'level': 'training_caption',
+                'caption': training_caption
+            }
         else:
             message_data = {
                 'agent': agent_name,
@@ -368,7 +412,8 @@ def notify_client(level=None, agent_name=None, message=None,
             try:
                 _client_data_notifier_func(messages=[message_data])
             except Exception as e:
-                log_message("error", f"Error sending immediate message to client: {e}", author="notify_client")
+                tb_str = traceback.format_exc()
+                log_message("error", f"Error sending immediate message to client: {e}\n{tb_str}", author="notify_client")
         else:
             if message_data.get('level') == SystemLevels.DEBUG or (message_data.get('level') == SystemLevels.INFO and message_data.get('agent') == SYSTEM):
                 return

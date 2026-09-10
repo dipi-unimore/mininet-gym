@@ -822,51 +822,6 @@ def plot_test_confusion_matrix(dir_name, ground_truth, predicted, agent, labels=
     )
 
 
-#TODO: remove this function, not usefull, because now we have plot_cumulative_reward and 
-# the status traffic is the same for all agents
-def plot_indicators(indicators, dir_name, title=''):
-    # Extracting indicators to plot
-    episodes = [item['episode'] for item in indicators]
-    steps = [item['steps'] for item in indicators]
-    packets_received = [item['packets_received'] for item in indicators]
-    bytes_received = [item['bytes_received'] for item in indicators]
-    packets_transmitted = [item['packets_transmitted'] for item in indicators]
-    packets_varation = [item['packets_varation'] for item in indicators]
-    bytes_transmitted = [item['bytes_transmitted'] for item in indicators]
-    bytes_varation = [item['bytes_varation'] for item in indicators]
-    reward = [item['cumulative_reward'] for item in indicators]
-
-    # Create subplots for different indicators
-    plt.yscale("log")
-    fig, axs = plt.subplots(3, 1, figsize=(10, 15))
-
-    if len(packets_received)>0:
-        axs[0].plot(episodes, packets_received, label='Packets Received', color='blue')
-    elif len(packets_received)>0:
-        axs[0].plot(episodes, packets_varation, label='Packets % Variation', color='blue')
-    axs[0].plot(episodes, packets_transmitted, label='Packets Transmitted', color='green')
-    axs[0].set_title(f'{title} Packets Count')
-    axs[0].legend()
-
-    if len(packets_received)>0:
-        axs[1].plot(episodes, bytes_received, label='Bytes Received', color='red')
-    elif len(packets_received)>0:
-        axs[1].plot(episodes, bytes_varation, label='Bytes % Variation', color='red')    
-    axs[1].plot(episodes, bytes_transmitted, label='Bytes Transmitted', color='black')    
-    axs[1].set_title(f'{title} Bytes Count')
-    axs[1].legend()
-
-    axs[2].plot(episodes, reward, label='Rewards', color='purple')
-    axs[2].plot(episodes, steps, label='Steps', color='cyan')
-    axs[2].set_title(f'{title} Cumlative Rewards')
-    axs[2].legend()
-
-    # Save figure
-    plt.savefig(f"{dir_name}/indicators.png")
-    plt.close()
-    
-
-
 def plot_metrics(metrics, dir_name, title=''):
     plt.figure(figsize=(12, 6))
 

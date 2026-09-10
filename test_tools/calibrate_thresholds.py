@@ -124,42 +124,61 @@ def run_normal_phase(net, host_names, host_objs, traffic_types, rounds, duration
 
 
 def run_attack_phase(net, host_names, host_objs, attack_types, rounds, duration,
-                     prev_totals, executor, log=print):
+                     prev_totals, executor, normal_bw_mbps=1, log=print):
     from reinforcement_learning.agents.adversarial_agent import _launch_attack_once, _name_to_attack_type
+    from reinforcement_learning.agents.adversarial_agent import _generate_normal_traffic_once
+    import random
 
     pkts, byts = [], []
     n = len(host_names)
     if n < 2:
         log(f"  {YELLOW}Need at least 2 hosts to run the attack phase, skipping.{RESET}")
         return pkts, byts, prev_totals
+    
+    # Each attack type is run for a fixed duration (e.g., 5s) to get a stable measurement.
+    # During the attack, other hosts generate normal background traffic.
+    attack_duration = 5.0
 
-    for r in range(rounds):
-        attacker_name = host_names[r % n]
-        victim_name   = host_names[(r + 1) % n]
-        attack_name   = attack_types[r % len(attack_types)]
-        attack_type   = _name_to_attack_type(attack_name)
+    for attack_idx, attack_name in enumerate(attack_types):
+        # Choose a random attacker/victim pair for this attack type
+        attacker_name, victim_name = random.sample(host_names, 2)
+        attack_type = _name_to_attack_type(attack_name)
 
         _, prev_totals = read_host_states(net, prev_totals)      # baseline
         kill_all_traffic(net)
         time.sleep(0.1)
 
+        # 1. Launch the main attack
         executor.submit(_launch_attack_once, host_objs[attacker_name],
-                        host_objs[victim_name], attack_type, duration)
+                        host_objs[victim_name], attack_type, attack_duration)
 
-        time.sleep(duration)
+        # 2. Launch background normal traffic from all other hosts
+        other_hosts = [h for h in host_names if h not in (attacker_name, victim_name)]
+        log(f"  {DIM}attack round: {attacker_name}->{victim_name} ({attack_name}), "
+            f"background traffic from {len(other_hosts)} other hosts.{RESET}")
+
+        for i, name in enumerate(other_hosts):
+            src = host_objs[name]
+            # Simple round-robin target for background traffic
+            dst_idx = (i + 1) % len(other_hosts)
+            dst = host_objs[other_hosts[dst_idx]]
+            # Use a mix of normal traffic types for background noise
+            ttype = ["ping", "udp", "tcp"][i % 3]
+            executor.submit(_generate_normal_traffic_once, src, dst, ttype, attack_duration, normal_bw_mbps)
+
+        time.sleep(attack_duration)
         host_states, prev_totals = read_host_states(net, prev_totals)
         kill_all_traffic(net)
 
         attacker_s8 = host_states.get(attacker_name)
-        victim_s8   = host_states.get(victim_name)
+        victim_s8 = host_states.get(victim_name)
         if attacker_s8 is not None:
             pkts.append(float(attacker_s8[4])); byts.append(float(attacker_s8[6]))  # attacker TX
         if victim_s8 is not None:
             pkts.append(float(victim_s8[0])); byts.append(float(victim_s8[2]))      # victim RX
 
-        log(f"  {DIM}attack round {r + 1}/{rounds}  "
+        log(f"  {DIM}attack type {attack_idx + 1}/{len(attack_types)}  "
             f"{attacker_name}->{victim_name} ({attack_name}){RESET}")
-
     return pkts, byts, prev_totals
 
 
@@ -330,8 +349,9 @@ def run_calibration(config_path="config/default.yaml", gym_type=None, num_hosts=
 
             log(f"\n{BOLD}Phase 2/2 — attack traffic{RESET}")
             attack_pkts, attack_byts, prev_totals = run_attack_phase(
-                net, host_names, host_objs, attack_types, rounds, duration,
-                prev_totals, executor, log=log,
+                net, host_names, host_objs, attack_types, rounds,
+                duration, prev_totals, executor,
+                normal_bw_mbps=normal_bw_mbps, log=log,
             )
     except KeyboardInterrupt:
         log(f"\n{DIM}Interrupted.{RESET}")

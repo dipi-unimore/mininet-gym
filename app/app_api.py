@@ -8,6 +8,7 @@ from flask import Flask, Response, request, send_from_directory
 from utility.my_log import information
 
 from .routes import (
+    create_batch_blueprint,
     create_calibration_blueprint,
     create_config_blueprint,
     create_results_blueprint,
@@ -65,12 +66,14 @@ state = {
     "pause_event": Event(),
     "stop_event": Event(),
     "app_root": APP_ROOT,
+    "batch": {"active": False},
 }
 
 app.register_blueprint(create_config_blueprint(state, CONFIG_PATH, APP_ROOT))
 app.register_blueprint(create_results_blueprint(state))
 app.register_blueprint(create_training_blueprint(state))
 app.register_blueprint(create_calibration_blueprint(state))
+app.register_blueprint(create_batch_blueprint(state))
 
 @app.route('/favicon.ico')
 def favicon():

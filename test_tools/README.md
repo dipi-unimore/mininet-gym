@@ -204,12 +204,13 @@ then:
    traffic (ping/udp/tcp, rotating) with a neighbour using the framework's
    own `_generate_normal_traffic_once`, with the exact fire-and-forget +
    fixed-wait pattern `_apply_scenario_step` uses in production
-   (`env_params.wait_after_read`, default 1s). Samples every host's RX/TX
+   (`env_params.wait_after_read`, default 1s). It samples every host's RX/TX
    packets & bytes via the real `get_data_flow()`.
-2. **Attack phase** — for `--rounds` rounds, one attacker floods one victim
-   (attack type rotating through `--attack-types`) via the framework's own
-   `launch_attack_smart()`, rest of the hosts idle. Samples the attacker's
-   TX and the victim's RX packets & bytes.
+2. **Attack phase** — for each attack type in `--attack-types`, one random
+   attacker floods one random victim for a fixed 5-second window.
+   Crucially, all other `N-2` hosts simultaneously generate normal
+   background traffic, creating a more realistic network load. The script
+   samples the attacker's TX and the victim's RX packets & bytes.
 3. Prints percentiles for both pools (`normal p95`, `attack p10/p50/max`)
    and a **recommended threshold**: the log-midpoint between "typical
    normal ceiling" (p95) and "weakest observed attack" (p10). Warns loudly

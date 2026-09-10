@@ -10,6 +10,11 @@
   <strong>Training Dashboard</strong>, and <strong>Results Panel</strong> — that cover
   the full experiment lifecycle without requiring any command-line interaction.
 </p>
+<p>
+  A final section, <strong>Auxiliary Tools &amp; Integrations</strong>, documents optional
+  helpers that live outside that browser flow: mobile push notifications, config
+  status tagging, and unattended batch runs.
+</p>
 
 <div class="man-quicklinks">
   <a class="man-qlink" href="screensaver.html" target="_blank">
@@ -89,8 +94,6 @@
     <tr><td><code>attacks_ho_from_dataset</code></td><td>Attack-PerHost (dataset)</td><td>Same per-host detection</td><td>SDN link block per host</td><td>Replay dataset</td></tr>
     <tr><td><code>marl_pz</code></td><td>MARL-PZ</td><td>PettingZoo multi-agent (Host agents + optional Coordinator), Dec-POMDP with CTDE</td><td>Distributed SDN block</td><td>Live Mininet</td></tr>
     <tr><td><code>marl_pz_from_dataset</code></td><td>MARL-PZ (dataset)</td><td>Same MARL-PZ task</td><td>Distributed SDN block</td><td>Replay dataset</td></tr>
-    <tr><td><code>marl_attacks</code></td><td>MARL (legacy)</td><td>Hierarchical multi-agent (Coordinator + Host agents), threaded</td><td>Distributed SDN block</td><td>Live Mininet</td></tr>
-    <tr><td><code>marl_attacks_from_dataset</code></td><td>MARL (legacy, dataset)</td><td>Same legacy MARL task</td><td>Distributed SDN block</td><td>Replay dataset</td></tr>
   </tbody>
 </table>
 <div class="man-note">
@@ -100,9 +103,8 @@
   want fast, reproducible runs without a running Mininet network.
 </div>
 <div class="man-note">
-  <strong>MARL-PZ</strong> (<code>marl_pz</code>) is the recommended multi-agent scenario — a cleaner
-  PettingZoo Parallel-API replacement for the legacy threaded <strong>MARL</strong>
-  (<code>marl_attacks</code>) scenario. See the dedicated <strong>MARL-PZ — PettingZoo Multi-Agent
+  <strong>MARL-PZ</strong> (<code>marl_pz</code>) is the multi-agent scenario — a PettingZoo Parallel-API
+  environment. See the dedicated <strong>MARL-PZ — PettingZoo Multi-Agent
   Mode</strong> section below for architecture, communication strategies, and agent compatibility.
 </div>
 <div class="man-warn">
@@ -240,7 +242,7 @@
 </div>
 
 <h3>Attack Parameters (<code>env_params.attacks</code>)</h3>
-<p>Active for attack-oriented scenarios: <strong>Attack-Net</strong>, <strong>Attack-PerHost</strong>, <strong>MARL</strong> (and their <code>_from_dataset</code> equivalents).</p>
+<p>Active for attack-oriented scenarios: <strong>Attack-Net</strong>, <strong>Attack-PerHost</strong>, <strong>MARL-PZ</strong> (and their <code>_from_dataset</code> equivalents).</p>
 
 <h4>Probability &amp; Timing</h4>
 <table>
@@ -251,11 +253,11 @@
       <td>Base probability (0.0–0.5) that any idle host starts an attack at each step. A value of 0.45 means roughly 45 % chance per step per host. Used by the <code>attacks</code> and <code>attacks_from_dataset</code> scenarios; in <code>attacks_ho</code> it is superseded by <code>likely_train</code>/<code>likely_eval</code>.</td>
     </tr>
     <tr>
-      <td><code>likely_train</code></td><td><code>0.9</code></td><td>Attack-PerHost, MARL</td>
+      <td><code>likely_train</code></td><td><code>0.9</code></td><td>Attack-PerHost, MARL-PZ</td>
       <td>Attack probability during <strong>training</strong> episodes (0.0–1.0). A high value (e.g. 0.9) exposes the agent to frequent attacks so it can learn the block policy quickly. Lower this if convergence is unstable.</td>
     </tr>
     <tr>
-      <td><code>likely_eval</code></td><td><code>0.3</code></td><td>Attack-PerHost, MARL</td>
+      <td><code>likely_eval</code></td><td><code>0.3</code></td><td>Attack-PerHost, MARL-PZ</td>
       <td>Attack probability during <strong>evaluation</strong> episodes (0.0–1.0). A lower value (e.g. 0.3) simulates a realistic sparse-attack environment for fair metrics. Must be ≤ <code>likely_train</code> in typical setups.</td>
     </tr>
     <tr>
@@ -263,15 +265,15 @@
       <td>Hard cap on effective attack probability regardless of dynamic scaling (0.0–1.0). Prevents the generator from creating pathological 100 % attack conditions that would give the agent no normal-traffic baseline.</td>
     </tr>
     <tr>
-      <td><code>short_attack_duration</code></td><td><code>5</code></td><td>Attack-PerHost, MARL</td>
+      <td><code>short_attack_duration</code></td><td><code>5</code></td><td>Attack-PerHost, MARL-PZ</td>
       <td>Length (in steps) of a <em>SHORT_ATTACK</em> window. Lower values (2–3) produce bursty spikes that are harder to detect before they end; higher values (8–10) give the agent more time to react.</td>
     </tr>
     <tr>
-      <td><code>long_attack_duration</code></td><td><code>25</code></td><td>Attack-PerHost, MARL</td>
+      <td><code>long_attack_duration</code></td><td><code>25</code></td><td>Attack-PerHost, MARL-PZ</td>
       <td>Length (in steps) of a <em>LONG_ATTACK</em> window. Increase for sustained attacks that stress mitigation latency; decrease for fragmented, intermittent attack patterns.</td>
     </tr>
     <tr>
-      <td><code>no_attack_timeout</code></td><td><code>3</code></td><td>Attack-PerHost, MARL</td>
+      <td><code>no_attack_timeout</code></td><td><code>3</code></td><td>Attack-PerHost, MARL-PZ</td>
       <td>Cooldown period (steps) after any attack before the same host can attack again. A low value (3–5) creates high-density alternating attacks; a high value (15–30) spaces attacks out and makes normal-traffic windows more prominent.</td>
     </tr>
   </tbody>
@@ -836,7 +838,7 @@ agents:
     </tr>
     <tr>
       <td><strong>Mitigation Ratio</strong></td>
-      <td>Ratio of SDN block actions correctly issued to total true attack events detected. A value of 1.0 means every identified attacker was blocked. Only meaningful when <code>apply_drop_rules: true</code> or in Attack-PerHost / MARL scenarios.</td>
+      <td>Ratio of SDN block actions correctly issued to total true attack events detected. A value of 1.0 means every identified attacker was blocked. Only meaningful when <code>apply_drop_rules: true</code> or in Attack-PerHost / MARL-PZ scenarios.</td>
     </tr>
     <tr>
       <td><strong>False Negative Rate (FNR)</strong></td>
@@ -844,7 +846,7 @@ agents:
     </tr>
     <tr>
       <td><strong>Attack Latency</strong></td>
-      <td>Average number of environment steps between the start of an attack and the first correct SDN block action. Lower is better. Only available for Attack-PerHost and MARL scenarios.</td>
+      <td>Average number of environment steps between the start of an attack and the first correct SDN block action. Lower is better. Only available for Attack-PerHost and MARL-PZ scenarios.</td>
     </tr>
   </tbody>
 </table>
@@ -939,8 +941,7 @@ agents:
 <h2>MARL-PZ — PettingZoo Multi-Agent Mode</h2>
 <p>
   The <strong>MARL-PZ</strong> scenario (<code>marl_pz</code> / <code>marl_pz_from_dataset</code>) is
-  a PettingZoo Parallel-API multi-agent environment — a cleaner, race-condition-free replacement for
-  the legacy threaded <strong>MARL</strong> scenario described further below. It is modelled as a
+  a PettingZoo Parallel-API multi-agent environment. It is modelled as a
   Decentralized Partially Observable MDP (Dec-POMDP) under the Centralized-Training,
   Decentralized-Execution (CTDE) paradigm: agents train with access to richer coordination signals
   but act at deployment time using only their own local observation and the coordinator's message.
@@ -1083,30 +1084,174 @@ agents:
 
 <hr>
 
-<h2>MARL (Legacy) — Multi-Agent Mode</h2>
+<h2>MARL (Legacy) — Removed</h2>
 <p>
-  In the legacy <strong>MARL</strong> scenario (<code>marl_attacks</code>), two agent types
-  collaborate via an internal message bus:
+  The legacy threaded <strong>MARL</strong> scenario (<code>marl_attacks</code> /
+  <code>marl_attacks_from_dataset</code>) has been removed in favour of
+  <strong>MARL-PZ</strong> (<code>marl_pz</code>), the PettingZoo Parallel-API replacement
+  described above. It is no longer selectable in the UI.
 </p>
-<ul>
-  <li>
-    <strong>Coordinator</strong> — observes global network statistics (ℝ<sup>5</sup>),
-    decides whether to signal an alert to host agents. Acts as a supervisory tier.
-  </li>
-  <li>
-    <strong>Host Agents</strong> (one per host) — observe per-host traffic (ℝ<sup>9</sup>),
-    take local block / no-block actions. Each host agent also receives the coordinator's alert signal
-    as an extra feature in its observation vector.
-  </li>
-</ul>
+
+<hr>
+
+<h2>Auxiliary Tools &amp; Integrations</h2>
 <p>
-  All agents run in <em>parallel threads</em>. The coordinator's signal is included as an
-  extra feature in each host agent's observation vector.
+  The features in this section sit <strong>outside the standard MininetGym flow</strong>
+  (Configuration → Training → Results in the browser). They are optional helpers for
+  running many experiments unattended, keeping track of which configs have been run,
+  and being told on your phone when a long run ends. None of them are required for
+  normal single-experiment use, and each is self-contained: if you never create its
+  config file or never call its script, MininetGym behaves exactly as before.
 </p>
+
 <div class="man-note">
-  MARL training is more resource-intensive than single-agent modes: <code>num_hosts + 1</code> agents
-  run concurrently. Reduce <code>episodes</code> or <code>max_steps</code> if the machine is
-  under heavy load, or use <code>marl_attacks_from_dataset</code> for faster replay-based runs.
+  <strong>At a glance:</strong>
+  <ul>
+    <li><strong>Mobile push notifications</strong> — opt-in phone alert when a run finishes or fails (<code>config_notify_mobile.yaml</code>).</li>
+    <li><strong>Config status tagging</strong> — <code>utility/manage_configs.py</code> renames staged config files to record whether their training run is complete.</li>
+    <li><strong>Unattended batch runs</strong> — <code>utility/run_batch.py</code> trains a whole folder of configs one after another, with a live progress banner in the web UI.</li>
+  </ul>
+</div>
+
+<h3>Mobile Push Notifications</h3>
+<p>
+  A long training campaign can run for hours. This optional feature sends a push
+  notification to your phone when an experiment <strong>finishes</strong> (with a compact
+  per-agent accuracy / F1 line-up) or <strong>aborts with an error</strong>. It works for
+  both web-UI runs and headless (<code>enable_web_interface: false</code>) runs, and every
+  send is best-effort on a background thread — a failed or slow notification never
+  affects the run itself, it is only logged.
+</p>
+
+<h4>Enabling it</h4>
+<p>
+  The whole feature is driven by a single optional file at the repository root,
+  <code>config_notify_mobile.yaml</code>. If that file does not exist — or it exists but
+  <code>notify_mobile</code> is not exactly <code>true</code> — nothing is ever sent, and no
+  notification config is loaded at all.
+</p>
+<pre><code>cp config_notify_mobile.yaml.example config_notify_mobile.yaml
+# then edit config_notify_mobile.yaml</code></pre>
+<p>
+  The real file is git-ignored because it can hold bot tokens. Key settings:
+</p>
+<table>
+  <thead><tr><th>Key</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>notify_mobile</code></td><td>Master switch. Must be exactly <code>true</code> to enable the feature.</td></tr>
+    <tr><td><code>provider</code></td><td><code>ntfy</code> (default), <code>telegram</code>, or <code>pushover</code>.</td></tr>
+    <tr><td><code>on_finish</code></td><td>Notify when a run completes (default <code>true</code>).</td></tr>
+    <tr><td><code>on_error</code></td><td>Notify when a run aborts with an error (default <code>true</code>).</td></tr>
+    <tr><td><code>ntfy.server</code> / <code>ntfy.topic</code></td><td>ntfy instance (default <code>https://ntfy.sh</code>) and a private topic you subscribe to in the ntfy app. Optional <code>ntfy.priority</code> and <code>ntfy.tags</code>.</td></tr>
+    <tr><td><code>telegram.bot_token</code> / <code>telegram.chat_id</code></td><td>Bot created via <em>@BotFather</em>; chat id from e.g. <em>@userinfobot</em>.</td></tr>
+    <tr><td><code>pushover.token</code> / <code>pushover.user</code></td><td>Pushover application token and user/group key.</td></tr>
+  </tbody>
+</table>
+
+<div class="man-tip">
+  <strong>Quickest path (ntfy):</strong> install the ntfy app, pick a hard-to-guess topic
+  name (no account needed), subscribe to it, and put the same topic in
+  <code>config_notify_mobile.yaml</code>.
+</div>
+
+<h4>Testing without a run</h4>
+<pre><code>python test_tools/test_mobile_notify.py            # plain "hello" push
+python test_tools/test_mobile_notify.py --finish   # simulate an end-of-run notification
+python test_tools/test_mobile_notify.py --error    # simulate a failed run
+python test_tools/test_mobile_notify.py --dry-run  # report what would be sent, send nothing</code></pre>
+<p>
+  The <code>--finish</code> / <code>--error</code> paths go through the exact same code an
+  experiment triggers (<code>utility/my_log.py</code> → <code>utility/mobile_notifier.py</code>).
+</p>
+
+<h3>Config Status Tagging — <code>utility/manage_configs.py</code></h3>
+<p>
+  When you stage many experiment configs under <code>config/&lt;gym_type&gt;/</code>
+  (for example <code>config/marl_pz/tier1/</code>), it is easy to lose track of which
+  ones have actually been trained. This script walks every such directory and
+  <strong>renames each config file</strong> to record the status of its training run:
+</p>
+<table>
+  <thead><tr><th>Filename</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;name&gt;_&lt;ddMMyyyyHHmm&gt;.yaml</code></td><td>A <strong>complete</strong> run exists; the stamp is the datetime of the most recent one.</td></tr>
+    <tr><td><code>&lt;name&gt;_incomplete.yaml</code></td><td>A matching run folder exists but no run of it is complete yet.</td></tr>
+    <tr><td><code>&lt;name&gt;.yaml</code></td><td>No matching run folder at all — not run yet.</td></tr>
+  </tbody>
+</table>
+<p>
+  "Complete" is <em>not</em> re-implemented here: it is decided by the same function the
+  <strong>Results</strong> panel calls (<code>build_results_dir_list</code>), so the tags never
+  drift from the panel. A config is matched to a run by a <em>scenario-identity
+  signature</em> — gym type, network shape, <code>random_seed</code>, episode / step / bin
+  counts, and (for <code>marl_pz</code>) the coordination strategy / strategies / UAQ
+  <code>tau</code> — plus the requirement that every learning algorithm the config enables
+  was also trained in the run. Attack thresholds / timing and agent hyper-parameters are
+  deliberately <strong>not</strong> compared; diff <code>config.yaml</code> by hand before treating
+  an old run as a drop-in for the current protocol.
+</p>
+<p>
+  The script is <strong>idempotent</strong>: it strips the marker it finds, recomputes the
+  status from scratch, and re-applies. A file only moves when the underlying facts move —
+  a newer complete run bumps the stamp, an <code>_incomplete</code> run that finishes
+  becomes a stamp, the last complete run disappearing falls back to <code>_incomplete</code>,
+  and a config that no longer matches any run loses its marker.
+</p>
+<pre><code>python3 utility/manage_configs.py                      # apply
+python3 utility/manage_configs.py --dry-run            # preview the plan, rename nothing
+python3 utility/manage_configs.py --gym-type marl_pz   # limit to one gym type (repeatable)
+python3 utility/manage_configs.py --config-root config --training-dir _training</code></pre>
+
+<h3>Unattended Batch Runs — <code>utility/run_batch.py</code></h3>
+<p>
+  This is the launching counterpart of <code>manage_configs.py</code>: instead of tagging a
+  config with the status of an <em>existing</em> run, it actually <strong>runs</strong> every
+  config in a folder, one after another, and tags each as it goes:
+</p>
+<table>
+  <thead><tr><th>Transition</th><th>When</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;name&gt;.yaml</code> → <code>&lt;name&gt;_running.yaml</code></td><td>While that config is training.</td></tr>
+    <tr><td>→ <code>&lt;name&gt;_&lt;ddMMyyyyHHmm&gt;.yaml</code></td><td>On success (same completion stamp <code>manage_configs</code> would apply).</td></tr>
+    <tr><td>→ <code>&lt;name&gt;_failed.yaml</code></td><td>On failure — the batch logs it and continues with the next config.</td></tr>
+    <tr><td>→ <code>&lt;name&gt;.yaml</code></td><td>On user stop / <kbd>Ctrl-C</kbd> — the current run is stopped cleanly and the batch halts.</td></tr>
+  </tbody>
+</table>
+<p>
+  The whole batch runs in <strong>one process</strong>: the web app (Flask + SocketIO) is
+  started in a background thread exactly as <code>main.py</code> does, and each experiment is
+  launched the same way the <strong>Start Training</strong> button does. So while the batch
+  runs you can open the web UI and watch the current experiment live — charts, log,
+  status — plus a <strong>batch-progress banner</strong> on the Training page
+  (<em>"Batch 3/20 — &lt;config&gt; · running (2 done, 0 failed)"</em>), fed by
+  <code>GET /batch_status</code>. Pause / stop of the <em>current</em> experiment still work
+  through the normal Training controls.
+</p>
+<div class="man-warn">
+  Must run as <strong>root</strong> (for Mininet), like <code>main.py</code>. "Success" is
+  checked against the same <code>/results</code> authority the other tools use, so a run that
+  the Results panel would not show as complete is tagged <code>_failed</code>.
+</div>
+<pre><code>sudo python3 utility/run_batch.py config/marl_pz/tier1
+sudo python3 utility/run_batch.py config/marl_pz --gym-type marl_pz --dry-run
+sudo python3 utility/run_batch.py config/marl_pz/tier2 --retry --sync-after</code></pre>
+<table>
+  <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+  <tbody>
+    <tr><td><code>--gym-type &lt;type&gt;</code></td><td>Only run configs of this gym type.</td></tr>
+    <tr><td><code>--force</code></td><td>Also re-run configs already stamped complete.</td></tr>
+    <tr><td><code>--retry</code></td><td>Also (re-)run configs marked <code>_running</code> / <code>_failed</code>.</td></tr>
+    <tr><td><code>--dry-run</code></td><td>List what would run, touch nothing.</td></tr>
+    <tr><td><code>--sync-after</code></td><td>Run <code>manage_configs.py</code> after the batch to reconcile every marker with <code>_training/</code>.</td></tr>
+    <tr><td><code>--training-dir &lt;dir&gt;</code></td><td>Override the training results root used for the completeness check.</td></tr>
+    <tr><td><code>--port &lt;n&gt;</code></td><td>Web UI port (default: the config's <code>web_server_port</code>).</td></tr>
+  </tbody>
+</table>
+<div class="man-tip">
+  Configs already stamped complete, or marked <code>_running</code> / <code>_failed</code>, are
+  skipped by default — so re-launching an interrupted batch just picks up where it left
+  off. Combine with mobile push notifications above to run a whole campaign without
+  babysitting it.
 </div>
 
 <hr>
@@ -1129,7 +1274,7 @@ agents:
 
 <h3>SDN blocks are never triggered</h3>
 <ul>
-  <li>Only the <strong>Attack-PerHost</strong> and <strong>MARL</strong> scenarios issue SDN drop rules.</li>
+  <li>Only the <strong>Attack-PerHost</strong> and <strong>MARL-PZ</strong> scenarios issue SDN drop rules.</li>
   <li>Ensure <code>apply_drop_rules: true</code> in the config; the default is <code>false</code>.</li>
   <li>Verify OpenDayLight credentials and REST API port (8181) are correct.</li>
 </ul>
@@ -1150,13 +1295,28 @@ agents:
 <h3>"Incompatible agent(s) for marl_pz" popup / an agent got auto-disabled</h3>
 <ul>
   <li>This is expected: PPO and A2C are not supported in the <code>marl_pz</code> scenario. The Configuration UI automatically disables them and shows this warning whenever they would otherwise be enabled together with <code>marl_pz</code> — see <strong>MARL-PZ — Agent Compatibility</strong> above.</li>
-  <li>Switch to Q-Learning, SARSA, or DQN for <code>marl_pz</code>, or switch the scenario to <code>attacks_ho</code> / <code>marl_attacks</code> if you specifically need PPO/A2C.</li>
+  <li>Switch to Q-Learning, SARSA, or DQN for <code>marl_pz</code>, or switch the scenario to <code>attacks_ho</code> if you specifically need PPO/A2C.</li>
 </ul>
 
 <h3>PDF export fails</h3>
 <ul>
   <li>Ensure <strong>WeasyPrint</strong> is installed on the server: <code>pip install weasyprint</code>.</li>
   <li>Check server logs (<code>app.log</code>) for the detailed error message.</li>
+</ul>
+
+<h3>Mobile notification never arrives</h3>
+<ul>
+  <li>Confirm <code>config_notify_mobile.yaml</code> exists at the repo root and has <code>notify_mobile: true</code> (exactly <code>true</code>).</li>
+  <li>Run <code>python test_tools/test_mobile_notify.py</code> — it uses the same code path a run does and prints the provider's HTTP response.</li>
+  <li>For ntfy, make sure the phone is subscribed to the <em>same</em> topic string; for Telegram / Pushover, re-check the token and chat id / user key.</li>
+  <li>Sends are best-effort and only logged on failure — grep <code>app.log</code> for <code>[mobile_notifier]</code>.</li>
+</ul>
+
+<h3>Batch run skips every config</h3>
+<ul>
+  <li>Configs already stamped complete are skipped unless you pass <code>--force</code>; ones marked <code>_running</code> / <code>_failed</code> need <code>--retry</code>.</li>
+  <li>Use <code>--dry-run</code> to see the per-file skip reason (wrong <code>gym_type</code>, not an experiment config, cannot load, …).</li>
+  <li><code>utility/run_batch.py</code> must be started with <code>sudo</code>, from the repo root.</li>
 </ul>
 
 <hr>

@@ -1,0 +1,139 @@
+# Paper 9 multi-seed campaign — BASE config.
+#
+# Not run directly. `test_tools/gen_paper9_multiseed_configs.py` reads this file,
+# stamps the per-cell Tier A / Tier B strategy and the seed, and writes the
+# ready-to-run files into config/marl_pz/tier1/ (and tier2/).
+#
+# Fixed protocol (matches experiments9.tex Section 6.1, the existing paper cells):
+#   N=10 (5 workstations + 5 IoT), cold start, 100 train episodes / 300 test,
+#   all three feature flags on (apply_drop_rules, include_percentage_variations,
+#   use_reward_scaling), tau=0.8, sync_interval=100, framework-default Tier B params.
+#   Q-Learning (Q-learning_quick) + SARSA (Sarsa_balanced) enabled; DQN disabled
+#   (see config/marl_pz/README.md for why DQN is out of the multi-seed campaign).
+#
+# Derived from _training/marl_pz/20260812-110417_1_5_5/config.yaml (the S0 baseline
+# cell in the paper) plus the top-level wrapper keys from config/default.yaml.
+
+training_directory: _training
+enable_web_interface: true
+web_server_port: 5000
+server_user: finistrellas
+log_level: info
+random_seed: 77          # overwritten per run by the generator
+
+agents:
+- algorithm: Q-Learning
+  discount_factor: 0.3
+  enabled: true
+  exploration_decay: 0.995
+  exploration_rate: 1
+  learning_rate: 0.2
+  load: false
+  load_dir: 'null'
+  name: Q-learning_quick
+  save: true
+  show_action: false
+  skip_learn: false
+- algorithm: SARSA
+  discount_factor: 0.5
+  enabled: true
+  exploration_decay: 0.999
+  exploration_rate: 1
+  learning_rate: 0.05
+  load: false
+  load_dir: 'null'
+  name: Sarsa_balanced
+  save: true
+  show_action: false
+  skip_learn: false
+- algorithm: DQN
+  batch_size: 16
+  buffer_size: 5000
+  enabled: false          # excluded from the multi-seed campaign
+  exploration_final_eps: 0.1
+  exploration_fraction: 0.1
+  exploration_initial_eps: 1
+  gamma: 0.3
+  learning_rate: 0.005
+  learning_starts: 20
+  load: false
+  load_dir: 'null'
+  name: DQN_quick
+  net_arch:
+  - 8
+  - 8
+  progress_bar: false
+  save: true
+  show_action: false
+  skip_learn: false
+  state_input_mode: normalized
+  target_update_interval: 80
+
+env_params:
+  accuracy_min: 0.9
+  attacks:
+    apply_drop_rules: true
+    include_percentage_variations: true
+    likely: 0.45
+    likely_eval: 0.5
+    likely_train: 0.6
+    long_attack_duration: 25
+    no_attack_timeout: 3
+    short_attack_duration: 5
+    thresholds:
+      bytes: 659083
+      packets: 2429
+      var_bytes: 30
+      var_packets: 50
+    unblock_required_normal_streak: 2
+    use_reward_scaling: true
+  communication:
+    experience_sharing:
+      buffer_share_size: 50
+      exchange_interval: 50
+      td_error_threshold: 1
+    federated_sync:
+      sync_interval: 100
+    policy_exchange:
+      lag_threshold: 10
+    strategies: []          # Tier B — overwritten per cell by the generator
+    strategy: naive_broadcast   # Tier A — overwritten per cell by the generator
+    uaq:
+      cooldown_steps: 5
+      tau: 0.8
+      tau_expert: 0.3
+    use_coordinator: true
+  episodes: 100
+  gym_type: marl_pz
+  max_steps: 60
+  must_check_env: false
+  n_bins: 4
+  net_params:
+    controller:
+      ip: 192.168.1.x
+      port: 6633
+      pwd: xxx
+      usr: xxx
+    link_bw_mbps: 100
+    normal_traffic_bw_mbps: 1
+    num_hosts: 5
+    num_iots: 5
+    num_switches: 1
+    start_cli: false
+    traffic_types:
+    - none
+    - ping
+    - udp
+    - tcp
+  pettingzoo:
+    local_ratio: 1
+    max_cycles: 'null'
+    render_mode: 'null'
+    shared_reward: false
+  print_training_chart: true
+  scenario_file: ''
+  scenario_source: generate
+  show_normal_traffic: true
+  steps_min_percentage: 0.9
+  test_episodes: 300
+  wait_after_read: 1

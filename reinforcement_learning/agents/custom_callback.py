@@ -4,7 +4,7 @@ import numpy as np
 from colorama import Fore
 from stable_baselines3.common.callbacks import BaseCallback
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-from reinforcement_learning.scenarios.marl.constants import COORDINATOR
+from reinforcement_learning.scenarios.marl_pz.constants import COORDINATOR
 from utility.constants import ATTACKS_HO, ALGO_DQN, ALGO_PPO, ALGO_A2C, GYM_TYPE, SystemLevels
 from utility.my_log import debug, notify_client, information
 
@@ -127,7 +127,10 @@ class CustomCallback(BaseCallback):
         if self.step_end:
             self.step_end(self)
 
-        if self.current_step == self.env.max_steps:
+        if hasattr(self, 'max_steps') and self.max_steps is not None:
+            if self.current_step == self.max_steps:
+                return False
+        elif self.current_step == self.env.max_steps:
             return False
 
         return True

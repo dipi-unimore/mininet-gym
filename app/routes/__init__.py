@@ -1,3 +1,4 @@
+from .batch_routes import create_batch_blueprint
 from .calibration_routes import create_calibration_blueprint
 from .config_routes import create_config_blueprint
 from .results_routes import create_results_blueprint

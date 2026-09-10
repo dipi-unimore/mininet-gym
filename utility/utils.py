@@ -75,3 +75,10 @@ def convert_ansi_to_html(text: str) -> str:
     # Rimuove eventuali resti di ANSI all'inizio o alla fine se l'analisi non è stata perfetta
     # Se il testo iniziava con codice ANSI non catturato dal loop, questa pulizia finale è una safety net.
     return clean_ansi(output_html)
+
+def deep_get(d, keys, default=None):
+    for key in keys.split("."):
+        if not isinstance(d, dict) or key not in d:
+            return default
+        d = d[key]
+    return d

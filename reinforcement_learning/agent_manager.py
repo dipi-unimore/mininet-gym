@@ -6,8 +6,6 @@ from reinforcement_learning.agents.qlearning_agent import QLearningAgent
 from reinforcement_learning.agents.sarsa_agent import SARSAAgent
 from reinforcement_learning.agents.custom_callback import CustomCallback
 from reinforcement_learning.agents.supervised_agent import SupervisedAgent
-from reinforcement_learning.scenarios.marl.constants import COORDINATOR
-from reinforcement_learning.scenarios.marl.network_env_marl_attack_detect import NetworkEnvMarlAttackDetect
 from reinforcement_learning.network_env import NetworkEnv
 from utility.constants import *
 from utility.my_files import find_latest_file
@@ -29,24 +27,15 @@ class AgentManager:
         self.episode = 0
         self.episodes = config.env_params.episodes
         self.test_episodes = config.env_params.test_episodes
+        # Configured seed for fresh SB3 model creation (seeds torch/numpy/random and,
+        # crucially, the model's action_space RNG used e.g. by DQN's epsilon-greedy
+        # exploration) — irrelevant for loaded checkpoints, which restore their own state.
+        _configured_seed = getattr(config, 'random_seed', 0) or 0
+        self.random_seed = _configured_seed if _configured_seed > 0 else None
         
         information("Check environment\n")
         if self.env is None:
             raise ValueError("The environment can't be None. Create environment")
-        elif isinstance(self.env, NetworkEnvMarlAttackDetect):
-            information("Marl environment\n")
-            for name,env in self.env.host_envs.items():
-                information(f"Host {name} environment\n")
-                if config.env_params.must_check_env:
-                    check_env(env, warn=True)
-                else:
-                    time.sleep(1.5)
-                break
-            information(f"Coordinator environment\n")
-            if config.env_params.must_check_env:
-                check_env(self.env.coordinator_env, warn=True)
-            else:
-                time.sleep(1.5)
         elif self.gym_type.startswith(MARL_PZ):
             # parallel_api_test + check_env(SingleAgentView) run in marl_pz_main
             # after the scenario is loaded so env.reset() has data to work with.
@@ -65,31 +54,7 @@ class AgentManager:
         else:
             raise Exception(f"In config/default.yaml insert at least one agent and its params")
     
-    def create_marl_agent(self, agent_param ):
-        agent_param.instances = {}
-        for host_name,env in self.env.host_envs.items():
-            instance, custum_callback, is_custom_agent =  self.create_agent(agent_param, env, name = host_name )
-            instance.is_team_member = True
-            instance.is_team_coordinator = False
-
-            agent_param.instances[host_name] = {
-                'instance': instance,
-                'custom_callback': custum_callback,
-                'is_custom_agent': is_custom_agent,
-                'max_steps' : self.env.max_steps
-            }
-        instance, custum_callback, is_custom_agent =  self.create_agent(agent_param, self.env.coordinator_env, name = COORDINATOR )
-        instance.is_team_member = True
-        instance.is_team_coordinator = True
-        agent_param.instances[COORDINATOR] = {
-                'instance': instance,
-                'custom_callback': custum_callback,
-                'is_custom_agent': is_custom_agent,
-                'max_steps' : self.env.max_steps
-        }          
-        
-            
-    def create_agent(self, agent_param, env=None, name = None): 
+    def create_agent(self, agent_param, env=None, name = None, is_coordinator = False):
         if env is None:
             env = self.env
         algorithm = agent_param.algorithm
@@ -100,39 +65,41 @@ class AgentManager:
         if algorithm.lower() == ALGO_Q_LEARNING:
             if env.observation_space.shape[0] > 64:
                 raise Exception(f"Custom agents with Q-Learning or SARSA algorithms are not supported in this env, the observation is too big for Q-Table (max 64, so max 8 hosts * 8 features, but it's better to avoid and use Deep algorithms).")
-            return self.create_custom_agent(QLearningAgent, env, agent_param, name), {}, True
+            return self.create_custom_agent(QLearningAgent, env, agent_param, name, is_coordinator), {}, True
         elif algorithm.lower() == ALGO_SARSA:
             if env.observation_space.shape[0] > 64:
                 raise Exception(f"Custom agents with Q-Learning or SARSA algorithms are not supported in this env, the observation is too big for Q-Table (max 64, so max 8 hosts * 8 features, but it's better to avoid and use Deep algorithms).")
-            return self.create_custom_agent(SARSAAgent, env, agent_param, name), {}, True       
+            return self.create_custom_agent(SARSAAgent, env, agent_param, name, is_coordinator), {}, True
         elif algorithm.lower() == ALGO_SUPERVISED:
             split_ratio = getattr(agent_param, 'train_test_split_ratio', 0.20)
             agent_name = agent_param.name if name is None else f"{agent_param.name}_{name}"
             return SupervisedAgent(env.gym_type, self.data_traffic_file,
                                    train_test_split_ratio=split_ratio,
-                                   name=agent_name), {}, False        
+                                   name=agent_name), {}, False
         elif algorithm.lower() == ALGO_PPO:
             try:
                 if agent_param.load:
-                    model = self.load_agent_model(agent_param, name)
-            except Exception as e: 
+                    model = self.load_agent_model(agent_param, name, is_coordinator)
+            except Exception as e:
                 debug(f"No {algorithm} model file\n")
             if model is None:
-                model =  PPO('MlpPolicy', env, device='cpu', 
-                        policy_kwargs = dict(net_arch=agent_param.net_arch),                             
-                        n_steps = agent_param.n_steps, 
-                        learning_rate=agent_param.learning_rate, 
-                        gamma=agent_param.gamma, 
-                        ent_coef=agent_param.ent_coef, 
+                model =  PPO('MlpPolicy', env, device='cpu',
+                        policy_kwargs = dict(net_arch=agent_param.net_arch),
+                        n_steps = agent_param.n_steps,
+                        learning_rate=agent_param.learning_rate,
+                        gamma=agent_param.gamma,
+                        ent_coef=agent_param.ent_coef,
+                        batch_size=agent_param.batch_size, # Add batch_size for PPO
+                        seed=self.random_seed,
                         verbose=1)
             cc = CustomCallback(env = env, agent_param=agent_param, name=name)
             model.name = cc.name               
             return model, cc, False
             
         elif algorithm.lower() == ALGO_DQN:
-            try: 
-                if agent_param.load:               
-                    model = self.load_agent_model(agent_param, name)
+            try:
+                if agent_param.load:
+                    model = self.load_agent_model(agent_param, name, is_coordinator)
             except:
                 debug(f"No {algorithm} model file\n")
             if model is None:
@@ -152,6 +119,7 @@ class AgentManager:
                        learning_starts=agent_param.learning_starts,
                        batch_size=agent_param.batch_size,
                        target_update_interval=agent_param.target_update_interval,
+                       seed=self.random_seed,
                        verbose=1)
             else:
                 model.learning_rate=agent_param.learning_rate 
@@ -171,17 +139,19 @@ class AgentManager:
         elif algorithm.lower() == ALGO_A2C:
             try:
                 if agent_param.load:
-                    model = self.load_agent_model(agent_param, name)
+                    model = self.load_agent_model(agent_param, name, is_coordinator)
             except:
                 debug(f"No {algorithm} model file\n")            
 
             if model is None:
                 model = A2C('MlpPolicy', env,
-                       policy_kwargs = dict(net_arch=agent_param.net_arch), 
-                       n_steps = agent_param.n_steps, 
-                       learning_rate=agent_param.learning_rate, 
-                       gamma=agent_param.gamma, 
-                       ent_coef=agent_param.ent_coef, 
+                       policy_kwargs = dict(net_arch=agent_param.net_arch),
+                       n_steps = agent_param.n_steps,
+                       learning_rate=agent_param.learning_rate,
+                       gamma=agent_param.gamma,
+                       #batch_size=agent_param.batch_size, # Add batch_size for A2C
+                       ent_coef=agent_param.ent_coef,
+                       seed=self.random_seed,
                        verbose=1)
             cc = CustomCallback(env = env, agent_param=agent_param, name=name)
             model.name = cc.name               
@@ -190,7 +160,7 @@ class AgentManager:
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")      
         
-    def create_custom_agent(self, agent_class, env, agent_param, host_name):
+    def create_custom_agent(self, agent_class, env, agent_param, host_name, is_coordinator=False):
         """
         Create a custom RL agent (Q-Learning, SARSA) for a given host.
 
@@ -210,10 +180,14 @@ class AgentManager:
         The original nominal value is logged so the user can see what happened.
 
         Args:
-            agent_class: QLearningAgent or SARSAAgent class.
-            env:         The environment (may be a PerHostScanWrapper).
-            agent_param: Agent configuration params.
-            host_name:   Host name for multi-agent scenarios, None otherwise.
+            agent_class:    QLearningAgent or SARSAAgent class.
+            env:            The environment (may be a PerHostScanWrapper).
+            agent_param:    Agent configuration params.
+            host_name:      Host/agent id for marl_pz, None for every other scenario.
+            is_coordinator: For marl_pz only — True if this instance is the
+                             team coordinator, which is saved to (and loaded
+                             from) its own "<name>_coordinator.json" file
+                             instead of the file shared by every host.
 
         Returns:
             model: Instantiated and optionally loaded agent.
@@ -250,20 +224,32 @@ class AgentManager:
 
         try:
             if agent_param.load:
-                path = (
-                    agent_param.load_dir
-                    if agent_param.load_dir is not None
-                    else find_latest_file(
-                        self.training_directory, host_name, 'json',
-                        self.net_config_filter
-                    )
-                )
                 if host_name is not None:
-                    filename = (
-                        f"{self.training_directory}/{path}"
-                        f"/{agent_param.name}_{host_name}.json"
+                    # marl_pz: every host shares the same "<name>.json" file
+                    # (the team's federated-averaged table, see
+                    # _save_marl_pz_team in marl_pz_main.py); only the
+                    # coordinator uses its own "<name>_coordinator.json".
+                    path = (
+                        agent_param.load_dir
+                        if agent_param.load_dir is not None
+                        else find_latest_file(
+                            self.training_directory, agent_param.name, 'json',
+                            self.net_config_filter
+                        )
                     )
+                    if path.endswith('.json'):
+                        path = path[:-len('.json')]
+                    suffix = "_coordinator" if is_coordinator else ""
+                    filename = f"{self.training_directory}/{path}{suffix}.json"
                 else:
+                    path = (
+                        agent_param.load_dir
+                        if agent_param.load_dir is not None
+                        else find_latest_file(
+                            self.training_directory, host_name, 'json',
+                            self.net_config_filter
+                        )
+                    )
                     filename = f"{self.training_directory}/{path}"
                 model.load(filename)
         except Exception as e:
@@ -304,7 +290,7 @@ class AgentManager:
             single_view = SingleAgentView(env, agent_id, state_mode=state_mode)
 
             instance, custom_callback, is_custom_agent = self.create_agent(
-                agent_param, env=single_view, name=agent_id
+                agent_param, env=single_view, name=agent_id, is_coordinator=is_coordinator
             )
             instance.is_team_member      = True
             instance.is_team_coordinator = is_coordinator
@@ -321,13 +307,11 @@ class AgentManager:
         for agent_param in self.agents_params:
             if self.gym_type.startswith(MARL_PZ):
                 self.create_marl_pz_agent(agent_param)
-            elif self.gym_type.startswith("marl"):
-                self.create_marl_agent(agent_param)
             else:
                 agent_param.instance, agent_param.custom_callback, agent_param.is_custom_agent = self.create_agent(agent_param)
                 agent_param.max_steps = self.env.max_steps
     
-    def load_agent_model(self, agent_param, name=None):
+    def load_agent_model(self, agent_param, name=None, is_coordinator=False):
         """
         Load an RL model (DQN, PPO, A2C) for a given agent.
 
@@ -337,7 +321,10 @@ class AgentManager:
             env: The environment to bind to the model.
             training_directory (str): Path to the directory with saved models.
             net_config_filter (str): Optional filter for file selection.
-            name (str, optional): Host name only for multi-agent scenarios.
+            name (str, optional): Host/agent id — marl_pz only, None otherwise.
+            is_coordinator (bool): marl_pz only — True loads the team's
+                separate "<load_dir>_coordinator.zip" file instead of the
+                "<load_dir>.zip" file shared by every host.
 
         Returns:
             model: Loaded RL model ready to use.
@@ -345,12 +332,12 @@ class AgentManager:
         # Determine path to model
         algorithm = agent_param.algorithm
         env = self.env
-        training_directory = self.training_directory 
+        training_directory = self.training_directory
         net_config_filter = self.net_config_filter
-        # Check if the algorithm is supported and set the path to the model        
+        # Check if the algorithm is supported and set the path to the model
         if algorithm not in [ALGO_DQN, ALGO_PPO, ALGO_A2C]:
-            raise ValueError(f"Unsupported algorithm: {algorithm}")    
-        
+            raise ValueError(f"Unsupported algorithm: {algorithm}")
+
         try:
             if agent_param.load_dir == 'None':
                 #it's bettr to show an error if the model saved file has not beeen specified, instead of looking for the latest file and maybe loading a wrong model
@@ -360,7 +347,14 @@ class AgentManager:
             else:
                 path = f"{self.training_directory}/{agent_param.load_dir}"
                 if name is not None:
-                    path = f"{path}/{agent_param.name}_{name}.zip"
+                    # marl_pz: every host shares "<load_dir>.zip" (the team's
+                    # federated-averaged weights, see _save_marl_pz_team in
+                    # marl_pz_main.py); only the coordinator uses its own
+                    # "<load_dir>_coordinator.zip".
+                    if path.endswith('.zip'):
+                        path = path[:-len('.zip')]
+                    suffix = "_coordinator" if is_coordinator else ""
+                    path = f"{path}{suffix}.zip"
 
             assert os.path.isfile(path), f"Model file not found at {path}"
         except AssertionError as e:

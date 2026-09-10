@@ -1,0 +1,42 @@
+# Compares Tier A alerting-channel strategies for paper9 (MARL Coordination):
+# S0 (naive_broadcast) vs S1 (UAQ, tau=0.8), N=10 (1_5_5), seed=77, 100 train
+# episodes, no Tier B strategy active, no percentage mode.
+#
+# IMPORTANT: both paths below use attacks.apply_drop_rules=true. The two earliest
+# August S0 runs (20260810-105150, 20260811-114945) used apply_drop_rules=false and
+# are NOT used here — mixing them with the apply_drop_rules=true runs is a real
+# confound (it collapses the under_attack ground-truth class from 252 down to
+# single digits via remap_ground_truth_sequence's mitigation-aware relabeling), not
+# just run-to-run noise. See ch08_experiment_log.md, "apply_drop_rules confound"
+# note (2026-08-21).
+#
+# Used by:
+# - compare_episodes_metrics.py
+# - generate_confusion_plots.py
+# - generate_ranking_table.py
+output_prefix: tier_a
+# compare_episodes_metrics.py: figure height in inches for the metrics-comparison bar
+# chart (default 7.0). Only 2 experiments/2 algorithms here, so the default looks
+# cramped/tall; flatten it. fig_width_scale (default 0.8) is left at default.
+fig_height: 5.0
+# generate_confusion_plots.py: emit one combined S0-vs-S1 role-confusion chart.
+combine_role_confusion: true
+# generate_confusion_plots.py: emit one grid of (non-pooled) confusion matrices,
+# rows=experiment labels, columns=algorithms, instead of a single merged/pooled
+# "all_experiments" matrix per algorithm -- we want S0 and S1 kept visually separate.
+confusion_matrix_grid: true
+# "grid" (rows=labels, cols=algorithms) or "inline" (all label x algorithm panels in
+# a single row, label-then-algorithm order). User prefers inline.
+confusion_matrix_layout: inline
+# DQN majority-class-collapses under both S0 and S1 (see ch08_experiment_log.md,
+# "Round 3" table) independently of Tier A/B strategy — excluded from these plots
+# for the same reason it is excluded from the paper9.tex Tier A/B tables.
+excluded_algorithms: [DQN]
+experiments:
+  - label: "S0"
+    path: "_training/marl_pz/20260812-110417_1_5_5"
+    description: "Tier A baseline: naive_broadcast (S0), no Tier B, N=10, seed=77, apply_drop_rules=true"
+
+  - label: "S1-UAQ"
+    path: "_training/marl_pz/20260815-181031_1_5_5"
+    description: "Tier A: UAQ (S1, tau=0.8), no Tier B, N=10, seed=77, apply_drop_rules=true"

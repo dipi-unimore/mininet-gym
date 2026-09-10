@@ -1,0 +1,24 @@
+# Group 3 (increased network resources: 1 switch, 10 hosts, 10 iot = 20 nodes).
+# Warm-start / generalization check: each agent is warm-started from its
+# corresponding Group 2 (10-node, 300-episode) model, fine-tuned for a few
+# episodes on the 20-node topology, then evaluated on the test set.
+# Used by:
+# - compare_episodes_metrics.py
+# - generate_confusion_plots.py
+# - generate_ranking_table.py
+output_prefix: group3
+# Leave empty to include all algorithms; otherwise list algorithms to exclude.
+# Valid names: Q-Learning, SARSA, DQN, PPO, A2C
+excluded_algorithms: []
+experiments:
+  - label: "reward_scaling"
+    path: "_training/attacks_ho/20260818-122525_1_10_10"
+    description: "Group 3 - warm-started from G2 Reward-Scaling-Only model (20260802-235108_1_5_5)"
+
+  - label: "deltas"
+    path: "_training/attacks_ho/20260808-122406_1_10_10"
+    description: "Group 3 - warm-started from G2 Deltas model (20260804-093406_1_5_5)"
+
+  - label: "all_flags"
+    path: "_training/attacks_ho/20260819-123046_1_10_10"
+    description: "Group 3 - warm-started from G2 All-Flags model (20260731-104001_1_5_5); test_episodes=300"

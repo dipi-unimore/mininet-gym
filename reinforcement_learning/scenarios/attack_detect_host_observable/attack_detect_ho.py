@@ -41,6 +41,7 @@ from colorama import Fore
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 from reinforcement_learning.agent_manager import AgentManager
+from reinforcement_learning.scenarios.attack_detect_host_observable.constants import HOST_STATUS_ID_MAPPING
 from .network_env_attack_detect_per_host_observable import (
     NetworkEnvAttackDetectPerHostObservable,
 )
@@ -251,11 +252,13 @@ def attack_detect_ho_main(config, am: AgentManager,
                         directory_name,
                         title=f"{agent.name} Evaluation Errors",
                     )
-                    plot_ho_attack_mitigation_stats(
-                        mitigation_history,
-                        directory_name,
-                        title=f"{agent.name} Attack Mitigation",
-                    )
+                    #only if drop rules is applied, we can check if the incoming attack is mitigated
+                    if config.env_params.apply_drop_rules and len(mitigation_history) > 0  :
+                        plot_ho_attack_mitigation_stats(
+                            mitigation_history,
+                            directory_name,
+                            title=f"{agent.name} Attack Mitigation",
+                        )
                 except Exception as e:
                     error(Fore.RED + f"Error plotting test for {agent.name}!\n"
                         + f"{e}\n{traceback.format_exc()}\n" + Fore.WHITE)
@@ -474,8 +477,9 @@ def train_agent(agent):
                 else:
                     # Regular RL agent learning
                     agent.custom_callback.before_episode(episode + 1)
+                    agent.custom_callback.max_steps = agent.max_steps * train_agent.env.n_hosts
                     agent.instance.learn(
-                        total_timesteps=agent.max_steps,
+                        total_timesteps=agent.custom_callback.max_steps,
                         callback=agent.custom_callback,
                         progress_bar=agent.progress_bar,
                     )
@@ -537,15 +541,13 @@ def _evaluate_single_agent(agent, wrapped_env: PerHostScanWrapper,
         # evaluation scenario).
         wrapped_env._current_round_step = wrapped_env.env.max_steps - 1
         last_infos = None
+        episode_score = 0
+        episode_reward = 0.0
 
         for host_idx in range(wrapped_env.num_hosts):
             if base_env.stop_event.is_set():
                 break
                 
-            raw_host_status_id = int(base_env.global_state.status["id"][host_idx])
-            host_status_id = map_ho_status_id_to_class(raw_host_status_id)
-            ground_truth.append(host_status_id)
-
             if isinstance(model, SupervisedAgent):
                 action = int(model.predict(state))
             elif isinstance(model, (QLearningAgent, SARSAAgent)):
@@ -554,23 +556,47 @@ def _evaluate_single_agent(agent, wrapped_env: PerHostScanWrapper,
                 action, _ = model.predict(state, deterministic=True)
                 action = int(action)
 
-            predicted.append(action)
-            if action == host_status_id:
-                score += 1
+            state, reward, done, truncated, infos = wrapped_env.step(action)
+            reward = float(reward)  # avoid leaking numpy scalars (e.g. float32) into notify_client payloads
+            last_infos = infos
+            episode_reward += reward
 
-            color = Fore.GREEN if action == host_status_id else Fore.RED
+            # The effective ground truth (including INCOMING_BLOCKED_ATTACK) is in the `infos` dict.
+            effective_gt_id = infos.get("action_correct", 0)
+            raw_host_status_id = int(base_env.global_state.status["id"][host_idx])
+            ground_truth.append(effective_gt_id)
+
+            predicted.append(action)
+            map_ho_status_id_to_class(action)
+            if action == effective_gt_id or (effective_gt_id == HOST_STATUS_ID_MAPPING.get("incoming_blocked_attack") and action == HOST_STATUS_ID_MAPPING.get("normal")):
+                score += 1
+                episode_score += 1
+
+            color = Fore.GREEN if action == effective_gt_id else Fore.RED
             information(
-                f"  {agent.name} | {base_env.hosts[host_idx].name}"
+                f"  {agent.name} | {base_env.hosts[host_idx].name:<7}"
                 + color
-                + f" pred={action} gt={host_status_id} sd={[int(i) for i in base_env.get_discretized_state(state)]}"
+                + f" pred={action} gt={effective_gt_id} (raw={raw_host_status_id}) "
+                + f"link={'UP' if wrapped_env.env.status_links[host_idx] else 'DOWN'} "
+                + f"sd={[int(i) for i in base_env.get_discretized_state(state)]}"
                 + Fore.WHITE + "\n"
             )
 
-            state, _, done, truncated, infos = wrapped_env.step(action)
-            last_infos = infos
-            # if done or truncated:
-            #     break
-
+            notify_client(
+                level=SystemLevels.DATA,
+                agent_name=agent.name,
+                step_data={
+                    "episode": episode + 1,
+                    "step": host_idx,
+                    "status": infos.get("status", {}),
+                    "action": {"choosen": action, "isCorrect": action == effective_gt_id},
+                    "correctPredictions": episode_score,
+                    "reward": reward,
+                    "host": base_env.hosts[host_idx].name,
+                    "linkStatus": 1 if wrapped_env.env.status_links[host_idx] else 0,
+                }
+            )
+        
         if isinstance(last_infos, dict):
             mitigation_history.append({
                 "episode": episode + 1,
@@ -585,6 +611,25 @@ def _evaluate_single_agent(agent, wrapped_env: PerHostScanWrapper,
                 "mitigated_under_attack_count": 0,
                 "mitigated_under_attack_ratio": 0.0,
             })
+        
+        # Notify per-episode metrics at the end of the evaluation round
+        accuracy_episode = episode_score / wrapped_env.num_hosts if wrapped_env.num_hosts > 0 else 0.0
+        notify_client(
+            level=SystemLevels.DATA,
+            agent_name=agent.name,
+            metrics={
+                "episode": episode + 1,
+                "steps": wrapped_env.num_hosts,
+                "correctPredictions": episode_score,
+                "accuracy": accuracy_episode,
+                "precision": 0, # Not calculated per-episode in evaluation
+                "recall": 0,    # Not calculated per-episode in evaluation
+                "f1Score": 0,   # Not calculated per-episode in evaluation
+                "cumulativeReward": episode_reward,
+                "qtableCoveragePct": 0, # No Q-table in evaluation for most agents
+                "qtableTotalCells": 0,
+            },
+        )
 
     return score, ground_truth, predicted, mitigation_history
 

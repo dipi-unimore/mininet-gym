@@ -100,10 +100,19 @@ def save_data_to_file(data, dir_name, file_name="data"):
             return bool(obj)
         raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
     
-   
-    with open(f"{dir_name}/{file_name}.json", 'w') as f:
-        js.dump(data, f, default=convert_np) 
-    
+    final_path = f"{dir_name}/{file_name}.json"
+    temp_path = f"{final_path}.tmp"
+
+    try:
+        with open(temp_path, 'w') as f:
+            js.dump(data, f, default=convert_np)
+        # If the write is successful, atomically rename the temp file to the final file.
+        # This prevents corrupted files if the process is killed mid-write.
+        os.rename(temp_path, final_path)
+    except Exception as e:
+        error(f"Failed to save data to {final_path}: {e}")
+        if os.path.exists(temp_path):
+            os.remove(temp_path) # Clean up the temporary file on error
 
     
 def read_csv_file(csv_file):
@@ -121,9 +130,13 @@ def read_data_file(file_name:str = '../data' , extension:str = None):
     if extension is not None:
         file_name = f"{file_name}.{extension}"
     file_name = resolve_data_file_path(file_name)
-    with open(file_name, 'r') as file:
-        data = orjson.loads(file.read()) # faster than this -> data = yaml.safe_load(file)
-    return data #js.loads(js.dumps(config), object_hook=Params), config
+    try:
+        with open(file_name, 'r') as file:
+            data = orjson.loads(file.read()) # faster than this -> data = yaml.safe_load(file)
+        return data #js.loads(js.dumps(config), object_hook=Params), config
+    except orjson.JSONDecodeError as e:
+        error(f"Failed to decode JSON from file: {file_name}")
+        raise e
 
 
 def resolve_data_file_path(file_name: str) -> str:

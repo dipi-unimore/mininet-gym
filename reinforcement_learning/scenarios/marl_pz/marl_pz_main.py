@@ -1480,6 +1480,7 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
 
         # Advance to almost done so each eval episode is 1 round
         env._step_count = env.max_steps - 1
+        episode_score = 0
 
         # Collect host ground truths BEFORE stepping
         host_agents = [a for a in env.possible_agents if a != COORDINATOR]
@@ -1489,8 +1490,8 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
             )
             gt_hs = env.global_state.host_statuses.get(host_id, {})
             raw_gt_id = gt_hs.get('id', 0) if isinstance(gt_hs, dict) else 0
-            gt_class = map_ho_status_id_to_class(raw_gt_id)
-            ground_truth.append(gt_class)
+            # For score, logging, and confusion matrix, we use the mapped class.
+            ground_truth.append(map_ho_status_id_to_class(raw_gt_id))
 
         # Build coordinated actions
         actions: dict = {}
@@ -1509,12 +1510,16 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
             actions[agent_id] = action
 
         # Record host predictions
+        host_predictions: dict = {}
         for host_id in host_agents:
             action = actions.get(host_id, 0)
             gt_class = ground_truth[-(len(host_agents)) + host_agents.index(host_id)]
             predicted.append(action)
-            if action == gt_class:
+            is_correct = action == gt_class
+            host_predictions[host_id] = {"action": action, "is_correct": is_correct}
+            if is_correct:
                 score += 1
+                episode_score += 1
 
             color = Fore.GREEN if action == gt_class else Fore.RED
             information(
@@ -1544,6 +1549,34 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
         # Step with coordinated actions
         obs_dict, rewards, terms, truncs, infos = env.step(actions)
 
+        # Episode reward = sum of per-host rewards (coordinator excluded, to
+        # stay comparable with the host-only accuracy metric above).
+        # float() avoids leaking numpy scalars (e.g. float32) into notify_client payloads.
+        episode_reward = sum(float(rewards.get(host_id, 0.0)) for host_id in host_agents)
+
+        # Live per-host step update (mirrors the per-step notify in the HO scenario;
+        # here all hosts share a single coordinated env.step(), so "step" is the
+        # host's position within the episode rather than a separate env tick).
+        for step_idx, host_id in enumerate(host_agents):
+            host_idx = next(
+                (i for i, h in enumerate(env.hosts) if h.name == host_id), 0
+            )
+            pred = host_predictions.get(host_id, {"action": 0, "is_correct": False})
+            notify_client(
+                level=SystemLevels.DATA,
+                agent_name=agent.name,
+                step_data={
+                    "episode": episode + 1,
+                    "step": step_idx,
+                    "status": infos.get(host_id, {}).get("status", {}),
+                    "action": {"choosen": pred["action"], "isCorrect": pred["is_correct"]},
+                    "correctPredictions": episode_score,
+                    "reward": float(rewards.get(host_id, 0.0)),
+                    "host": host_id,
+                    "linkStatus": 1 if env.status_links[host_idx] else 0,
+                }
+            )
+
         # Track mitigation
         under_attack = 0
         mitigated    = 0
@@ -1566,6 +1599,25 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
             "mitigated_under_attack_count": mitigated,
             "mitigated_under_attack_ratio": mitigated / max(1, under_attack),
         })
+
+        # Notify per-episode metrics at the end of the evaluation round
+        accuracy_episode = episode_score / len(host_agents) if host_agents else 0.0
+        notify_client(
+            level=SystemLevels.DATA,
+            agent_name=agent.name,
+            metrics={
+                "episode": episode + 1,
+                "steps": len(host_agents),
+                "correctPredictions": episode_score,
+                "accuracy": accuracy_episode,
+                "precision": 0,  # Not calculated per-episode in evaluation
+                "recall": 0,     # Not calculated per-episode in evaluation
+                "f1Score": 0,    # Not calculated per-episode in evaluation
+                "cumulativeReward": episode_reward,
+                "qtableCoveragePct": 0,  # No single Q-table in evaluation for a multi-agent config
+                "qtableTotalCells": 0,
+            },
+        )
 
     return score, ground_truth, predicted, mitigation_history
 
@@ -1677,6 +1729,54 @@ def _get_agent_metrics(agent):
     return getattr(agent, 'instance', type('', (), {'metrics': {}})()).metrics
 
 
+def _save_marl_pz_team(agent, primary, directory_name):
+    """Persist model(s) for one marl_pz team.
+
+    Host agents share a single saved file: their tables/weights are
+    federated-averaged in place first (reusing the exact averaging already
+    trusted mid-training for the S2 comm strategy — _federated_sync_qtables /
+    _federated_sync_sb3_weights — rather than picking one "best" host
+    arbitrarily), then one representative host instance is saved. On load,
+    create_marl_pz_agent() broadcasts this same file back to every host.
+
+    The coordinator has a different (binary) action space, so it is never
+    averaged with the hosts and gets its own "<name>_coordinator" file —
+    only written if the coordinator actually has training metrics (i.e. it
+    took part in training).
+
+    Hosts using an algorithm with no federated-average path here (e.g.
+    Supervised) fall back to saving just the first-seen host instance,
+    matching prior (pre-fix) behaviour for that case.
+    """
+    instances = agent.instances
+    base_name = directory_name + "/" + agent.name
+
+    tabular_hosts = _host_tabular_agents(instances)
+    sb3_hosts = [
+        (aid, m) for aid, m in _host_sb3_agents(instances)
+        if not isinstance(m, SupervisedAgent) and hasattr(m, 'save')
+    ]
+    if tabular_hosts:
+        _federated_sync_qtables(instances)
+        tabular_hosts[0][1].save(base_name)
+    elif sb3_hosts:
+        _federated_sync_sb3_weights(instances)
+        sb3_hosts[0][1].save(base_name)
+    elif hasattr(primary, 'save'):
+        primary.save(base_name)
+
+    coord_info = instances.get(COORDINATOR)
+    if coord_info is not None:
+        coord_instance = coord_info.get('instance')
+        coord_cb       = coord_info.get('custom_callback')
+        has_metrics = bool(
+            (coord_cb and hasattr(coord_cb, 'metrics') and coord_cb.metrics.get('accuracy'))
+            or (coord_instance and hasattr(coord_instance, 'metrics') and coord_instance.metrics.get('accuracy'))
+        )
+        if has_metrics and hasattr(coord_instance, 'save'):
+            coord_instance.save(base_name + "_coordinator")
+
+
 def _plot_and_save_agent(agent, config):
     """Plot and save training data for one agent. Returns data object or None."""
     import gc
@@ -1692,9 +1792,11 @@ def _plot_and_save_agent(agent, config):
     host_qtable_history_by_name: dict = {}
     if hasattr(agent, 'instances') and agent.instances:
         # marl_pz: pick first instance with metrics as the "primary" one used
-        # for instance.save() / data.train_metrics / data.train_indicators
-        # (the live-dashboard training summary and model persistence keep
-        # using this single instance, unchanged). Tabular agents (Q-Learning/
+        # for data.train_metrics / data.train_indicators (the live-dashboard
+        # training summary keeps using this single instance, unchanged).
+        # Model persistence is handled separately by _save_marl_pz_team()
+        # below, which saves one shared file across all host instances plus
+        # a distinct file for the coordinator. Tabular agents (Q-Learning/
         # SARSA) track metrics directly on the instance and have no callback
         # ({}). SB3 agents (DQN/PPO/A2C) track metrics on their CustomCallback,
         # not on the raw model — mirror the single-agent SB3 branch below by
@@ -1707,7 +1809,8 @@ def _plot_and_save_agent(agent, config):
             if agent_id == COORDINATOR:
                 # Binary (0/1) action space — incompatible with the 3-class
                 # (Normal/Under Attack/Attacking) host confusion matrix and
-                # bin coverage, so it's excluded from the aggregation below.
+                # bin coverage, so it's excluded from the aggregation below
+                # (it's still saved on its own, see _save_marl_pz_team()).
                 continue
             m  = inst_info.get('instance')
             cb = inst_info.get('custom_callback')
@@ -1761,7 +1864,10 @@ def _plot_and_save_agent(agent, config):
     directory_name = create_directory_training_execution(config, agent_name=agent.name)
 
     if getattr(agent, 'save', False) and hasattr(instance, 'save'):
-        instance.save(directory_name + "/" + agent.name)
+        if hasattr(agent, 'instances') and agent.instances:
+            _save_marl_pz_team(agent, instance, directory_name)
+        else:
+            instance.save(directory_name + "/" + agent.name)
 
     information("Plotting training data\n", agent.name)
 

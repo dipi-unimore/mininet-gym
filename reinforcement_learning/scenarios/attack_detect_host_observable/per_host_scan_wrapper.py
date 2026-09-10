@@ -74,13 +74,14 @@ import time
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+
 from reinforcement_learning.network_env import get_normalized_state
 from utility.my_log import notify_client
 
 from .network_env_attack_detect_per_host_observable import (
     NetworkEnvAttackDetectPerHostObservable,
 )
-from .constants import AGENT_ACTIONS, NORMALIZED, RAW, REWARDS
+from .constants import AGENT_ACTIONS, HOST_STATUS_ID_MAPPING, NORMALIZED, RAW, REWARDS
 from utility.constants import HostStatus, SystemLevels, SystemModes, SystemStatus
 
 
@@ -254,6 +255,21 @@ class PerHostScanWrapper(gym.Wrapper):
         """
         True when victim is tagged UNDER_ATTACK but all known attackers
         targeting that victim are currently blocked.
+
+        Note: status_links flips the instant a drop-rule action executes
+        (mid-round/mid-episode), but this victim's own observation (_full_obs)
+        stays frozen at the value captured at the start of the round and is
+        only refreshed at the next round/episode boundary. So a victim
+        processed after its attacker within the same round/episode can be
+        labelled "mitigated" (status 3) one round before its observation
+        actually reflects the block -- this same-round lag is real but, given
+        that drop rules now persist across evaluation episodes (see reset()),
+        it only affects the first round/episode a given block takes effect
+        in; every subsequent round/episode the block stays active, the
+        observation has had time to catch up. The offline analysis scripts
+        (generate_confusion_plots.py, generate_ranking_table.py) already
+        account for exactly this by treating only the *first* occurrence of
+        status 3 for a given host as ambiguous/lag-affected.
         """
         host_tasks = getattr(self.env, "host_tasks", None)
         if not isinstance(host_tasks, dict) or not self.env.hosts:
@@ -284,11 +300,12 @@ class PerHostScanWrapper(gym.Wrapper):
         - Everything else → unchanged
         """
         if host_status_id < 0:
-            return 0, HostStatus.NORMAL, False
+            return HOST_STATUS_ID_MAPPING['normal'], HostStatus.NORMAL, False
         if host_status_text == HostStatus.OUT_ATTACK_BLOCKED:
-            return 2, HostStatus.ATTACKING, False
-        if host_status_text == HostStatus.UNDER_ATTACK and self._is_incoming_attack_mitigated(host_idx):
-            return 3, HostStatus.INCOMING_BLOCKED_ATTACK, True
+            # For reward/correctness, a blocked attacker is still an attacker.
+            return HOST_STATUS_ID_MAPPING['attacking'], HostStatus.ATTACKING, False
+        if host_status_text == HostStatus.UNDER_ATTACK and self._is_incoming_attack_mitigated(host_idx):            
+            return HOST_STATUS_ID_MAPPING['incoming_blocked_attack'], HostStatus.INCOMING_BLOCKED_ATTACK, True
         return host_status_id, host_status_text, False
 
     def _raw_slice(self, host_idx: int) -> np.ndarray:
@@ -348,15 +365,24 @@ class PerHostScanWrapper(gym.Wrapper):
         reward  = 0.0
         scale   = self._attack_reward_scale if self._use_attack_reward_scaling else 1.0
 
-        if not link_up and g_t == HostStatus.NORMAL:
-            reward += REWARDS.LINK_OFF
+        # For reward purposes, a saved victim is treated as normal.
+        if g_t == HostStatus.INCOMING_BLOCKED_ATTACK:
+            g_t = HostStatus.NORMAL
+
+        # if not link_up and g_t == HostStatus.NORMAL:
+        #     reward += REWARDS.LINK_OFF
 
         if action == AGENT_ACTIONS.NORMAL_TRAFFIC:
-            if g_t == HostStatus.NORMAL:
+            if g_t == HostStatus.NORMAL or g_t == HostStatus.INCOMING_BLOCKED_ATTACK:
                 # Not scaled: reward for normal stays constant regardless of host count
                 # so that "always predict normal" does not become more attractive
                 # with larger networks.
-                reward += REWARDS.CORRECT_NORMAL_TRAFFIC
+                if not link_up:
+                    # Penalize keeping a normal host blocked, even if predicted correctly.
+                    # This should be a significant penalty to discourage blocking normal hosts.
+                    reward += REWARDS.FALSE_POSITIVE  # e.g., -1.5 (unscaled)
+                else:
+                    reward += REWARDS.CORRECT_NORMAL_TRAFFIC
             else:
                 reward += REWARDS.FALSE_NEGATIVE * scale
 
@@ -377,6 +403,11 @@ class PerHostScanWrapper(gym.Wrapper):
                 reward += REWARDS.CORRECT_ATTACK_DETECTION * scale
             elif g_t == HostStatus.UNDER_ATTACK:
                 reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
+
+        # General penalty for having a link down on a non-attacking host.
+        # This applies regardless of the action taken in the current step.
+        if not link_up and g_t != HostStatus.ATTACKING:
+            reward += REWARDS.LINK_OFF
 
         return reward
 
@@ -410,15 +441,16 @@ class PerHostScanWrapper(gym.Wrapper):
             # Agent says normal — unblock only after hold + consistent normal streak.
             if not link_up:
                 self._normal_streak_while_blocked[host_idx] = self._normal_streak_while_blocked.get(host_idx, 0) + 1
-                held_rounds = self._current_round_step - self._block_started_round.get(host_idx, self._current_round_step)
-                if (held_rounds >= self._unblock_min_hold_rounds
-                        and self._normal_streak_while_blocked.get(host_idx, 0) >= self._unblock_required_normal_streak):
+                # Unblock as soon as the agent consistently predicts NORMAL.
+                if self._normal_streak_while_blocked.get(host_idx, 0) >= self._unblock_required_normal_streak:
                     if apply_drop_rules and unblock_flow_delete(self.env.net, host.name):
                         import time as _t; _t.sleep(0.02)
-                        self.env.status_links[host_idx] = True
-                        self._frozen_obs.pop(host_idx, None)
+                        self.env.status_links[host_idx] = True # Mark link as up
+                        self._frozen_obs.pop(host_idx, None)   # Clear any frozen observation
                         self._normal_streak_while_blocked.pop(host_idx, None)
                         self._block_started_round.pop(host_idx, None)
+                        # self.env.update_state() # BUG: This consumes a scenario step prematurely
+                        self._refresh_full_obs()
 
         elif action == AGENT_ACTIONS.ATTACK_IN:
             # ATTACK_IN alone is not enough evidence to unblock.
@@ -431,7 +463,9 @@ class PerHostScanWrapper(gym.Wrapper):
                 import time as _t; _t.sleep(0.02)
                 self.env.status_links[host_idx] = False
                 self._block_started_round[host_idx] = self._current_round_step
-                self._normal_streak_while_blocked[host_idx] = 0
+                self._normal_streak_while_blocked.pop(host_idx, None)
+                # self.env.update_state() # BUG: This consumes a scenario step prematurely
+                self._refresh_full_obs()
 
         if show_action:
             agent_name = get_agent_name() if name is None else name
@@ -507,15 +541,22 @@ class PerHostScanWrapper(gym.Wrapper):
         if options is None:
             options = {}
 
-        # Remove any OVS drop rules left over from the previous episode.
-        # If we skip this, _block_started_round.clear() below resets the
-        # block timestamp so held_rounds always evaluates to 0, making the
-        # unblock condition (held_rounds >= _unblock_min_hold_rounds) permanently
-        # unsatisfiable and leaving the drop rule active for the entire next episode.
+        # Network state (OVS drop rules) is physically continuous; "episode" is an
+        # RL bookkeeping construct. During evaluation (options["is_real_state"]=True,
+        # set only by the eval loop in attack_detect_ho.py), each of the 300 test
+        # episodes is a single round in one continuous stream (the evaluation scenario
+        # generator itself carries attacker/victim/cooldown state across episodes, see
+        # utility/scenario_generator.py's _generate_evaluation_sequence), so drop rules
+        # and their associated bookkeeping (_block_started_round,
+        # _normal_streak_while_blocked) are intentionally left in place across the reset
+        # rather than force-unblocked. Training keeps the previous per-episode reset
+        # behaviour unchanged.
+        is_real_state = bool(options.get("is_real_state", False))
+
         apply_drop_rules = getattr(
             getattr(self.env.params, 'attacks', None), 'apply_drop_rules', True
         )
-        if apply_drop_rules:
+        if apply_drop_rules and not is_real_state:
             from utility.network_configurator import unblock_flow_delete
             for host_idx in range(self._num_hosts):
                 if not self.env.status_links[host_idx]:
@@ -533,8 +574,9 @@ class PerHostScanWrapper(gym.Wrapper):
         self._correct_predictions = 0
         self._episode_under_attack_count = 0
         self._episode_mitigated_under_attack_count = 0
-        self._block_started_round.clear()
-        self._normal_streak_while_blocked.clear()
+        if not is_real_state:
+            self._block_started_round.clear()
+            self._normal_streak_while_blocked.clear()
 
         return self._get_output_slice(0), info
 
@@ -585,6 +627,7 @@ class PerHostScanWrapper(gym.Wrapper):
         # ── 1. Capture ground truth BEFORE any mutation ────────────────
         host_status_id   = self.env.global_state.status["id"][host_idx]
         host_status_text = self.env.global_state.status["status"][host_idx]
+        #only if drop rules is applied, we can check if the incoming attack is mitigated
         effective_status_id, effective_status_text, incoming_attack_mitigated = self._effective_ground_truth(
             host_idx,
             host_status_id,

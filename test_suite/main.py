@@ -46,10 +46,11 @@ class TestSuiteConfig:
 
 
 def load_suite_config(config_path: str | Path | None) -> TestSuiteConfig:
+    
     base_config_path = Path(config_path) if config_path else Path(__file__).with_name("config/default.yaml")
     if not base_config_path.is_absolute():
         base_config_path = (Path.cwd() / base_config_path).resolve()
-
+    print(f"Loading test suite config from: {base_config_path}")
     raw = {}
     if base_config_path.exists():
         with open(base_config_path, "r", encoding="utf-8") as file:
@@ -99,6 +100,7 @@ def run_suite(suite_config: TestSuiteConfig, config_override: str | None = None,
     forced_skip = set(forced_skip or [])
 
     config_file = config_override or suite_config.config_file
+    print(f"Using application config file: {config_file}")
     config, _ = read_config_file(config_file)
     set_log_level("info")
 

@@ -1,0 +1,19 @@
+# Compares Tier A alerting-channel strategies for paper9, both with Experience
+# Sharing (S4) layered on top: S0+S4 (naive_broadcast) vs S1+S4 (UAQ, tau=0.8).
+# N=10 (1_5_5), seed=77, 100 train episodes, all 3 flags true (see paper9.tex sec:exp_setup).
+# DQN excluded here too (see the DQN-under-Tier-B collapse note in experiments9.tex --
+# it degrades further under S4 specifically, tracked separately via plot_dqn_collapse.py).
+output_prefix: tier_b_s4
+fig_height: 5.0
+combine_role_confusion: true
+confusion_matrix_grid: true
+confusion_matrix_layout: inline
+excluded_algorithms: [DQN]
+experiments:
+  - label: "S0+S4"
+    path: "_training/marl_pz/20260814-183144_1_5_5"
+    description: "naive_broadcast + experience_sharing (S4), N=10, seed=77"
+
+  - label: "S1+S4"
+    path: "_training/marl_pz/20260818-150129_1_5_5"
+    description: "UAQ (tau=0.8) + experience_sharing (S4), N=10, seed=77"

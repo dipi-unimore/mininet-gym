@@ -152,6 +152,10 @@ function initializeWebSocket() {
         if (currentPage === 'training') {
             syncTrainingStateOnReconnect();
         }
+        // Refresh batch-runner progress on (re)connect
+        if (typeof pollBatchStatus === 'function') {
+            pollBatchStatus();
+        }
     });
 
     socket.on('live_update', function (messages) {

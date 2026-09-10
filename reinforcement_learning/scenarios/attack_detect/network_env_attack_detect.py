@@ -94,7 +94,6 @@ class NetworkEnvAttackDetect(NetworkEnv):
                 error(Fore.RED+"Reading status error\n")
 
     def evaluate_traffic(self):
-        #TODO: create a property state in InstantState class
         self.global_state.state = np.array([
                     self.global_state.packets, 
                     self.global_state.packets_percentage_change, 

@@ -102,6 +102,56 @@ function getTrainingStateFromStorage() {
     }
 }
 
+// ── Batch runner progress (utility/run_batch.py) ──────────────────────
+// Polls GET /batch_status while a batch is running and renders a banner on the
+// Training page. Mirrors pollCalibrationStatus's self-rescheduling setTimeout
+// style. global:false keeps the 2 s poll out of the ajaxStart/Stop overlay.
+let batchPollTimer = null;
+
+function renderBatchProgress(b) {
+    const banner = $('#batch-progress-banner');
+    if (!banner.length) return;
+    const results = (b && b.results) || [];
+    if (!b || (!b.active && results.length === 0)) {
+        banner.addClass('hidden').removeClass('flex');
+        return;
+    }
+    const done = results.filter(r => r.status === 'done').length;
+    const failed = results.filter(r => r.status === 'failed').length;
+    let msg;
+    if (b.active) {
+        const pos = (b.index && b.total) ? `${b.index}/${b.total}` : '';
+        const name = (b.current_file || '').replace(/\.(ya?ml)$/i, '');
+        msg = `Batch ${pos} — ${name || '…'} · ${b.current_status || 'running'}`;
+        if (done || failed) msg += `  (${done} done, ${failed} failed)`;
+    } else {
+        msg = `Batch ${b.current_status || 'finished'}: ${done} done, ${failed} failed`;
+        if (b.total) msg += ` of ${b.total}`;
+    }
+    $('#batch-progress-text').text(msg);
+    banner.removeClass('hidden').addClass('flex');
+}
+
+function pollBatchStatus() {
+    clearTimeout(batchPollTimer);
+    $.ajax({
+        url: '/batch_status',
+        type: 'GET',
+        global: false,
+        success: function (b) {
+            renderBatchProgress(b);
+            if (b && b.active) {
+                batchPollTimer = setTimeout(pollBatchStatus, 2000);
+            } else if (b && b.results && b.results.length) {
+                batchPollTimer = setTimeout(function () {
+                    $('#batch-progress-banner').addClass('hidden').removeClass('flex');
+                }, 15000);
+            }
+        },
+        error: function () { /* endpoint unavailable — ignore */ }
+    });
+}
+
 // Check if there's an active training and navigate automatically
 async function checkAndRecoverTrainingState() {
     try {
@@ -210,6 +260,9 @@ $(document).ready(async function () {
 
     // Check for active training BEFORE initial render
     const wasRecovered = await checkAndRecoverTrainingState();
+
+    // Start polling the batch runner's progress (no-op unless a batch is active)
+    pollBatchStatus();
 
     // Initial render of the configuration
     renderConfig();

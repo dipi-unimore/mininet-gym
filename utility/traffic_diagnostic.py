@@ -57,7 +57,7 @@ DIM    = "\033[2m"
 
 # ── constants used across the module ─────────────────────────────────────────
 _DEFAULT_SCENARIO = "attacks_ho"
-_SCENARIO_CHOICES = ["attacks_ho", "marl_attacks"]
+_SCENARIO_CHOICES = ["attacks_ho"]
 
 # Feature labels for the 8-element per-host state vector
 _FEAT_LABELS = [
@@ -652,8 +652,6 @@ def run_diagnostics(config_path, scenario, max_steps, episodes):
 _SCENARIO_YAML_MAP = {
     "attacks_ho":   os.path.join(_ROOT, "reinforcement_learning", "scenarios",
                                  "attack_detect_host_observable", "scenario_env_param.yaml"),
-    "marl_attacks": os.path.join(_ROOT, "reinforcement_learning", "scenarios",
-                                 "marl", "scenario_env_param.yaml"),
 }
 
 

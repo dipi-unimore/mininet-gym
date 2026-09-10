@@ -69,7 +69,7 @@ function initializeLineChartPackets() {
             {
                 label: 'RX Packets',
                 data: [],
-                borderColor: 'rgb(30, 144, 255)',
+                borderColor: 'rgb(189, 218, 64)',
                 borderDash: [3, 3],
                 tension: 0.1,
                 yAxisID: 'yPackets',
@@ -198,7 +198,7 @@ function initializeLineChartBytes() {
             {
                 label: 'RX Bytes',
                 data: [],
-                borderColor: 'rgb(65, 105, 225)',
+                borderColor: 'rgb(187, 210, 33)',
                 borderDash: [3, 3],
                 tension: 0.1,
                 yAxisID: 'yBytes',
@@ -976,7 +976,7 @@ function updateHostTasksTable(hostTasks) {
         hostTaskData.html("");
         keys.forEach(function (host) {
             var task = hostTasks[host];
-            isLinkOff = task.linkStatus === 0;
+            isLinkOff = task.linkStatus === 0; // Link is off due to drop rule, Link status is 1 if there isn't a drop rule
             dstHost = task.destination;
             taskType = task.taskType;
             imgSrcFile = "server-security";

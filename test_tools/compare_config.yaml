@@ -1,0 +1,19 @@
+# Example configuration for compare_episodes_metrics.py,
+# generate_confusion_plots.py and generate_ranking_table.py.
+# Fill the `path` entries with the experiment folders you want to compare.
+# Use the labels to identify the two (or more) conditions, e.g. "100_episodes" and "300_episodes".
+output_prefix: comparison
+# Leave empty to include all algorithms; otherwise list algorithms to exclude.
+# Valid names: Q-Learning, SARSA, DQN, PPO, A2C
+excluded_algorithms: []
+experiments:
+  - label: "100_episodes"
+    path: "_training/attacks_ho/20260806-213847_1_5_5"
+    description: "Group 1: 100 episodes, 1 switch, 5 hosts, 5 iot (only reward scaling)"
+
+  - label: "300_episodes"
+    path: "_training/attacks_ho/20260802-235108_1_5_5"
+    description: "Group 2: 300 episodes, 1 switch, 5 hosts, 5 iot (only reward scaling)"
+
+# Add more pairs as needed. The script will read TEST*/test.json inside each path
+# and generate a single PNG with all algorithms in one chart.

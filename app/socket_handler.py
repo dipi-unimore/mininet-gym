@@ -1,12 +1,65 @@
-import datetime, re
+import datetime, re, json, traceback
 from flask import request
 from flask_socketio import SocketIO
 from utility.constants import SystemStatus, SystemModes
 
 
 socketio = None # initialized in app_api.py
-flask_app = None 
+flask_app = None
 app_state = None # Application state dict (training thread, pause/stop events)
+_handlers_registered = False # guard: register_handlers is re-called on every start_experiment
+
+
+def _find_unserializable(obj, path="root"):
+    """
+    Walk a (possibly nested) dict/list/tuple structure and return a string
+    pinpointing the first value that json can't serialize (path + type + repr),
+    or None if everything is serializable. Used to give useful diagnostics for
+    socketio.emit() failures instead of a bare "Object of type X is not JSON
+    serializable".
+    """
+    try:
+        json.dumps(obj)
+        return None
+    except TypeError:
+        pass
+
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            found = _find_unserializable(value, f"{path}[{key!r}]")
+            if found:
+                return found
+        return f"{path} ({type(obj).__name__})"
+    if isinstance(obj, (list, tuple)):
+        for index, value in enumerate(obj):
+            found = _find_unserializable(value, f"{path}[{index}]")
+            if found:
+                return found
+        return f"{path} ({type(obj).__name__})"
+
+    try:
+        value_repr = repr(obj)
+    except Exception:
+        value_repr = "<unrepr-able>"
+    return f"{path} ({type(obj).__name__}) = {value_repr}"
+
+
+def _log_emit_error(context: str, payload, exc: Exception):
+    """Log an emit failure with the offending field and full traceback, to both
+    stdout and the app log file (utility.my_log), instead of a bare print()."""
+    culprit = _find_unserializable(payload)
+    tb_str = traceback.format_exc()
+    detail = f"Error {context}: {exc}"
+    if culprit:
+        detail += f"\n  -> unserializable value at: {culprit}"
+    print(detail)
+    try:
+        # Local import to avoid circular import (utility.my_log imports send_live_data
+        # from this module at module load time).
+        from utility.my_log import error as log_error
+        log_error(f"{detail}\n{tb_str}")
+    except Exception:
+        print(tb_str)
 
 def init_socketio(app):
     """
@@ -51,8 +104,17 @@ def _get_training_status():
         return SystemStatus.IDLE, SystemModes.TRAINING, 'No active training'
 
 def register_handlers(socketio_instance):
-    """Register handler SocketIO like connect, disconnect, message, ecc."""
-    
+    """Register handler SocketIO like connect, disconnect, message, ecc.
+
+    Idempotent: main.start_experiment calls this on every run, and a batch of N
+    configs (utility/run_batch.py) would otherwise stack N copies of each handler
+    in the same process.
+    """
+    global _handlers_registered
+    if _handlers_registered:
+        return
+    _handlers_registered = True
+
     @socketio_instance.on('connect')
     def handle_connect():
         print(f'Client connected {request.sid}')
@@ -83,9 +145,9 @@ def _emit_live_data(messages):
             try:
                 socketio.emit('live_update', messages)
                 # force flush buffer I/O.
-                socketio.sleep(0) 
+                socketio.sleep(0)
             except Exception as e:
-                print(f"Error emitting live data in background task: {e}")
+                _log_emit_error("emitting live data in background task", messages, e)
     else:
         print("flask_app non è disponibile per l'emissione in _emit_live_data.")
         
@@ -103,7 +165,7 @@ def send_live_data(messages):
         try:
             _emit_live_data(messages)
         except Exception as e:
-            print(f"Error sending socket data: {e}")
+            _log_emit_error("sending socket data", messages, e)
     else:
         print("SocketIO not initialized.")
  
@@ -115,7 +177,7 @@ def _emit_status(status_data):
             try:
                 socketio.emit('status_update', status_data)
             except Exception as e:
-                print(f"Error emitting training status in background task: {e}")
+                _log_emit_error("emitting training status in background task", status_data, e)
                
 def send_status(status: str, mode: str, message: str = None, agent_name: str = None):
     """
@@ -134,8 +196,8 @@ def send_status(status: str, mode: str, message: str = None, agent_name: str = N
         }
         try:
             _emit_status(status_data)
-            
+
         except Exception as e:
-            print(f"Error sending socket data (status): {e}")
+            _log_emit_error("sending socket data (status)", status_data, e)
     else:
         print("SocketIO not initialized.")

@@ -126,7 +126,7 @@ def _set_attack_timing_params(short_duration=None, long_duration=None,
     If a parameter is None, the global default is kept.
     
     Args:
-        short_duration: Duration (steps) for SHORT_ATTACK (default 5, range 2-10)
+        short_duration: Duration (steps) for SHORT_ATTACK (default 5, range 3-10)
         long_duration: Duration (steps) for LONG_ATTACK (default 30, range 10-60)
         no_attack_timeout: Timeout (steps) between attacks (default 15, range 5-30)
     """
@@ -137,7 +137,7 @@ def _set_attack_timing_params(short_duration=None, long_duration=None,
     _NO_ATTACK_TIMEOUT = DEFAULT_NO_ATTACK_TIMEOUT
     
     if short_duration is not None:
-        short_duration = max(2, min(int(short_duration), 10))  # Clamp to [2, 10]
+        short_duration = max(3, min(int(short_duration), 10))  # Clamp to [3, 10]
         _DURATION_STEPS[SHORT_ATTACK] = short_duration
         information(f"[Scenario] SHORT_ATTACK duration set to {short_duration} steps\n")
     
@@ -220,12 +220,115 @@ def _choose_task_type(attack_likely: float,
 # Core sequence generator
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _generate_evaluation_sequence(hosts,
+                                   traffic_types: list,
+                                   attack_likely: float,
+                                   n_episodes: int,
+                                   max_attack_percentage: float = 0.99) -> List[Dict]:
+    """
+    Generate evaluation sequence with proper attack durations across episodes.
+
+    Unlike training where episodes are isolated, evaluation episodes form a SINGLE
+    continuous traffic stream. Attacks can span multiple episodes.
+
+    Each episode = 1 step of decision, but steps form a continuous sequence where:
+    - Attacks run for their full duration (short_attack_duration or long_attack_duration)
+    - attack_likely is the TARGET FRACTION of total steps that should be attacks
+    - After each attack, cooldown is enforced before the next attack
+    - 66% of attacks are SHORT, 33% are LONG (probabilistically)
+
+    Args:
+        hosts: List of host objects
+        traffic_types: Available traffic types (tcp, udp, ping, none)
+        attack_likely: Target fraction of steps that should contain attacks (0.0 to 1.0)
+        n_episodes: Number of evaluation episodes (= total steps)
+        max_attack_percentage: Maximum allowed attack percentage
+
+    Returns:
+        List of step dicts, one per episode/step
+    """
+    host_names = [h.name for h in hosts]
+    pct_short = 0.66
+    attack_likely = max(0.0, min(float(attack_likely), max_attack_percentage))
+    
+    total_steps = n_episodes
+    steps = []
+    global_step = 0
+
+    # Global attack state — continuous across all episodes
+    g_attacker = None
+    g_victim = None
+    g_task_type = None
+    g_subtype = None
+    g_remaining = 0       # steps remaining in current attack
+    g_cooldown = 0        # steps remaining in cooldown
+
+    for episode in range(n_episodes):
+        step_entry = {
+            "step": global_step,
+            "episode": episode,
+            "episode_step": 0,  # Always 0 for evaluation (1 step per episode)
+        }
+
+        # Handle state transitions
+        if g_remaining > 0:
+            # Attack in progress, continue it
+            g_remaining -= 1
+        elif g_cooldown > 0:
+            # Cooldown active, decrement
+            g_cooldown -= 1
+        else:
+            # No active attack or cooldown. Decide whether to start a new attack.
+            if g_attacker is not None:
+                # Previous attack just finished, reset and start cooldown
+                g_attacker = None
+                g_victim = None
+                g_task_type = None
+                g_subtype = None
+                g_cooldown = _NO_ATTACK_TIMEOUT - 1
+
+            # Decide whether to start a new attack based on target fraction
+            if random.random() < attack_likely:
+                # Start a new attack
+                g_attacker = random.choice(host_names)
+                others = [n for n in host_names if n != g_attacker]
+                g_victim = random.choice(others) if others else g_attacker
+                g_task_type = SHORT_ATTACK if random.random() < pct_short else LONG_ATTACK
+                g_subtype = random.choice(_ATTACK_SUBTYPES)
+                g_remaining = _DURATION_STEPS[g_task_type] - 1  # -1 because this step counts
+
+        # Build per-host entries for this step
+        for name in host_names:
+            others = [n for n in host_names if n != name]
+            
+            if name == g_attacker and g_remaining >= 0:
+                # This host is attacking
+                step_entry[name] = {
+                    "task_type": g_task_type,
+                    "traffic_type": "attack",
+                    "destination": g_victim,
+                    "attack_subtype": g_subtype,
+                }
+            else:
+                # Normal traffic
+                step_entry[name] = {
+                    "task_type": NORMAL,
+                    "traffic_type": random.choice(traffic_types),
+                    "destination": random.choice(others) if others else None,
+                }
+
+        steps.append(step_entry)
+        global_step += 1
+
+    return steps
+
+
 def _generate_sequence(hosts,
                         traffic_types:      list,
                         attack_likely_init: float,
                         n_episodes:         int,
                         max_steps:          int,
-                        max_attack_percentage: float = 0.5) -> List[Dict]:
+                        max_attack_percentage: float = 0.99) -> List[Dict]:
     """
     Generate n_episodes * max_steps synthetic task assignments.
 
@@ -238,45 +341,52 @@ def _generate_sequence(hosts,
     comparisons so all cooldowns are correctly honoured even though the
     entire sequence is generated in a tight loop without wall-clock time.
 
+    For evaluation (max_steps=1), uses _generate_evaluation_sequence()
+    to ensure attacks have proper duration.
+
     Each entry in the returned list is a step dict with keys:
       "step", "episode", "episode_step", and one key per host name.
     """
+    # Use specialized function for evaluation generation
+    if max_steps == 1:
+        return _generate_evaluation_sequence(
+            hosts,
+            traffic_types,
+            attack_likely_init,
+            n_episodes,
+            max_attack_percentage
+        )
+
     host_names = [h.name for h in hosts]
     pct_short  = 0.66
 
-    # Interpret attack_likely_init as the TARGET FRACTION of steps that should
-    # be attacks rather than a raw per-decision probability.  When multi-step
-    # attacks are possible (max_steps > 1), the effective attack fraction in
-    # steady-state is p*E/(1+p*(E-1)) where p is the per-decision probability
-    # and E is the mean attack duration.  We invert that formula so that the
-    # user-facing parameter directly controls the fraction of attack steps:
-    #   p = fraction / (E - fraction*(E-1))
-    # For max_steps==1 every episode is a fresh decision so fraction==p.
+    # Interpret attack_likely_init as the TARGET FRACTION of steps that should be
+    # attacks, not as a raw per-decision probability. When multi-step attacks are
+    # possible, the effective attack fraction in steady-state is p*E / (1 + p*(E-1)),
+    # where p is the per-decision probability and E is the mean attack duration.
+    # We invert this formula to derive the correct per-decision probability 'p'
+    # that will yield the desired target fraction of attack steps.
     target_fraction = max(0.0, min(float(attack_likely_init), max_attack_percentage))
-    if max_steps > 1:
-        mean_duration = (pct_short * _DURATION_STEPS[SHORT_ATTACK] +
-                         (1.0 - pct_short) * _DURATION_STEPS[LONG_ATTACK])
-        if mean_duration > 1.0 and target_fraction < 1.0:
-            denom = mean_duration - target_fraction * (mean_duration - 1.0)
-            attack_likely = min(1.0, target_fraction / denom) if denom > 0.0 else 1.0
-        else:
-            attack_likely = target_fraction
-        attack_likely = max(0.0, attack_likely)
+    mean_duration = (pct_short * _DURATION_STEPS[SHORT_ATTACK] +
+                     (1.0 - pct_short) * _DURATION_STEPS[LONG_ATTACK])
+    if mean_duration > 1.0 and target_fraction < 1.0:
+        # Inverted formula: p = F / (E - F*(E-1))
+        denominator = mean_duration - target_fraction * (mean_duration - 1.0)
+        attack_likely = min(1.0, target_fraction / denominator) if denominator > 0.0 else 1.0
     else:
         attack_likely = target_fraction
+    attack_likely = max(0.0, attack_likely)
 
     steps = []
     global_step = 0
 
     # Global attack state — at most one attacker and one victim at a time.
-    # No cooldown between attacks: attack_likely directly controls the
-    # probability of starting a new attack at each non-attack decision step,
-    # so the parameter is honoured as configured.
     g_attacker  = None   # name of the host currently attacking
     g_victim    = None   # name of the host being attacked
     g_task_type = None   # SHORT_ATTACK or LONG_ATTACK
     g_subtype   = None   # udp_flood / syn_flood / icmp_flood
     g_remaining = 0      # steps still left in the current attack
+    g_cooldown  = 0      # steps of cooldown after an attack
 
     for episode in range(n_episodes):
         # Stop any in-progress attack at each episode boundary so multi-step
@@ -295,24 +405,30 @@ def _generate_sequence(hosts,
             }
 
             if g_remaining > 0:
-                # Ongoing attack — continue for one more step.
+                # An attack is in progress, continue it.
                 g_remaining -= 1
+            elif g_cooldown > 0:
+                # Cooldown is active, do nothing and wait for it to finish.
+                g_cooldown -= 1
             else:
-                # No active attack — start a new one with probability attack_likely.
-                g_attacker  = None
-                g_victim    = None
-                g_task_type = None
-                g_subtype   = None
+                # No active attack or cooldown. Decide whether to start a new attack.
+                if g_attacker is not None:
+                    # The previous attack just finished in the last step.
+                    # Reset state and start cooldown.
+                    g_attacker = None
+                    g_victim = None
+                    g_task_type = None
+                    g_subtype = None
+                    g_cooldown = _NO_ATTACK_TIMEOUT - 1 # -1 because this step counts
 
                 if random.random() < attack_likely:
+                    # Start a new attack.
                     g_attacker = random.choice(host_names)
-                    others     = [n for n in host_names if n != g_attacker]
-                    g_victim   = random.choice(others) if others else g_attacker
-                    g_task_type = (SHORT_ATTACK if random.random() < pct_short
-                                   else LONG_ATTACK)
-                    g_subtype   = random.choice(_ATTACK_SUBTYPES)
-                    # -1 because the current step already counts as step 1.
-                    g_remaining = _DURATION_STEPS[g_task_type] - 1
+                    others = [n for n in host_names if n != g_attacker]
+                    g_victim = random.choice(others) if others else g_attacker
+                    g_task_type = SHORT_ATTACK if random.random() < pct_short else LONG_ATTACK
+                    g_subtype = random.choice(_ATTACK_SUBTYPES)
+                    g_remaining = _DURATION_STEPS[g_task_type] - 1 # -1 because this step counts
 
             # Build per-host entries for this step.
             for name in host_names:
@@ -479,6 +595,10 @@ def generate_and_save_scenario(base_env,
     max_steps          = config.env_params.max_steps
     test_episodes      = config.env_params.test_episodes
     num_hosts          = len(hosts)
+
+    # Increase steps by 10% as requested
+    max_steps = int(max_steps * 1.1)
+    test_episodes = int(test_episodes * 1.1)
 
     # Load optional attack timing and percentage parameters from config (for ATTACKS_HO distribution)
     # If not specified, uses global _DURATION_STEPS and _NO_ATTACK_TIMEOUT constants

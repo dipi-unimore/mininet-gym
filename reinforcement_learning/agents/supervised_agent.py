@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from utility.constants import (
     ATTACKS, ATTACKS_FROM_DATASET,
     CLASSIFICATION_FROM_DATASET, CLASSIFICATION,
-    GYM_TYPE, MARL_ATTACKS, MARL_ATTACKS_FROM_DATASET,
+    GYM_TYPE,
     SystemLevels,
 )
 from utility.my_files import read_data_file
@@ -47,7 +47,7 @@ class SupervisedAgent:
         self.clf = DecisionTreeClassifier(max_depth=4)
 
         # Baseline fit from dataset file — only when the file actually exists.
-        # For live gym types (attacks, classification, marl_attacks) the file may
+        # For live gym types (attacks, classification) the file may
         # not be present; in that case skip the baseline and let learn() build the
         # model from environment data incrementally.
         is_dataset_type = json_file and os.path.isfile(json_file)
@@ -59,8 +59,6 @@ class SupervisedAgent:
                 X, y = self._init_attack_detection_from_file(json_file)
             elif gym_type in [GYM_TYPE[CLASSIFICATION_FROM_DATASET], GYM_TYPE[CLASSIFICATION]]:
                 X, y = self._init_traffic_classification_from_file(json_file)
-            elif gym_type in [GYM_TYPE[MARL_ATTACKS_FROM_DATASET], GYM_TYPE[MARL_ATTACKS]]:
-                X, y = self._init_attack_detection_from_file(json_file)
             else:
                 raise ValueError(f"Unsupported gym_type for SupervisedAgent: {gym_type}")
 

@@ -1,0 +1,36 @@
+# Mobile push notifications — OPTIONAL.
+#
+# Copy this file to  config_notify_mobile.yaml  (repo root) to enable it.
+# If  config_notify_mobile.yaml  does not exist, or  notify_mobile  below is
+# false / missing, NO mobile notification config is loaded at all — the feature
+# behaves exactly as if the file were not there.
+#
+#   cp config_notify_mobile.yaml.example config_notify_mobile.yaml
+#
+# The real file is git-ignored because it can hold bot tokens.
+
+notify_mobile: true            # master switch — must be exactly true to enable
+
+provider: ntfy                 # ntfy | telegram | pushover
+
+on_finish: true                # notify when a run completes
+on_error: true                 # notify when a run aborts with an error
+
+# ── ntfy (https://ntfy.sh) ────────────────────────────────────────────────────
+# No account needed: pick a hard-to-guess topic, install the ntfy app, subscribe.
+ntfy:
+  server: https://ntfy.sh     # or your self-hosted instance
+  topic: mininetgym-CHANGE-ME-to-something-private
+  priority: default            # min | low | default | high | urgent
+  tags: white_check_mark       # optional emoji/tag shown in the notification
+
+# ── Telegram ─────────────────────────────────────────────────────────────────
+# Create a bot with @BotFather, then get your chat_id (e.g. via @userinfobot).
+telegram:
+  bot_token: ""
+  chat_id: ""
+
+# ── Pushover (https://pushover.net) ──────────────────────────────────────────
+pushover:
+  token: ""                    # application/API token
+  user: ""                     # user/group key

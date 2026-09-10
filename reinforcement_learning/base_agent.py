@@ -3,10 +3,10 @@ from abc import ABC, abstractmethod
 import time
 import numpy as np
 import json
-from reinforcement_learning.scenarios.marl.constants import COORDINATOR
+from reinforcement_learning.scenarios.marl_pz.constants import COORDINATOR
 from reinforcement_learning.network_env import NetworkEnv
 from utility.constants import ATTACKS_HO, CLASSIFICATION, CLASSIFICATION_FROM_DATASET, MARL_PZ, MARL_PZ_FROM_DATASET, GYM_TYPE, SystemLevels
-from utility.my_log import information, debug, notify_client
+from utility.my_log import information, debug, error, notify_client
 from colorama import Fore
 from gymnasium import spaces
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
@@ -523,7 +523,20 @@ class BaseAgent(ABC):
             filename += ".json"
         with open(filename, 'r') as file:
             data = json.load(file)
-        self.q_table           = np.array(data['q_table'])
+        loaded_q_table = np.array(data['q_table'])
+        if loaded_q_table.shape != self.q_table.shape:
+            # Discretization/action-space shape depends on the current env
+            # (network size, feature bins, ...); a saved table from a
+            # different config can't be safely dropped in — keep the freshly
+            # initialized table instead of risking an out-of-bounds index
+            # later during action selection.
+            error(
+                f"Model at {filename} has q_table shape {loaded_q_table.shape}, "
+                f"expected {self.q_table.shape} for the current environment — "
+                f"skipping q_table load, starting from a fresh table.\n"
+            )
+        else:
+            self.q_table = loaded_q_table
         self.learning_rate     = data['learning_rate']
         self.discount_factor   = data['discount_factor']
         self.exploration_rate  = data['exploration_rate']

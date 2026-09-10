@@ -219,7 +219,7 @@ All experiment parameters are stored in `config/default.yaml` and can be edited 
 
 Key configuration sections:
 
-- **`env_params.gym_type`** — selects the scenario: `classification`, `attacks`, `attacks_ho`, `marl_attacks`, `marl_pz` (and `*_from_dataset` variants).
+- **`env_params.gym_type`** — selects the scenario: `classification`, `attacks`, `attacks_ho`, `marl_pz` (and `*_from_dataset` variants).
 - **`env_params.episodes` / `max_steps`** — control experiment length.
 - **`env_params.attacks`** — tune attack probability, duration and SDN blocking behaviour.
 - **`env_params.communication`** — (`marl_pz` only) select the inter-agent communication strategy: `none`, `naive_broadcast`, `uaq`, `federated_sync`, `policy_exchange`, `experience_sharing`.
@@ -270,7 +270,7 @@ Key configuration sections:
 
 ### Phase 5 — Enhanced Scenarios & MARL · *Sept 2025 – May 2026*
 - [x] **Supervised Agent** baseline with incremental learning
-- [x] **MARL** hierarchical environment — Coordinator + per-host agents, message-bus communication
+- [x] **MARL** hierarchical environment — Coordinator + per-host agents, message-bus communication (legacy, later replaced by MARL-PZ and removed)
 - [x] `PerHostScanWrapper` — constant observation size across variable host counts
 - [x] Dataset-replay variants (`*_from_dataset`) for reproducible evaluation
 - [x] Attack scheduling: `likely_train` / `likely_eval` split for realistic evaluation conditions
@@ -291,7 +291,6 @@ Key configuration sections:
 
 ### Upcoming
 - [ ] Communication architecture axis (paper 7 §Communication Architecture): peer-to-peer vs. hierarchical (cluster-head aggregation for large IoT topologies), orthogonal to and applicable to any Tier B strategy — not a strategy of its own
-- [ ] S2–S4 support for SB3 deep agents (DQN weight averaging, prioritised experience replay sharing)
 - [ ] Docker Compose one-command deployment (Mininet + ODL + MininetGym)
 - [ ] Additional attack types: Slowloris, DNS amplification
 - [ ] Curriculum learning: progressive difficulty ramp across episodes

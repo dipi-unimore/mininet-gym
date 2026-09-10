@@ -3,6 +3,8 @@ warnings.filterwarnings("ignore", message=".*shimmy.*", category=UserWarning)
 import os
 import sys
 import shutil
+import numpy as np
+import torch
 from colorama import Fore
 from reinforcement_learning.agent_manager import AgentManager
 from reinforcement_learning.agents.adversarial_agent import continuous_traffic_generation
@@ -11,17 +13,15 @@ from reinforcement_learning.scenarios.attack_detect_host_observable.network_env_
 from reinforcement_learning.scenarios.attack_detect_host_observable.per_host_scan_wrapper import PerHostScanWrapper
 from reinforcement_learning.scenarios.classification.network_env_classification import NetworkEnvClassification
 from reinforcement_learning.scenarios.attack_detect.network_env_attack_detect import NetworkEnvAttackDetect
-from reinforcement_learning.scenarios.marl.network_env_marl_attack_detect import NetworkEnvMarlAttackDetect
 from reinforcement_learning.scenarios.marl_pz.marl_pz_env import MarlPzEnv
 from reinforcement_learning.scenarios.classification.traffic_classification import traffic_classification_main
 from reinforcement_learning.scenarios.attack_detect.attack_detect import attack_detect_main
-from reinforcement_learning.scenarios.marl.marl_attack_detect import marl_attack_detect_main
 from reinforcement_learning.scenarios.marl_pz.marl_pz_main import marl_pz_main
-from utility.constants import ATTACKS, ATTACKS_HO, CLASSIFICATION, FROM_DATASET, GYM_TYPE, MARL_ATTACKS, MARL_PZ, SystemLevels
+from utility.constants import ATTACKS, ATTACKS_HO, CLASSIFICATION, FROM_DATASET, GYM_TYPE, MARL_PZ, SystemLevels
 from utility.config_sanitizer import clean_load_dir
 from utility.my_files import copy_config_file_to_training_dir, create_directory_training_execution, drop_privileges, regain_root, resolve_data_file_path
 from utility.params import Params, read_config_file
-from utility.my_log import initialize_client_notifier, notify_client, set_is_from_dataset, set_log_level, set_log_file, information, error, clear_agent_summaries
+from utility.my_log import initialize_client_notifier, notify_client, notify_mobile_error, set_is_from_dataset, set_log_level, set_log_file, information, error, clear_agent_summaries
 from app.socket_handler import get_socketio_instance, register_handlers, send_live_data, send_status
 import random, threading
 import hashlib
@@ -97,6 +97,8 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
                 f"the identical scenario.json of the loaded checkpoint(s).\n"
             )
         random.seed(scenario_seed)
+        np.random.seed(scenario_seed)
+        torch.manual_seed(scenario_seed)
     config.net_config_filter = (
         f"{config.env_params.net_params.num_switches}_"
         f"{config.env_params.net_params.num_hosts}_"
@@ -139,9 +141,6 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
         env = NetworkEnvAttackDetect(config.env_params, server_user)
     elif config.env_params.gym_type.startswith(MARL_PZ):
         env = MarlPzEnv(config.env_params, server_user)
-        isMultiAgent = True
-    elif config.env_params.gym_type.startswith(MARL_ATTACKS):
-        env = NetworkEnvMarlAttackDetect(config.env_params, server_user)
         isMultiAgent = True
     else:
         env = NetworkEnvClassification(config.env_params, server_user)
@@ -231,11 +230,6 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
             set_agent_manager(am)
             marl_pz_main(config, am, env)
 
-        elif config.env_params.gym_type.startswith(MARL_ATTACKS):
-            am = AgentManager(env, config)
-            set_agent_manager(am)
-            marl_attack_detect_main(config, am, env)
-
         else:
             am = AgentManager(env, config)
             set_agent_manager(am)
@@ -243,6 +237,7 @@ def start_experiment(config_dict, pause_event=None, stop_event=None):
 
     except Exception as e:
         error(Fore.RED + f"{e}\n" + Fore.WHITE)
+        notify_mobile_error(f"{e}")
         env.stop()
 
 

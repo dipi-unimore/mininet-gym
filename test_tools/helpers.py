@@ -226,6 +226,9 @@ def test_results_from_saved_data(
     print_comparisons=True,
     agents_metrics=None,
 ):
+    """
+    Load and visualize results from saved data for a specific agent execution.
+    """
     directory_name = f"_training/{env_type}/{execution_dir}/{agent_name}"
     if not os.path.exists(directory_name):
         error(f"Directory {directory_name} does not exist")

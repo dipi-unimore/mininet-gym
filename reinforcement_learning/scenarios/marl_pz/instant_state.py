@@ -51,10 +51,10 @@ class MarlPzInstantState(BaseInstantState):
                 self.coordinator_status = {
                     "id":                       status_id,
                     "status":                   status,
-                    "packets":                  self.coordinator_state[0],
-                    "packets_percentage_change": self.coordinator_state[1],
-                    "bytes":                    self.coordinator_state[2],
-                    "bytes_percentage_change":  self.coordinator_state[3],
+                    "packets":                  float(self.coordinator_state[0]),
+                    "packets_percentage_change": float(self.coordinator_state[1]),
+                    "bytes":                    float(self.coordinator_state[2]),
+                    "bytes_percentage_change":  float(self.coordinator_state[3]),
                 }
                 self.status = {
                     "id":                       status_id,
@@ -71,14 +71,14 @@ class MarlPzInstantState(BaseInstantState):
                     self.host_statuses[name] = {
                         "id":                                    status_id,
                         "status":                                status,
-                        "received_packets":                      hs[0],
-                        "received_packets_percentage_change":    hs[1],
-                        "received_bytes":                        hs[2],
-                        "received_bytes_percentage_change":      hs[3],
-                        "transmitted_packets":                   hs[4],
-                        "transmitted_packets_percentage_change": hs[5],
-                        "transmitted_bytes":                     hs[6],
-                        "transmitted_bytes_percentage_change":   hs[7],
+                        "received_packets":                      float(hs[0]),
+                        "received_packets_percentage_change":    float(hs[1]),
+                        "received_bytes":                        float(hs[2]),
+                        "received_bytes_percentage_change":      float(hs[3]),
+                        "transmitted_packets":                   float(hs[4]),
+                        "transmitted_packets_percentage_change": float(hs[5]),
+                        "transmitted_bytes":                     float(hs[6]),
+                        "transmitted_bytes_percentage_change":   float(hs[7]),
                     }
 
     # ------------------------------------------------------------------

@@ -31,7 +31,6 @@ from colorama import Fore
 from gymnasium import spaces
 import gymnasium as gym
 from pettingzoo import ParallelEnv
-from pettingzoo import ParallelEnv
 
 from reinforcement_learning.network_env import (
     NetworkEnv,
@@ -69,7 +68,6 @@ from .constants import (
     COORDINATOR_ACTIONS,
     COORDINATOR_REWARDS,
     COORDINATOR_STATUS_ID_MAPPING,
-    CommStrategy,
     CommStrategy,
     HOST_STATUS_ID_MAPPING,
     NORMALIZED,
@@ -127,41 +125,12 @@ def _compute_attack_reward_scale(num_hosts: int) -> float:
     return float(max(1.0, min((num_hosts - 1) / 2.0, 8.0)))
 
 
-def _compute_attack_reward_scale(num_hosts: int) -> float:
-    """
-    Reward multiplier for attack-class terms, proportional to the class
-    imbalance introduced by the number of hosts (mirrors
-    attack_detect_host_observable.per_host_scan_wrapper._compute_attack_reward_scale).
-
-    With N hosts and ~2 attack-related hosts per round, normal traffic
-    dominates the ground truth roughly (N-2):2. Without compensation, the
-    expected reward of an "always predict normal" policy exceeds that of an
-    agent that actually learns to detect attacks once N is large enough,
-    since CORRECT_NORMAL_TRAFFIC accumulates on the vast majority of steps
-    while attack-detection rewards only pay off on a handful of them. Scaling
-    the attack-related terms (but not CORRECT_NORMAL_TRAFFIC, which stays
-    constant) keeps the "always normal" degenerate policy net-negative in
-    expectation regardless of network size.
-
-        num_hosts=3  → scale=1.0
-        num_hosts=6  → scale=2.5
-        num_hosts=10 → scale=4.5
-    """
-    return float(max(1.0, min((num_hosts - 1) / 2.0, 8.0)))
-
-
 # ────────────────────────────────────────────────────────────────────────────
 # MarlPzEnv
 # ────────────────────────────────────────────────────────────────────────────
 
 class MarlPzEnv(NetworkEnv, ParallelEnv):
-class MarlPzEnv(NetworkEnv, ParallelEnv):
     """
-    PettingZoo-compatible parallel MARL environment for network attack detection.
-
-    Inherits from NetworkEnv (Mininet/gym machinery) and PettingZoo ParallelEnv
-    (parallel multi-agent interface).  The PZ interface takes precedence for
-    reset() / step() signatures; gym-compat is provided via SingleAgentView.
     PettingZoo-compatible parallel MARL environment for network attack detection.
 
     Inherits from NetworkEnv (Mininet/gym machinery) and PettingZoo ParallelEnv
@@ -170,11 +139,9 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
 
     Each host has its own agent observing local traffic.
     A coordinator agent (optional) aggregates signals from all hosts.
-    A coordinator agent (optional) aggregates signals from all hosts.
     All agents act simultaneously each step.
     """
 
-    metadata = {"name": "marl_pz_v1", "render_modes": ["human", "rgb_array"]}
     metadata = {"name": "marl_pz_v1", "render_modes": ["human", "rgb_array"]}
 
     # ------------------------------------------------------------------
@@ -218,101 +185,9 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         self._use_coordinator = bool(
             getattr(params.attacks, 'use_coordinator', True)
         )
-        self._unblock_min_hold = int(
-            getattr(params.attacks, 'unblock_min_hold_rounds', 2)
-        )
         self._unblock_normal_streak = int(
             getattr(params.attacks, 'unblock_required_normal_streak', 2)
         )
-
-        # ── Communication strategy ────────────────────────────────────────
-        comm_cfg = getattr(params, 'communication', None) or {}
-        if not isinstance(comm_cfg, dict):
-            comm_cfg = vars(comm_cfg) if hasattr(comm_cfg, '__dict__') else {}
-
-        strategy = comm_cfg.get('strategy', None)
-        if strategy is None:
-            # Backward compat: derive from legacy use_coordinator param
-            strategy = (CommStrategy.NAIVE_BROADCAST
-                        if self._use_coordinator else CommStrategy.NONE)
-
-        if strategy not in CommStrategy.IMPLEMENTED:
-            raise NotImplementedError(
-                f"Communication strategy '{strategy}' is not yet implemented. "
-                f"Implemented strategies: {CommStrategy.IMPLEMENTED}"
-            )
-
-        # Tier B — peer coordination mechanisms (S2/S3/S4). Combinable, unlike
-        # the Tier A alerting channel above. `strategies` is the new list
-        # field; older configs may instead have put a single Tier B value
-        # directly into `strategy` (the pre-split flat model) — fold that in
-        # for backward compatibility, defaulting the alerting channel to
-        # naive_broadcast exactly as it implicitly did before.
-        strategies_cfg = comm_cfg.get('strategies', []) or []
-        if not isinstance(strategies_cfg, (list, tuple, set, frozenset)):
-            strategies_cfg = [strategies_cfg]
-
-        if strategy in CommStrategy.TIER_B:
-            strategies_cfg = list(strategies_cfg) + [strategy]
-            strategy = CommStrategy.NAIVE_BROADCAST
-
-        for s in strategies_cfg:
-            if s not in CommStrategy.TIER_B:
-                raise ValueError(
-                    f"'{s}' in communication.strategies is not a valid peer "
-                    f"coordination mechanism. Allowed: {CommStrategy.TIER_B}"
-                )
-
-        if strategy not in CommStrategy.TIER_A:
-            raise ValueError(
-                f"Communication strategy '{strategy}' is not a valid alerting "
-                f"channel (Tier A). Allowed: {CommStrategy.TIER_A}"
-            )
-
-        if strategy == CommStrategy.NONE and strategies_cfg:
-            raise ValueError(
-                "communication.strategies requires an active alerting channel "
-                "(naive_broadcast or uaq) — peer coordination mechanisms "
-                f"{strategies_cfg} cannot run with strategy: none."
-            )
-
-        self._comm_strategy: str = strategy
-        self._comm_strategies: frozenset = frozenset(strategies_cfg)
-
-        # Strategy is the master switch for coordinator presence
-        self._use_coordinator = (strategy != CommStrategy.NONE)
-
-        # UAQ (S1) params — only active when strategy == CommStrategy.UAQ
-        uaq_cfg = comm_cfg.get('uaq', {}) or {}
-        if not isinstance(uaq_cfg, dict):
-            uaq_cfg = vars(uaq_cfg) if hasattr(uaq_cfg, '__dict__') else {}
-        self._uaq_tau: float        = float(uaq_cfg.get('tau', 0.8))
-        self._uaq_tau_expert: float = float(uaq_cfg.get('tau_expert', 0.3))
-        self._uaq_cooldown: int     = int(uaq_cfg.get('cooldown_steps', 5))
-
-        # Per-agent entropy (injected by training loop each step; default = 1.0 = max uncertain)
-        self._uaq_uncertainties: Dict[str, float] = {}
-
-        # Full comm config dict — exposed for training-loop helpers (S2/S3/S4)
-        # Deep-convert any nested Params objects so callers can use .get() safely.
-        def _deep_to_dict(obj):
-            if hasattr(obj, '__dict__'):
-                return {k: _deep_to_dict(v) for k, v in vars(obj).items()}
-            return obj
-        self._comm_cfg: dict = {k: _deep_to_dict(v) for k, v in comm_cfg.items()}
-
-        # Per-episode message counters (reset on env.reset(); read by training loop for logging)
-        #   host_total   — host→coordinator messages with value != 0 (any alert)
-        #   confident    — UAQ only: messages with value == 2 (confident attack)
-        #   uncertain    — UAQ only: messages with value == 1 (uncertain, filtered out)
-        self._ep_msgs: dict = {'host_total': 0, 'confident': 0, 'uncertain': 0}
-
-        # Per-episode, per-host alert message counters (mirrors _ep_msgs but broken
-        # down by host, so results/live view can show which host is communicating).
-        # {host_name: {'total': int, 'confident': int, 'uncertain': int}}
-        self._ep_msgs_per_host: Dict[str, dict] = {
-            h.name: {'total': 0, 'confident': 0, 'uncertain': 0} for h in self.hosts
-        }
 
         # ── Communication strategy ────────────────────────────────────────
         comm_cfg = getattr(params, 'communication', None) or {}
@@ -443,23 +318,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         self.__dict__.pop('observation_space', None)
         self.__dict__.pop('action_space', None)
 
-        # ── PettingZoo parameters ──────────────────────────────────────
-        pz_cfg = getattr(params, 'pettingzoo', None) or {}
-        if not isinstance(pz_cfg, dict):
-            pz_cfg = vars(pz_cfg) if hasattr(pz_cfg, '__dict__') else {}
-        self._local_ratio: float = float(pz_cfg.get('local_ratio', 1.0))
-        self._shared_reward: bool = bool(pz_cfg.get('shared_reward', False))
-        self._render_mode = pz_cfg.get('render_mode', None)
-        max_cycles = pz_cfg.get('max_cycles', None)
-        if max_cycles is not None and str(max_cycles).lower() not in ('null', 'none', ''):
-            self.max_steps = int(max_cycles)
-
-        # Remove gym-compat singular attrs so PZ observation_space(agent) /
-        # action_space(agent) methods are reachable (not shadowed by instance attrs).
-        # Agent-level gym access is provided by SingleAgentView.
-        self.__dict__.pop('observation_space', None)
-        self.__dict__.pop('action_space', None)
-
         # Shared state
         coordinator_state = np.zeros(4, dtype=np.float32)
         messages = self._init_messages()
@@ -553,40 +411,25 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         # SingleAgentView creates its own Box(0,1) space when state_mode=NORMALIZED.
         self.observation_spaces: Dict[str, spaces.Box] = {}
         self.action_spaces: Dict[str, spaces.Discrete] = {}
-        # PettingZoo public dicts: observation_spaces[agent] / action_spaces[agent]
-        # Bounds match the raw observations returned by step()/reset() (_get_obs_raw).
-        # SingleAgentView creates its own Box(0,1) space when state_mode=NORMALIZED.
-        self.observation_spaces: Dict[str, spaces.Box] = {}
-        self.action_spaces: Dict[str, spaces.Discrete] = {}
 
         for agent_id in self.possible_agents:
             if agent_id == COORDINATOR:
                 self.observation_spaces[agent_id] = spaces.Box(
                     low=self._coord_low_raw,
                     high=self._coord_high_raw,
-                self.observation_spaces[agent_id] = spaces.Box(
-                    low=self._coord_low_raw,
-                    high=self._coord_high_raw,
                     dtype=np.float32,
                 )
-                self.action_spaces[agent_id] = spaces.Discrete(COORDINATOR_ACTIONS.NUMBER)
                 self.action_spaces[agent_id] = spaces.Discrete(COORDINATOR_ACTIONS.NUMBER)
             else:
                 self.observation_spaces[agent_id] = spaces.Box(
                     low=self._host_low_raw,
                     high=self._host_high_raw,
-                self.observation_spaces[agent_id] = spaces.Box(
-                    low=self._host_low_raw,
-                    high=self._host_high_raw,
                     dtype=np.float32,
                 )
-                self.action_spaces[agent_id] = spaces.Discrete(AGENT_ACTIONS.NUMBER)
                 self.action_spaces[agent_id] = spaces.Discrete(AGENT_ACTIONS.NUMBER)
 
         # Gymnasium compat (first host space is the default)
         first_host = self.hosts[0].name if self.hosts else COORDINATOR
-        self.observation_space = self.observation_spaces[first_host]
-        self.action_space = self.action_spaces[first_host]
         self.observation_space = self.observation_spaces[first_host]
         self.action_space = self.action_spaces[first_host]
 
@@ -595,24 +438,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         self.high = self._host_high_raw
         self.low_to_normalize  = self.low
         self.high_to_normalize = self.high
-
-    # ------------------------------------------------------------------
-    # PettingZoo API — required overrides
-    # ------------------------------------------------------------------
-
-    def observation_space(self, agent: str) -> spaces.Space:
-        """Return the observation space for agent (PettingZoo API)."""
-        return self.observation_spaces[agent]
-
-    def action_space(self, agent: str) -> spaces.Space:
-        """Return the action space for agent (PettingZoo API)."""
-        return self.action_spaces[agent]
-
-    def state(self) -> np.ndarray:
-        """Global state for centralized-training / CTDE algorithms (PZ API)."""
-        return self.global_state.state
-
-    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # PettingZoo API — required overrides
@@ -655,21 +480,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         """
         self._uaq_uncertainties[agent_id] = float(np.clip(entropy_normalized, 0.0, 1.0))
 
-    def set_agent_uncertainty(self, agent_id: str, entropy_normalized: float):
-        """Inject per-agent policy entropy for UAQ (S1) strategy.
-
-        Called by the training loop *before* env.step() on each step.
-        entropy_normalized ∈ [0..1]:
-          1.0 = maximum uncertainty (uniform policy — all Q-values equal)
-          0.0 = fully certain (all probability mass on one action)
-
-        The value is used in _execute_agent_action() to encode host messages:
-          H > tau         → uncertain flag  → alert filtered by coordinator
-          H <= tau_expert → confident flag  → alert reaches coordinator obs
-          tau_expert < H <= tau → moderate confidence → no message sent
-        """
-        self._uaq_uncertainties[agent_id] = float(np.clip(entropy_normalized, 0.0, 1.0))
-
     # ------------------------------------------------------------------
     # PettingZoo interface
     # ------------------------------------------------------------------
@@ -689,12 +499,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         self._total_count = 0
         self.agents = list(self.possible_agents)
         self._agent_corrects = {a: 0 for a in self.possible_agents}
-
-        # Reset per-episode message counters
-        self._ep_msgs = {'host_total': 0, 'confident': 0, 'uncertain': 0}
-        self._ep_msgs_per_host = {
-            h.name: {'total': 0, 'confident': 0, 'uncertain': 0} for h in self.hosts
-        }
 
         # Reset per-episode message counters
         self._ep_msgs = {'host_total': 0, 'confident': 0, 'uncertain': 0}
@@ -746,20 +550,8 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         ground_truths = self._snapshot_ground_truths()
 
         # Calculate per-agent individual rewards
-        # Calculate per-agent individual rewards
         rewards = {a: self._reward_for_agent(a, actions.get(a, 0), ground_truths[a])
                    for a in self.possible_agents}
-
-        # Apply PettingZoo local_ratio / shared_reward blending
-        if self._shared_reward and rewards:
-            mean_r = sum(rewards.values()) / len(rewards)
-            rewards = {a: mean_r for a in rewards}
-        elif self._local_ratio < 1.0 and rewards:
-            mean_r = sum(rewards.values()) / len(rewards)
-            rewards = {
-                a: self._local_ratio * r + (1.0 - self._local_ratio) * mean_r
-                for a, r in rewards.items()
-            }
 
         # Apply PettingZoo local_ratio / shared_reward blending
         if self._shared_reward and rewards:
@@ -918,6 +710,29 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
 
         time.sleep(1.0)
 
+    def _is_incoming_attack_mitigated(self, victim_host_name: str) -> bool:
+        """
+        True when victim is tagged UNDER_ATTACK but all known attackers
+        targeting that victim are currently blocked.
+        """
+        host_tasks = getattr(self, "host_tasks", None)
+        if not isinstance(host_tasks, dict) or not self.hosts:
+            return False
+
+        attacker_indexes = []
+        for idx, host in enumerate(self.hosts):
+            task = host_tasks.get(host.name, {}) if isinstance(host_tasks.get(host.name, {}), dict) else {}
+            task_type = task.get("task_type")
+            destination = task.get("destination")
+            if destination == victim_host_name and task_type in ("short_attack", "long_attack"):
+                attacker_indexes.append(idx)
+
+        if not attacker_indexes:
+            return False
+
+        return all(not self.status_links[idx] for idx in attacker_indexes)
+
+
     def _evaluate_traffic(self):
         """Update per-host statuses from network, remap blocked attacks, notify client."""
         statuses, _ = self.update_hosts_status()
@@ -926,6 +741,12 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
             for i, host in enumerate(self.hosts):
                 if not self.status_links[i] and statuses.get(host.name) == HostStatus.ATTACKING:
                     statuses[host.name] = HostStatus.OUT_ATTACK_BLOCKED
+
+            # Remap UNDER_ATTACK to INCOMING_BLOCKED_ATTACK if all attackers are blocked
+            for host in self.hosts:
+                if (statuses.get(host.name) == HostStatus.UNDER_ATTACK and
+                        self._is_incoming_attack_mitigated(host.name)):
+                    statuses[host.name] = HostStatus.INCOMING_BLOCKED_ATTACK
 
         # Derive coordinator status (only when coordinator is enabled)
         host_names = {h.name for h in self.hosts}
@@ -966,7 +787,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
             self.global_state.links_status[host.name] = 1 if self.status_links[i] else 0
 
         traffic_data = self.global_state.get_network_traffic_status()
-        traffic_data["commData"] = self.global_state.get_comm_snapshot(self._comm_strategy)
         traffic_data["commData"] = self.global_state.get_comm_snapshot(self._comm_strategy)
         notify_client(level=SystemLevels.DATA, traffic_data=traffic_data)
 
@@ -1020,13 +840,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         """Return the raw (non-normalized) observation for one agent."""
         if agent_id == COORDINATOR:
             cs = self.global_state.coordinator_state
-            msgs = self.global_state.get_messages(COORDINATOR)
-            if self._comm_strategy == CommStrategy.UAQ:
-                # UAQ: coordinator sees only *confident* alerts (msg_val == 2)
-                msg_count = float(sum(1 for v in msgs.values() if v == 2))
-            else:
-                # naive_broadcast: any non-zero message counts
-                msg_count = float(sum(1 for v in msgs.values() if v != 0))
             msgs = self.global_state.get_messages(COORDINATOR)
             if self._comm_strategy == CommStrategy.UAQ:
                 # UAQ: coordinator sees only *confident* alerts (msg_val == 2)
@@ -1135,7 +948,8 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                            HOST_STATUS_ID_MAPPING['out_attack_blocked']):
                 expected = AGENT_ACTIONS.ATTACK_OUT
             elif gt_id == HOST_STATUS_ID_MAPPING['incoming_blocked_attack']:
-                expected = AGENT_ACTIONS.ATTACK_IN
+                # A saved victim is effectively in a normal state.
+                expected = AGENT_ACTIONS.NORMAL_TRAFFIC
             else:
                 expected = AGENT_ACTIONS.NORMAL_TRAFFIC
             return action == expected
@@ -1176,45 +990,42 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                            HOST_STATUS_ID_MAPPING['out_attack_blocked']):
                 gt_label = HostStatus.ATTACKING
             elif gt_id == HOST_STATUS_ID_MAPPING['incoming_blocked_attack']:
-                gt_label = HostStatus.UNDER_ATTACK
+                # A saved victim is effectively in a normal state.
+                gt_label = HostStatus.NORMAL
             else:
                 gt_label = HostStatus.NORMAL
-
-            if is_blocked and gt_label == HostStatus.NORMAL:
-                reward += REWARDS.LINK_OFF
 
             if action == AGENT_ACTIONS.NORMAL_TRAFFIC:
                 if gt_label == HostStatus.NORMAL:
                     # Not scaled: reward for normal stays constant regardless
                     # of host count, so "always predict normal" does not
                     # become more attractive as the network grows.
-                    # Not scaled: reward for normal stays constant regardless
-                    # of host count, so "always predict normal" does not
-                    # become more attractive as the network grows.
-                    reward += REWARDS.CORRECT_NORMAL_TRAFFIC
+                    if is_blocked:
+                        # Penalize keeping a normal host blocked, even if predicted correctly.
+                        reward += REWARDS.FALSE_POSITIVE  # e.g., -1.5 (unscaled)
+                    else:
+                        reward += REWARDS.CORRECT_NORMAL_TRAFFIC
                 else:
-                    reward += REWARDS.FALSE_NEGATIVE * scale
                     reward += REWARDS.FALSE_NEGATIVE * scale
             elif action == AGENT_ACTIONS.ATTACK_IN:
                 if gt_label == HostStatus.UNDER_ATTACK:
                     reward += REWARDS.CORRECT_UNDER_ATTACK_DETECTION * scale
-                    reward += REWARDS.CORRECT_UNDER_ATTACK_DETECTION * scale
                 elif gt_label == HostStatus.NORMAL:
-                    reward += REWARDS.FALSE_POSITIVE * scale
-                    reward += REWARDS.FALSE_POSITIVE * scale
+                    reward += REWARDS.FALSE_POSITIVE * scale                    
                 elif gt_label == HostStatus.ATTACKING:
-                    reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
                     reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
             elif action == AGENT_ACTIONS.ATTACK_OUT:
                 if gt_label == HostStatus.ATTACKING:
                     reward += REWARDS.CORRECT_ATTACK_DETECTION * scale
-                    reward += REWARDS.CORRECT_ATTACK_DETECTION * scale
                 elif gt_label == HostStatus.NORMAL:
-                    reward += REWARDS.FALSE_POSITIVE * scale
                     reward += REWARDS.FALSE_POSITIVE * scale
                 elif gt_label == HostStatus.UNDER_ATTACK:
                     reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
-                    reward += REWARDS.WRONG_ATTACK_DIRECTION_DETECTED * scale
+
+            # General penalty for having a link down on a non-attacking host.
+            # This applies regardless of the action taken in the current step.
+            if is_blocked and gt_label != HostStatus.ATTACKING and gt_label != HostStatus.OUT_ATTACK_BLOCKED:
+                reward += REWARDS.LINK_OFF
 
             return reward
 
@@ -1226,12 +1037,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                                ground_truth: dict):
         """Execute action side-effects: drop rules and messaging."""
         if agent_id == COORDINATOR:
-            # Coordinator broadcasts its RL decision to all hosts.
-            # Both naive_broadcast and UAQ use the coordinator's own action;
-            # the difference lies in what the coordinator *observes* (see _get_obs_raw).
-            broadcast_val = 1 if action == CoordinatorActions.ATTACK else 0
-            for h in self.hosts:
-                self.global_state.set_message(h.name, COORDINATOR, broadcast_val)
             # Coordinator broadcasts its RL decision to all hosts.
             # Both naive_broadcast and UAQ use the coordinator's own action;
             # the difference lies in what the coordinator *observes* (see _get_obs_raw).
@@ -1287,46 +1092,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                 self._ep_msgs_per_host[agent_id]['uncertain'] += 1
                 self._ep_msgs_per_host[agent_id]['total'] += 1
         # CommStrategy.NONE: no message sent
-        # Send message to coordinator (only when a communication strategy is active)
-        if self._comm_strategy == CommStrategy.NAIVE_BROADCAST:
-            # S0: binary alert — 0 = normal, 1 = attack (any direction)
-            msg_val = 1 if action != AGENT_ACTIONS.NORMAL_TRAFFIC else 0
-            self.global_state.set_message(COORDINATOR, agent_id, msg_val)
-            if msg_val != 0:
-                self._ep_msgs['host_total'] += 1
-                self._ep_msgs_per_host[agent_id]['total'] += 1
-        elif self._comm_strategy == CommStrategy.UAQ:
-            # S1: three-valued message encoding:
-            #   0 = no attack, OR attack with moderate confidence
-            #       (tau_expert < H <= tau) — host withholds the alert
-            #   1 = attack, *uncertain* (H > tau) — filtered by coordinator
-            #   2 = attack, *confident* (H <= tau_expert) — reaches coordinator obs
-            entropy = self._uaq_uncertainties.get(agent_id, 1.0)
-            is_confident = entropy <= self._uaq_tau_expert
-            is_uncertain = entropy > self._uaq_tau
-            if action == AGENT_ACTIONS.NORMAL_TRAFFIC:
-                msg_val = 0
-            elif is_confident:
-                msg_val = 2
-            elif is_uncertain:
-                msg_val = 1
-            else:
-                # Moderate confidence (tau_expert < H <= tau): not certain enough
-                # to be trusted as "confident", not uncertain enough to warrant
-                # flagging — the host stays silent to reduce alert overhead.
-                msg_val = 0
-            self.global_state.set_message(COORDINATOR, agent_id, msg_val)
-            if msg_val == 2:
-                self._ep_msgs['confident'] += 1
-                self._ep_msgs['host_total'] += 1
-                self._ep_msgs_per_host[agent_id]['confident'] += 1
-                self._ep_msgs_per_host[agent_id]['total'] += 1
-            elif msg_val == 1:
-                self._ep_msgs['uncertain'] += 1
-                self._ep_msgs['host_total'] += 1
-                self._ep_msgs_per_host[agent_id]['uncertain'] += 1
-                self._ep_msgs_per_host[agent_id]['total'] += 1
-        # CommStrategy.NONE: no message sent
 
         if not self._apply_drop_rules:
             return
@@ -1337,13 +1102,12 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                 self._normal_streak_blocked[agent_id] = (
                     self._normal_streak_blocked.get(agent_id, 0) + 1
                 )
-                held = self._step_count - self._block_started_step.get(agent_id, 0)
-                if (held >= self._unblock_min_hold
-                        and self._normal_streak_blocked.get(agent_id, 0)
-                        >= self._unblock_normal_streak):
+                # Unblock as soon as the agent consistently predicts NORMAL.
+                if self._normal_streak_blocked.get(agent_id, 0) >= self._unblock_normal_streak:
                     if unblock_flow_delete(self.net, agent_id):
                         time.sleep(0.02)
                         self.status_links[host_index] = True
+                        self._evaluate_traffic()
                         self._normal_streak_blocked[agent_id] = 0
             else:
                 self._normal_streak_blocked[agent_id] = 0
@@ -1353,6 +1117,7 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                 if block_flow_drop(self.net, agent_id):
                     time.sleep(0.02)
                     self.status_links[host_index] = False
+                    self._evaluate_traffic()
                     self._block_started_step[agent_id] = self._step_count
                     self._normal_streak_blocked[agent_id] = 0
 
@@ -1364,8 +1129,6 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                     ground_truth: dict, done: bool, truncated: bool) -> dict:
         """Build the infos dict for a single agent (compatible with base_agent.manage_step_data)."""
         gt_id = ground_truth.get('id', 0)
-        if gt_id < 0:
-            gt_id = 0
         if gt_id < 0:
             gt_id = 0
         gt_status = ground_truth.get('status', 'normal')
@@ -1445,18 +1208,6 @@ class SingleAgentView(gym.Env):
         self.state_mode = state_mode
         self.is_coordinator = (agent_id == COORDINATOR)
 
-        # RAW: inherit raw bounds that match what MarlPzEnv.step() actually returns.
-        # NORMALIZED: SingleAgentView normalizes obs to [0,1], so declare Box(0,1).
-        if state_mode == NORMALIZED:
-            n_feat = marl_env.observation_spaces[agent_id].shape[0]
-            self.observation_space = spaces.Box(
-                low=np.zeros(n_feat, dtype=np.float32),
-                high=np.ones(n_feat, dtype=np.float32),
-                dtype=np.float32,
-            )
-        else:
-            self.observation_space = marl_env.observation_spaces[agent_id]
-        self.action_space = marl_env.action_spaces[agent_id]
         # RAW: inherit raw bounds that match what MarlPzEnv.step() actually returns.
         # NORMALIZED: SingleAgentView normalizes obs to [0,1], so declare Box(0,1).
         if state_mode == NORMALIZED:

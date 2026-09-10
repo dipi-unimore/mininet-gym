@@ -117,6 +117,7 @@ def plot_qtable_coverage_dynamic_actions_from_statuses(
     features=None,
 ):
     """Plot one subplot per action using env discretization and save a PNG."""
+    print(f"Generating Q-table coverage plot from statuses data to: {output_path}")
     statuses_list = _extract_statuses_list(statuses_data)
     if not statuses_list:
         raise ValueError("No statuses data available")
@@ -562,3 +563,24 @@ def plot_qtable_coverage_from_statuses(
         "rows": int(len(df)),
         "counts": counts,
     }
+    
+
+if __name__ == "__main__":
+    # Example usage
+    try:
+        statuses_path, statuses = load_statuses_json(
+            statuses_path="_training/attacks_ho/20260724-172536_1_5_5/statuses.json",
+            preferred_keywords=("qlearning", "sarsa", "tabular"),
+        )
+        print(f"Loaded {len(statuses)} statuses from {statuses_path}")
+        result = plot_qtable_coverage_dynamic_actions_from_statuses(
+            statuses_data=statuses,
+            output_path="_training/_debug/attacks_ho/20260724-172536_1_5_5/",
+            low=[0, -50, 0, -30, 0, -50, 0, -30],
+            high=[2100, 50, 2100000, 30, 2100, 50, 2100000, 30],
+            n_bins=4,
+            features=None,
+        )
+        print(f"Q-table coverage plot saved to: {result['counts']}")
+    except Exception as e:
+        print(f"Error generating Q-table coverage plot: {e}")

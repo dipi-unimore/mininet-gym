@@ -5,7 +5,7 @@ server_user: mininet-gym
 log_level: info  #info, #debug
 random_seed: 77
 env_params:
-  gym_type: attacks_ho #_from_dataset #How to read traffic: [classification_from_dataset, classification_with_syncronize, classification_without_syncronize, real_time, attacks, attacks_from_dataset, attacks_ho, attacks_ho_from_dataset, marl_attacks, marl_attacks_from_dataset].
+  gym_type: attacks_ho #_from_dataset #How to read traffic: [classification_from_dataset, classification_with_syncronize, classification_without_syncronize, real_time, attacks, attacks_from_dataset, attacks_ho, attacks_ho_from_dataset, marl_pz, marl_pz_from_dataset].
   #agent_execution_mode: "sequential"  # "parallel" (default, normal behavior) or "sequential" (an agent acts after the other, useful for debugging and to understand the environment behavior)
   #classification
   #csv_file: traffic.csv #necessary only if gym_type: classification_from_dataset and for agent supervised
@@ -48,7 +48,7 @@ agents:
     skip_learn: false
     show_action: false
     load: False
-    load_dir: "marl_attacks/20251123-081513_1_5_5/Q-learning_quick/"
+    load_dir: "attacks_ho/20251123-081513_1_5_5/Q-learning_quick/"
     save: true
     learning_rate: 0.2
     discount_factor: 0.3

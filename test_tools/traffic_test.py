@@ -5,7 +5,7 @@ Standalone framework pipeline test — no external controller required.
 Usage:
   sudo python3 test_tools/traffic_test.py \\
       --statuses _training/attacks_ho/20260523-075157_1_5_5/statuses.json \\
-      --step 5 [--step-end 10] [--scenario attack_ho|marl] [--n-bins 4]
+      --step 5 [--step-end 10] [--scenario attack_ho] [--n-bins 4]
 
 What it does:
   1. Reads host names from statuses.json
@@ -49,7 +49,6 @@ from utility.network_flows import get_data_flow, initialize_monitoring
 from reinforcement_learning.network_env import (
     get_normalized_state,
     get_log_bin_index,
-    get_linear_bin_index,
 )
 from reinforcement_learning.scenarios.attack_detect_host_observable.\
     network_env_attack_detect_per_host_observable import (
@@ -225,21 +224,13 @@ def read_host_states(net, prev_totals: dict) -> tuple:
 def make_bounds(scenario: str, thr_pkts, thr_var_pkts, thr_bytes,
                 thr_var_bytes, num_hosts):
     """Return (low, high) arrays matching what the env uses."""
-    if scenario == "marl":
-        # host_agent_env.py — per-host (fixed)
-        low  = np.array([0, -thr_var_pkts, 0, -thr_var_bytes,
-                         0, -thr_var_pkts, 0, -thr_var_bytes, 0])
-        high = np.array([thr_pkts, thr_var_pkts, thr_bytes, thr_var_bytes,
-                         thr_pkts, thr_var_pkts, thr_bytes, thr_var_bytes,
-                         num_hosts])
-    else:
-        # network_env_attack_detect_per_host_observable.py — per-host (no ×num_hosts)
-        low  = np.array([0, -thr_var_pkts, 0, -thr_var_bytes,
-                         0, -thr_var_pkts, 0, -thr_var_bytes])
-        high = np.array([thr_pkts, thr_var_pkts,
-                         thr_bytes, thr_var_bytes,
-                         thr_pkts, thr_var_pkts,
-                         thr_bytes, thr_var_bytes])
+    # network_env_attack_detect_per_host_observable.py — per-host (no ×num_hosts)
+    low  = np.array([0, -thr_var_pkts, 0, -thr_var_bytes,
+                     0, -thr_var_pkts, 0, -thr_var_bytes])
+    high = np.array([thr_pkts, thr_var_pkts,
+                     thr_bytes, thr_var_bytes,
+                     thr_pkts, thr_var_pkts,
+                     thr_bytes, thr_var_bytes])
     return low, high
 
 
@@ -247,22 +238,8 @@ def discretize(state8, low, high, n_bins, scenario):
     """
     Discretize an 8-element host state using the same logic as the real env.
     attack_ho → discretize_attack_detect_ho_state()
-    marl      → host_agent_env.get_discretized_state() logic
     """
-    if scenario == "attack_ho":
-        return discretize_attack_detect_ho_state(state8, low[:8], high[:8], n_bins)
-    # MARL: same algorithm as host_agent_env.get_discretized_state
-    from reinforcement_learning.network_env import get_custom_bin_index
-    disc = []
-    for i, val in enumerate(state8):
-        if i in (1, 3):
-            b = get_linear_bin_index(val, low[i], high[i], n_bins - 1) + 1
-        elif i == 0:
-            b = get_custom_bin_index(val, low[i], high[i], n_bins)
-        else:
-            b = get_linear_bin_index(val, low[i], high[i], n_bins)
-        disc.append(int(b))
-    return tuple(disc)
+    return discretize_attack_detect_ho_state(state8, low[:8], high[:8], n_bins)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -352,8 +329,6 @@ def print_step_result(step_idx, step, host_states, low, high, n_bins, scenario):
 _SCENARIO_YAML = {
     "attack_ho": os.path.join(_ROOT, "reinforcement_learning", "scenarios",
                               "attack_detect_host_observable", "scenario_env_param.yaml"),
-    "marl":      os.path.join(_ROOT, "reinforcement_learning", "scenarios",
-                              "marl", "scenario_env_param.yaml"),
 }
 
 
@@ -394,7 +369,7 @@ def main():
     ap.add_argument("--step",     default=0,    type=int, help="first step to test (default 0)")
     ap.add_argument("--step-end", default=None, type=int,
                     help="last step inclusive (default: end of file when --pause, else same as --step)")
-    ap.add_argument("--scenario", default="attack_ho", choices=["attack_ho", "marl"],
+    ap.add_argument("--scenario", default="attack_ho", choices=["attack_ho"],
                     help="which env's normalisation/discretization to use (default attack_ho)")
     ap.add_argument("--n-bins",   default=4, type=int, help="Q-table bins (default 4)")
     ap.add_argument("--thr-pkts",      default=None, type=int,

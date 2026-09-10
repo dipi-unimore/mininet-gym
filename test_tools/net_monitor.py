@@ -26,7 +26,7 @@ BINS [TXp,TXb|RXp,RXb]:
     Each digit is the Q-table bin assigned to that value.
     0=idle  1=normal  2=attack-range  3=extreme(overflow)
     Default (attack_ho): high = thr_pkts * n_hosts (220 000) → bin3 needs ≥220 000 pkt/s.
-    --per-host (MARL): high = thr_pkts (22 000) → bin3 needs ≥22 000 pkt/s (attack visible).
+    --per-host: high = thr_pkts (22 000) → bin3 needs ≥22 000 pkt/s (attack visible).
     Use --n-bins 5 for finer granularity inside the attack range.
 """
 
@@ -405,7 +405,7 @@ def replay_mode(statuses_file: str, bridge: str,
     print(f"{BOLD}Hosts:{RESET} {sorted(host_ips.keys())}  "
           f"{BOLD}Bridge:{RESET} {bridge}  "
           f"{BOLD}n_bins:{RESET} {n_bins}  "
-          f"{BOLD}bins:{RESET} {'per-host (MARL)' if per_host else 'global (attack_ho)'}")
+          f"{BOLD}bins:{RESET} {'per-host' if per_host else 'global (attack_ho)'}")
     _print_bin_legend(thr_pkts, thr_bytes, n_hosts_actual, n_bins, per_host=per_host)
 
     steps = data[step_start: step_end + 1 if step_end else len(data)]
@@ -547,7 +547,7 @@ def monitor(bridge: str, interval: float, show_fl: bool, show_dp: bool,
           f"{BOLD}n_bins:{RESET} {n_bins}  "
           f"{BOLD}thr_pkts:{RESET} {thr_pkts}  "
           f"{BOLD}thr_bytes:{RESET} {fmt_bytes(thr_bytes)}/s  "
-          f"{BOLD}bins:{RESET} {'per-host (MARL)' if per_host else 'global (attack_ho)'}")
+          f"{BOLD}bins:{RESET} {'per-host' if per_host else 'global (attack_ho)'}")
     _print_bin_legend(thr_pkts, thr_bytes, n_hosts, n_bins, per_host=per_host)
 
     if show_fl: show_flows(bridge)
@@ -666,7 +666,7 @@ if __name__ == "__main__":
     parser.add_argument("--thr-bytes", default=423_000_000, type=int, help="bytes threshold (default 423000000)")
     parser.add_argument("--n-hosts",   default=10,   type=int,     help="number of hosts (default 10)")
     parser.add_argument("--per-host",  action="store_true",
-                        help="use per-host thresholds for bins (MARL mode, no ×n_hosts multiplier)")
+                        help="use per-host thresholds for bins (no ×n_hosts multiplier)")
 
     # Live mode
     parser.add_argument("--interval",  default=1.0,  type=float,   help="sample interval s (default 1)")
