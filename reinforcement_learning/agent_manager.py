@@ -223,7 +223,9 @@ class AgentManager:
             agent_param.exploration_decay = nominal_decay
 
         try:
-            if agent_param.load:
+            # `load_coordinator: false` keeps a fresh coordinator when the hosts load a saved
+            # team (used by the topology-transfer runs: the coordinator's feature ranges scale with N).
+            if agent_param.load and not (is_coordinator and not getattr(agent_param, 'load_coordinator', True)):
                 if host_name is not None:
                     # marl_pz: every host shares the same "<name>.json" file
                     # (the team's federated-averaged table, see
@@ -329,6 +331,10 @@ class AgentManager:
         Returns:
             model: Loaded RL model ready to use.
         """
+        # Optional per-agent switch: keep a fresh coordinator (see create_custom_agent).
+        if is_coordinator and not getattr(agent_param, 'load_coordinator', True):
+            return None
+
         # Determine path to model
         algorithm = agent_param.algorithm
         env = self.env

@@ -20,7 +20,13 @@ background thread exactly as ``main.py`` does, and each experiment is launched t
 way the *Start Training* button does (``main.start_experiment`` in a thread, tracked in
 the shared ``app.app_api.state``). So while the batch runs you can open the web UI and
 watch the current experiment live -- charts, log, status -- plus a batch-progress banner
-fed by ``GET /batch_status``.
+fed by ``GET /batch_status``. Once the batch finishes, the process does NOT exit: it
+falls back to the same idle, ready-for-interactive-use state ``main.py`` leaves you in
+(pass ``--exit-after`` to get the old exit-on-completion behavior, e.g. for cron).
+
+The same core (``run_batch()``) is also what the web UI's Batch Runner panel calls --
+picking a folder there and pressing *Start Batch* runs this exact code in a background
+thread inside the already-running app, no terminal needed.
 
 Must run as root (Mininet), like ``main.py``:
 
@@ -51,6 +57,13 @@ from utility.constants import GYM_TYPE  # noqa: E402
 from utility.params import read_config_file  # noqa: E402
 
 _aborting = threading.Event()
+
+
+def _abort_requested():
+    """True when the batch (not just the current experiment) should stop:
+    our own SIGINT/SIGTERM handler, or the web-UI Stop button while a batch is
+    active (training_routes.py sets state['batch']['abort'])."""
+    return _aborting.is_set() or bool(state.get("batch", {}).get("abort"))
 
 
 # --------------------------------------------------------------------------- #
@@ -122,6 +135,12 @@ def _plan(config_dir, gym_type_filter, force, retry):
     todo, skipped = [], []
     for path in mc.iter_config_files(config_dir):
         fname = os.path.basename(path)
+        if fname == "default.yaml":
+            # never touch the live app config, even if someone points a batch at
+            # the top-level config/ folder that holds it (the /start_batch route
+            # already refuses that folder outright; this is the CLI's backstop).
+            skipped.append((fname, "refusing to treat config/default.yaml as a batch config"))
+            continue
         raw = mc._load_yaml(path)
         if not isinstance(raw, dict) or "env_params" not in raw:
             skipped.append((fname, "not an experiment config"))
@@ -182,22 +201,27 @@ def _run_one(path, cfg_dict, training_dir_override):
     state["training_thread"] = worker
     worker.start()
 
+    signalled = False
     while worker.is_alive():
         worker.join(timeout=1.0)
-        if _aborting.is_set() and not state["stop_event"].is_set():
+        if _abort_requested() and not signalled:
             print("  .. abort requested -- signalling the current experiment to stop")
             state["stop_event"].set()
-
-    # main.py:204-215 swaps state['stop_event'] for the env's own event mid-run
-    stopped = _aborting.is_set() or state.get("stop_event", Event()).is_set()
+            signalled = True
 
     run_dir = cfg_dict.get("training_execution_directory")
     run_basename = os.path.basename(run_dir.rstrip("/")) if run_dir else None
     training_dir = training_dir_override or cfg_dict.get("training_directory", "_training")
 
-    if stopped:
+    # NOTE: do NOT read state['stop_event'].is_set() as "user aborted". Every
+    # normal experiment ends by calling env.stop() (network_env.py), which *sets*
+    # the stop_event as part of teardown -- so it is set after every run whether
+    # it succeeded or crashed. The only signals that mean "stop the batch" are our
+    # SIGINT/SIGTERM handler and the web-UI Stop button (_abort_requested()).
+    # done-vs-failed is decided by the /results completeness check below.
+    if _abort_requested():
         _rename(running_path, _marked_path(running_path, None))
-        return "stopped", "user stop / Ctrl-C"
+        return "stopped", "Ctrl-C / web-UI Stop"
 
     if run_basename and _run_is_complete(training_dir, cfg_dict["env_params"]["gym_type"], run_basename):
         stamp_dt = mc._run_datetime(run_basename)
@@ -221,10 +245,78 @@ def _mininet_cleanup():
         print(f"  ! mininet cleanup skipped: {exc}")
 
 
+def _print_plan(print_fn, rel_dir, todo, skipped):
+    print_fn(f"\n=== batch: {rel_dir} ===")
+    for fname, reason in skipped:
+        print_fn(f"  [skip] {fname}  -- {reason}")
+    for path, _cfg in todo:
+        print_fn(f"  [run ] {os.path.basename(path)}")
+    print_fn(f"\n{len(todo)} to run, {len(skipped)} skipped")
+
+
 # --------------------------------------------------------------------------- #
-# main
+# the reusable core -- called by main() below (CLI) and by /start_batch (web UI)
+# --------------------------------------------------------------------------- #
+def run_batch(config_dir, gym_type=None, force=False, retry=False,
+              training_dir=None, sync_after=False, print_fn=print):
+    """Plan and run every eligible config under ``config_dir``, in the CALLING
+    thread, to completion or abort. Does not touch the web server -- the caller
+    is expected to already have one running (main.py's, or this module's own
+    CLI bootstrap via _start_web_server). Safe to call from a background thread
+    (the /start_batch route does exactly that).
+
+    Returns a summary dict; also visible live via state['batch'] / GET /batch_status.
+    """
+    config_dir = config_dir if os.path.isabs(config_dir) else os.path.join(REPO_ROOT, config_dir)
+    if not os.path.isdir(config_dir):
+        print_fn(f"not a directory: {config_dir}")
+        return {"error": f"not a directory: {config_dir}"}
+
+    todo, skipped = _plan(config_dir, gym_type, force, retry)
+    rel_dir = os.path.relpath(config_dir, REPO_ROOT)
+    _print_plan(print_fn, rel_dir, todo, skipped)
+
+    _set_batch(
+        active=True, abort=False, config_dir=rel_dir, total=len(todo), index=0,
+        current_file=None, current_status="starting",
+        started_at=_now(), results=[],
+        skipped=[{"file": f, "reason": r} for f, r in skipped],
+    )
+
+    counts = {"done": 0, "failed": 0, "stopped": 0}
+    for idx, (path, cfg_dict) in enumerate(todo, start=1):
+        if _abort_requested():
+            print_fn("aborted before starting the next experiment")
+            break
+        print_fn(f"\n--- [{idx}/{len(todo)}] {os.path.basename(path)} ---")
+        _set_batch(index=idx, current_file=os.path.basename(path), current_status="running")
+        status, detail = _run_one(path, cfg_dict, training_dir)
+        counts[status] = counts.get(status, 0) + 1
+        _record_result(os.path.basename(_marked_path(path, None)), status, error=detail if status == "failed" else None)
+        print_fn(f"    -> {status}: {detail}")
+        if status == "stopped":
+            break
+
+    final_status = "stopped" if (_abort_requested() or counts["stopped"]) else "finished"
+    _set_batch(active=False, current_status=final_status, current_file=None)
+    print_fn(f"\n=== batch {final_status}: {counts['done']} done, {counts['failed']} failed, "
+             f"{counts['stopped']} stopped ===")
+
+    if sync_after and not _abort_requested():
+        print_fn("\nreconciling markers with _training/ (manage_configs) ...")
+        gym_args = ["--gym-type", gym_type] if gym_type else []
+        mc.main(gym_args)
+
+    return {"config_dir": rel_dir, "total": len(todo), "skipped": len(skipped),
+            "status": final_status, **counts}
+
+
+# --------------------------------------------------------------------------- #
+# main (CLI only)
 # --------------------------------------------------------------------------- #
 def _start_web_server(port):
+    """Boot the Flask+SocketIO app in a daemon thread, CLI-only (a UI-launched
+    batch already has one running -- this is main.py's job then)."""
     _defaults, default_dict = read_config_file(
         os.path.join(REPO_ROOT, "config", "default.yaml"),
         config_cleaner=lambda cfg: clean_load_dir(cfg, GYM_TYPE.keys()),
@@ -243,7 +335,7 @@ def _start_web_server(port):
             break
         time.sleep(0.1)
     print(f"web UI: http://127.0.0.1:{web_port}  (batch progress banner on the Training page)")
-    return web_port
+    return web_port, thread, default_dict
 
 
 def main(argv=None):
@@ -259,6 +351,9 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="list what would run, touch nothing")
     parser.add_argument("--sync-after", action="store_true",
                         help="run manage_configs after the batch to reconcile every marker with _training/")
+    parser.add_argument("--exit-after", action="store_true",
+                        help="exit once the batch finishes instead of staying up as a normal interactive app "
+                             "(use for unattended/cron launches; default is to keep serving the web UI)")
     args = parser.parse_args(argv)
 
     config_dir = args.config_dir if os.path.isabs(args.config_dir) else os.path.join(REPO_ROOT, args.config_dir)
@@ -266,28 +361,11 @@ def main(argv=None):
         print(f"not a directory: {config_dir}")
         return 2
 
-    todo, skipped = _plan(config_dir, args.gym_type, args.force, args.retry)
-
-    rel_dir = os.path.relpath(config_dir, REPO_ROOT)
-    print(f"\n=== batch: {rel_dir} ===")
-    for fname, reason in skipped:
-        print(f"  [skip] {fname}  -- {reason}")
-    for path, _cfg in todo:
-        print(f"  [run ] {os.path.basename(path)}")
-    print(f"\n{len(todo)} to run, {len(skipped)} skipped")
-
     if args.dry_run:
+        todo, skipped = _plan(config_dir, args.gym_type, args.force, args.retry)
+        _print_plan(print, os.path.relpath(config_dir, REPO_ROOT), todo, skipped)
         print("(dry run -- nothing launched)")
         return 0
-    if not todo:
-        return 0
-
-    _set_batch(
-        active=True, config_dir=rel_dir, total=len(todo), index=0,
-        current_file=None, current_status="starting",
-        started_at=_now(), results=[],
-        skipped=[{"file": f, "reason": r} for f, r in skipped],
-    )
 
     def _on_signal(signum, _frame):
         print(f"\nreceived signal {signum} -- finishing the current experiment then stopping")
@@ -296,32 +374,24 @@ def main(argv=None):
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
 
-    _start_web_server(args.port)
+    web_port, web_thread, default_dict = _start_web_server(args.port)
 
-    counts = {"done": 0, "failed": 0, "stopped": 0}
-    for idx, (path, cfg_dict) in enumerate(todo, start=1):
-        if _aborting.is_set():
-            print("aborted before starting the next experiment")
-            break
-        print(f"\n--- [{idx}/{len(todo)}] {os.path.basename(path)} ---")
-        _set_batch(index=idx, current_file=os.path.basename(path), current_status="running")
-        status, detail = _run_one(path, cfg_dict, args.training_dir)
-        counts[status] = counts.get(status, 0) + 1
-        _record_result(os.path.basename(_marked_path(path, None)), status, error=detail if status == "failed" else None)
-        print(f"    -> {status}: {detail}")
-        if status == "stopped":
-            break
+    run_batch(config_dir, gym_type=args.gym_type, force=args.force, retry=args.retry,
+              training_dir=args.training_dir, sync_after=args.sync_after)
 
-    final_status = "stopped" if (_aborting.is_set() or counts["stopped"]) else "finished"
-    _set_batch(active=False, current_status=final_status, current_file=None)
-    print(f"\n=== batch {final_status}: {counts['done']} done, {counts['failed']} failed, "
-          f"{counts['stopped']} stopped ===")
+    # Back to a plain, on-disk-default config -- exactly what a fresh
+    # `sudo python3 main.py` would show, not whichever config ran last.
+    state["current_config"] = default_dict
 
-    if args.sync_after and not _aborting.is_set():
-        print("\nreconciling markers with _training/ (manage_configs) ...")
-        gym_args = ["--gym-type", args.gym_type] if args.gym_type else []
-        mc.main(gym_args)
+    if args.exit_after:
+        return 0
 
+    # The batch's signal handler only sets a flag; restore normal Ctrl-C/kill
+    # behavior now that there is no batch left to finish cleanly.
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    print(f"\nbatch finished -- app still running at http://127.0.0.1:{web_port} (Ctrl-C to quit)")
+    web_thread.join()
     return 0
 
 

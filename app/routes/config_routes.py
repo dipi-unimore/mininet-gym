@@ -55,6 +55,12 @@ def create_config_blueprint(state, config_path, app_root):
 
     @bp.route('/update_config', methods=['POST'])
     def update_config():
+        # During a batch, current_config is the config of the running experiment
+        # (set by utility/run_batch.py for each experiment): a page must not
+        # overwrite it with the form it loaded earlier.
+        if state.get('batch', {}).get('active'):
+            return jsonify({"status": "ignored",
+                            "message": "A batch is running: configuration not updated"}), 200
         state['current_config'] = clean_load_dir(request.json)
         return jsonify({"status": "success", "message": "Configuration updated"}), 200
 

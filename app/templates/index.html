@@ -289,7 +289,41 @@
         <!-- ============================================== -->
         <div id="training-page" class="hidden space-y-2">
 
-            <!-- Batch runner progress: shown while utility/run_batch.py drives a folder of configs -->
+            <!-- Batch Runner: pick a staged config/<gym_type>/... folder and launch
+                 utility/run_batch.py's core loop in the background, no terminal needed.
+                 Hidden while a batch is already active (the progress banner takes over)
+                 or while a manual training run is in progress. -->
+            <div id="batch-runner-panel" class="bg-white p-3 rounded-xl shadow-xl border border-gray-100 space-y-2">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-base font-bold text-gray-800">Batch Runner</h3>
+                    <button id="refresh-batch-dirs-btn" type="button"
+                        class="text-xs text-blue-600 hover:text-blue-800 underline">Refresh list</button>
+                </div>
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="flex flex-col">
+                        <label for="batch-dir-select" class="text-xs text-gray-500 mb-1">Config folder</label>
+                        <select id="batch-dir-select" class="border border-gray-300 rounded-lg px-2 py-1 text-sm min-w-[22rem]">
+                            <option value="">(loading…)</option>
+                        </select>
+                    </div>
+                    <label class="flex items-center gap-1 text-sm text-gray-700">
+                        <input type="checkbox" id="batch-force-checkbox"> Force re-run completed
+                    </label>
+                    <label class="flex items-center gap-1 text-sm text-gray-700">
+                        <input type="checkbox" id="batch-retry-checkbox"> Retry running/failed
+                    </label>
+                    <label class="flex items-center gap-1 text-sm text-gray-700">
+                        <input type="checkbox" id="batch-sync-checkbox" checked> Sync markers after
+                    </label>
+                    <button id="start-batch-btn" type="button"
+                        class="px-3 py-1 text-white font-bold rounded-xl bg-sky-600 hover:bg-sky-700 transition duration-150 shadow text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                        Start Batch
+                    </button>
+                </div>
+                <p id="batch-dir-summary" class="text-xs text-gray-500"></p>
+            </div>
+
+            <!-- Batch runner progress: shown while a batch (CLI or UI-launched) is running -->
             <div id="batch-progress-banner"
                 class="hidden items-center gap-2 bg-sky-50 border border-sky-300 text-sky-800 text-sm font-medium px-4 py-2 rounded-xl">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>

@@ -102,6 +102,13 @@ def _discretize_obs(obs: np.ndarray, low: np.ndarray, high: np.ndarray,
     return tuple(discrete)
 
 
+# Range of the host-side message feature. Hosts only ever receive the coordinator's
+# binary broadcast (0 = no attack, 1 = attack), so the feature is 0 or 1. It must NOT be
+# scaled by the number of hosts: binning [0, N] into n_bins made 0 and 1 fall in the same
+# bin (both < N/n_bins), so tabular hosts could not see the broadcast at all.
+HOST_MSG_MAX = 1.0
+
+
 def _compute_attack_reward_scale(num_hosts: int) -> float:
     """
     Reward multiplier for attack-class terms, proportional to the class
@@ -233,12 +240,9 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
                 f"channel (Tier A). Allowed: {CommStrategy.TIER_A}"
             )
 
-        if strategy == CommStrategy.NONE and strategies_cfg:
-            raise ValueError(
-                "communication.strategies requires an active alerting channel "
-                "(naive_broadcast or uaq) — peer coordination mechanisms "
-                f"{strategies_cfg} cannot run with strategy: none."
-            )
+        # Tier B (S2/S3/S4) may run with strategy: none (independent learners +
+        # peer coordination, no coordinator): the mechanisms act directly on the
+        # host Q-tables/weights in marl_pz_main.py and never use the coordinator.
 
         self._comm_strategy: str = strategy
         self._comm_strategies: frozenset = frozenset(strategies_cfg)
@@ -382,7 +386,7 @@ class MarlPzEnv(NetworkEnv, ParallelEnv):
         # Message feature appended only when coordinator is enabled
         if self._use_coordinator:
             self._host_low_raw = np.append(host_low_raw, 0.0).astype(np.float32)
-            self._host_high_raw = np.append(host_high_raw, float(self.num_hosts)).astype(np.float32)
+            self._host_high_raw = np.append(host_high_raw, HOST_MSG_MAX).astype(np.float32)
             self._host_msg_idx = n_host_raw   # index of the message feature
         else:
             self._host_low_raw = host_low_raw.astype(np.float32)

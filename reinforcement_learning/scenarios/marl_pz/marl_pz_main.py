@@ -297,6 +297,7 @@ def marl_pz_main(config, am: AgentManager, env: MarlPzEnv):
                     {"ground_truth": gt, "predicted": {agent.name: pred},
                      "metrics": agents_summary[agent.name],
                      "mitigation_history": mitigation,
+                     "test_comm_stats": getattr(env, '_eval_comm_stats', None),
                      "test_execution_time": test_execution_time},
                     directory_name, "test",
                 )
@@ -383,6 +384,7 @@ def marl_pz_main(config, am: AgentManager, env: MarlPzEnv):
             status=SystemStatus.FINISHED,
             mode=SystemModes.PLOTTING,
             message="Finished. Ready to start again.",
+            config=config,
         )
 
 
@@ -1462,6 +1464,9 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
     ground_truth = []
     predicted    = []
     mitigation_history = []
+    carried_msgs = None
+    comm_rounds = comm_alerts = comm_confident = comm_uncertain = 0
+    comm_broadcast_seen = 0   # rounds in which hosts saw a coordinator alert at decision time
 
     instances: dict = agent.instances   # {agent_id: {instance, is_custom_agent, single_view, ...}}
 
@@ -1474,6 +1479,18 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
         )
 
         obs_dict, _ = env.reset()
+
+        # reset() zeroes the message boxes. A test episode is a single round, so without
+        # this the hosts and the coordinator would never receive any message at test time.
+        # Carry the boxes over from the previous round, as consecutive steps do in training:
+        # the test rounds are one continuous trace, so a message sent in round k is
+        # observed in round k+1.
+        if carried_msgs is not None:
+            env.global_state.messages = carried_msgs
+        _first_host = next((a for a in env.possible_agents if a != COORDINATOR), None)
+        if env._use_coordinator and _first_host is not None and any(
+                v != 0 for v in env.global_state.messages[_first_host].values()):
+            comm_broadcast_seen += 1
 
         # Advance scenario state so GT reflects fresh eval data (reset() does not call update_state)
         env.update_state()
@@ -1549,6 +1566,14 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
         # Step with coordinated actions
         obs_dict, rewards, terms, truncs, infos = env.step(actions)
 
+        # Test-time communication cost: host -> coordinator alerts sent in this round
+        # (counted exactly as in training) and messages to carry into the next round.
+        carried_msgs = env.global_state.messages
+        comm_rounds += 1
+        comm_alerts += env._ep_msgs['host_total']
+        comm_confident += env._ep_msgs['confident']
+        comm_uncertain += env._ep_msgs['uncertain']
+
         # Episode reward = sum of per-host rewards (coordinator excluded, to
         # stay comparable with the host-only accuracy metric above).
         # float() avoids leaking numpy scalars (e.g. float32) into notify_client payloads.
@@ -1619,6 +1644,17 @@ def _evaluate_marl_agent(agent, env: MarlPzEnv,
             },
         )
 
+    # Read back by the caller and written into test.json. msgs_per_round is the paper's
+    # "msgs/step": host->coordinator alerts per decision round, summed over all hosts.
+    env._eval_comm_stats = {
+        'rounds': comm_rounds,
+        'num_hosts': len([a for a in env.possible_agents if a != COORDINATOR]),
+        'alerts_total': comm_alerts,
+        'confident': comm_confident,
+        'uncertain': comm_uncertain,
+        'msgs_per_round': comm_alerts / max(1, comm_rounds),
+        'rounds_hosts_saw_broadcast': comm_broadcast_seen,
+    }
     return score, ground_truth, predicted, mitigation_history
 
 
@@ -1729,14 +1765,43 @@ def _get_agent_metrics(agent):
     return getattr(agent, 'instance', type('', (), {'metrics': {}})()).metrics
 
 
+def _save_team_model_without_mutation(tabular_hosts: list, sb3_hosts: list,
+                                      base_name: str) -> None:
+    """Save the host team's federated average as ONE shared file, leaving every live
+    host agent untouched.
+
+    The saved file is the mean of the host tables/weights (same averaging as S2). It is
+    computed on a copy: averaging the live agents in place would give every host the same
+    policy before the test phase, in every condition, because evaluation runs right after
+    saving.
+    """
+    import copy
+    if tabular_hosts:
+        first = tabular_hosts[0][1]
+        original = first.q_table.copy()
+        try:
+            np.copyto(first.q_table,
+                      np.array([m.q_table for _, m in tabular_hosts]).mean(axis=0))
+            first.save(base_name)
+        finally:
+            np.copyto(first.q_table, original)
+    elif sb3_hosts:
+        backup = [copy.deepcopy(m.policy.state_dict()) for _, m in sb3_hosts]
+        try:
+            _federated_sync_sb3_weights({aid: {'instance': m} for aid, m in sb3_hosts})
+            sb3_hosts[0][1].save(base_name)
+        finally:
+            for (_, m), sd in zip(sb3_hosts, backup):
+                m.policy.load_state_dict(sd)
+
+
 def _save_marl_pz_team(agent, primary, directory_name):
     """Persist model(s) for one marl_pz team.
 
-    Host agents share a single saved file: their tables/weights are
-    federated-averaged in place first (reusing the exact averaging already
-    trusted mid-training for the S2 comm strategy — _federated_sync_qtables /
-    _federated_sync_sb3_weights — rather than picking one "best" host
-    arbitrarily), then one representative host instance is saved. On load,
+    Host agents share a single saved file: the federated average of their
+    tables/weights (the same averaging as the S2 comm strategy, rather than picking one
+    "best" host arbitrarily). The average is computed on a copy and the live agents are
+    left untouched, because evaluation runs right after saving. On load,
     create_marl_pz_agent() broadcasts this same file back to every host.
 
     The coordinator has a different (binary) action space, so it is never
@@ -1756,12 +1821,8 @@ def _save_marl_pz_team(agent, primary, directory_name):
         (aid, m) for aid, m in _host_sb3_agents(instances)
         if not isinstance(m, SupervisedAgent) and hasattr(m, 'save')
     ]
-    if tabular_hosts:
-        _federated_sync_qtables(instances)
-        tabular_hosts[0][1].save(base_name)
-    elif sb3_hosts:
-        _federated_sync_sb3_weights(instances)
-        sb3_hosts[0][1].save(base_name)
+    if tabular_hosts or sb3_hosts:
+        _save_team_model_without_mutation(tabular_hosts, sb3_hosts, base_name)
     elif hasattr(primary, 'save'):
         primary.save(base_name)
 

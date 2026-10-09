@@ -1,7 +1,10 @@
 import datetime
+import hashlib
 import io
+import json
 import os
 import shutil
+import threading
 from collections import Counter
 
 from itsdangerous import exc
@@ -239,14 +242,6 @@ def _get_net_param(net_params_dict, key_new, key_old, default=''):
         The parameter value or default
     """
     return net_params_dict.get(key_new) or net_params_dict.get(key_old, default)
-
-
-def _add_incomplete(incomplete_list, str_date, relative_path, reason):
-    incomplete_list.append({
-        "datetime": str_date,
-        "path": relative_path,
-        "reason": reason,
-    })
 
 
 def _get_candidate_test_dirs(dir_path, test_dir):
@@ -845,19 +840,163 @@ def _build_load_source_info(load, load_dir):
     }
 
 
+_RESULT_EXPECTED_FILES = ["metrics_comparison.png", "radar_chart.png", "statuses.json"]
+_RESULT_AGENT_DATA_FILE = "data.json"
+_RESULT_TEST_DIR = "TEST"
+_RESULT_AGENT_TRAINING_CHARTS = ["matrix.png", "metrics.png", "metrics_combined.png", "rewards.png"]
+
+# Cache of the per-run entries built by _scan_result_dir, stored in the training
+# directory. Each entry is keyed by the run's relative path and tagged with a
+# signature of the files it was built from, so only new/changed runs are re-read.
+_RESULTS_CACHE_FILE = ".results_list_cache.json"
+_RESULTS_CACHE_VERSION = 1
+_results_cache_lock = threading.Lock()
+
+
+def _incomplete_entry(str_date, relative_path, reason):
+    return {
+        "datetime": str_date,
+        "path": relative_path,
+        "reason": reason,
+    }
+
+
+def _result_dir_signature(dir_path):
+    """Name/mtime/size of every entry in the run dir and in its direct subdirs.
+
+    These are exactly the files _scan_result_dir reads (config.yaml, statuses.json,
+    root PNGs, <agent>/data.json + PNGs, TEST*/test.json + PNGs). A run still in
+    progress keeps touching log.txt and its subfolders, so its signature changes and
+    it is re-scanned on every load until it stops writing.
+    """
+    sig = []
+    with os.scandir(dir_path) as root_entries:
+        for entry in root_entries:
+            st = entry.stat()
+            sig.append((entry.name, st.st_mtime_ns, st.st_size))
+            if entry.is_dir():
+                with os.scandir(entry.path) as sub_entries:
+                    for sub in sub_entries:
+                        sub_st = sub.stat()
+                        sig.append((f"{entry.name}/{sub.name}", sub_st.st_mtime_ns, sub_st.st_size))
+    sig.sort()
+    return hashlib.sha1(repr(sig).encode()).hexdigest()
+
+
+def _results_cache_code_stamp():
+    # Invalidate the whole cache whenever this module changes, since the entry
+    # format and the completeness rules live here.
+    return f"{_RESULTS_CACHE_VERSION}:{os.path.getmtime(__file__)}"
+
+
+def _load_results_cache(cache_path, code_stamp):
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(cache, dict) or cache.get("code_stamp") != code_stamp:
+        return {}
+    entries = cache.get("entries", {})
+    return entries if isinstance(entries, dict) else {}
+
+
+def _json_default(obj):
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+def _save_results_cache(cache_path, code_stamp, entries):
+    tmp_path = f"{cache_path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump({"code_stamp": code_stamp, "entries": entries}, f, default=_json_default)
+        os.replace(tmp_path, cache_path)
+    except (OSError, TypeError, ValueError) as exc:
+        error(f"[BUILD_RESULTS] Could not write results cache {cache_path}: {exc}")
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+_summary_cache_locks = {}
+
+
+class _SummaryCache:
+    """Per-file cache of small summaries extracted from big run files.
+
+    Used by the tables that read one file per run (statuses.json, scenario.json,
+    <agent>/data.json, config.yaml). An entry is reused only while the file's
+    mtime and size are unchanged, so new runs, runs still writing and re-printed
+    results are re-read automatically; entries of deleted files are pruned on save.
+    Use as a context manager: it holds a per-kind lock and saves on exit.
+    """
+
+    def __init__(self, training_directory, kind):
+        self.base = os.path.abspath(training_directory)
+        self.path = os.path.join(self.base, f".summary_cache_{kind}.json")
+        self.lock = _summary_cache_locks.setdefault(kind, threading.Lock())
+
+    def __enter__(self):
+        self.lock.acquire()
+        self.code_stamp = _results_cache_code_stamp()
+        self.entries = _load_results_cache(self.path, self.code_stamp)
+        self.dirty = False
+        return self
+
+    def __exit__(self, *exc_info):
+        try:
+            for key in list(self.entries):
+                if not os.path.exists(os.path.join(self.base, key.split("#", 1)[0])):
+                    del self.entries[key]
+                    self.dirty = True
+            if self.dirty:
+                _save_results_cache(self.path, self.code_stamp, self.entries)
+        finally:
+            self.lock.release()
+
+    def get(self, file_path, extract, key_suffix=""):
+        """Return extract(file_path), cached. extract returns None when the file
+        could not be read (e.g. half-written by a running experiment): that result
+        is passed through but never cached."""
+        key = os.path.relpath(os.path.abspath(file_path), self.base) + key_suffix
+        # Stamp taken *before* reading: a write during the read leaves a stale
+        # stamp, so the file is re-read on the next load.
+        st = os.stat(file_path)
+        stamp = [st.st_mtime_ns, st.st_size]
+        cached = self.entries.get(key)
+        if isinstance(cached, dict) and cached.get("stamp") == stamp:
+            return cached["summary"]
+        summary = extract(file_path)
+        if summary is not None:
+            self.entries[key] = {"stamp": stamp, "summary": json.loads(json.dumps(summary, default=_json_default))}
+            self.dirty = True
+        return summary
+
+
 def build_results_dir_list(current_config):
     from utility.my_log import information, debug, error as log_error
-    
+
     results_dir_list = []
-    expected_files = ["metrics_comparison.png", "radar_chart.png", "statuses.json"]
-    data_file_in_agent_folder = "data.json"
-    test_dir = "TEST"
-    expected_files_in_agent_folder_print_training_chart_enabled = ["matrix.png", "metrics.png", "metrics_combined.png", "rewards.png"]
     training_directory = current_config.get("training_directory", None)
-    
+
     debug(f"[BUILD_RESULTS] Starting build_results_dir_list with training_directory: {training_directory}")
 
-    if training_directory and os.path.isdir(training_directory):
+    if not (training_directory and os.path.isdir(training_directory)):
+        information("[BUILD_RESULTS] Found 0 gym types with 0 complete results")
+        return results_dir_list
+
+    with _results_cache_lock:
+        cache_path = os.path.join(training_directory, _RESULTS_CACHE_FILE)
+        code_stamp = _results_cache_code_stamp()
+        old_entries = _load_results_cache(cache_path, code_stamp)
+        new_entries = {}
+        n_scanned = 0
+
         for gym_type in RESULT_GYM_TYPES:
             path = os.path.join(training_directory, gym_type)
             if not os.path.isdir(path):
@@ -870,237 +1009,301 @@ def build_results_dir_list(current_config):
                 dir_path = os.path.join(path, d)
                 if not os.path.isdir(dir_path):
                     continue
-
-                str_date = d.split("_")[0]
                 relative_path = dir_path.replace(f"{training_directory}/", "")
 
                 try:
-                    datetime.datetime.strptime(str_date, "%Y%m%d-%H%M%S")
-                except ValueError:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "Invalid datetime format in directory name")
-                    continue
-                try:
-                    _, config_yaml = read_config_file(os.path.join(dir_path, "config.yaml"))
-                except FileNotFoundError:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "Missing config.yaml")
-                    continue    
-                env_params = config_yaml.get("env_params", None)
-                if env_params is None:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "Missing env_params in config.yaml")
+                    # Signature is taken *before* reading, so a file written while we
+                    # read leaves a stale signature and forces a re-scan next time.
+                    signature = _result_dir_signature(dir_path)
+                except OSError as exc:
+                    # Directory removed or being rewritten under us: list it, don't cache it.
+                    incomplete_datas_gym_type.append(_incomplete_entry(d.split("_")[0], relative_path, f"Unreadable directory: {exc}"))
                     continue
 
-                gym_type_in_config = env_params.get("gym_type", "")
-                if gym_type_in_config != gym_type:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, f"Gym type mismatch: expected {gym_type}, found {gym_type_in_config}")
-                    continue
+                cached = old_entries.get(relative_path)
+                if isinstance(cached, dict) and cached.get("signature") == signature:
+                    kind, payload = cached["kind"], cached["payload"]
+                else:
+                    n_scanned += 1
+                    try:
+                        kind, payload = _scan_result_dir(training_directory, gym_type, d, dir_path)
+                    except Exception as exc:
+                        # Typically a JSON file caught half-written by a running experiment.
+                        log_error(f"[BUILD_RESULTS] Error reading {relative_path}: {exc}")
+                        incomplete_datas_gym_type.append(_incomplete_entry(d.split("_")[0], relative_path, f"Error reading result files: {exc}"))
+                        continue
 
-                print_training_chart = env_params.get("print_training_chart", False)
-                net_params = env_params.get("net_params", None)
-                if net_params is None:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "Missing net_params in config.yaml")
-                    continue
-
-                training_episodes = env_params.get("episodes", 0)
-                max_steps = env_params.get("max_steps", 0)
-                test_episodes = env_params.get("test_episodes", 0)
-                n_bins = env_params.get("n_bins", None)
-                _comm_raw = env_params.get("communication", {}) or {}
-                if hasattr(_comm_raw, '__dict__'):
-                    _comm_raw = _comm_raw.__dict__
-                _cs = _comm_raw.get("strategy", None) if isinstance(_comm_raw, dict) else None
-                comm_strategy = None if (not _cs or _cs == "none") else _cs
-                _css = _comm_raw.get("strategies", None) if isinstance(_comm_raw, dict) else None
-                comm_strategies = list(_css) if _css else []
-                _attacks_raw = env_params.get("attacks", {}) or {}
-                if hasattr(_attacks_raw, '__dict__'):
-                    _attacks_raw = _attacks_raw.__dict__
-                apply_drop_rules = _attacks_raw.get("apply_drop_rules", None) if isinstance(_attacks_raw, dict) else None
-                include_percentage_variations = _attacks_raw.get("include_percentage_variations", None) if isinstance(_attacks_raw, dict) else None
-                use_reward_scaling = _attacks_raw.get("use_reward_scaling", None) if isinstance(_attacks_raw, dict) else None
-                random_seed = config_yaml.get("random_seed", None)
-                attack_likely = _attacks_raw.get("likely", None) if isinstance(_attacks_raw, dict) else None
-                attack_likely_train = _attacks_raw.get("likely_train", None) if isinstance(_attacks_raw, dict) else None
-                attack_likely_eval = _attacks_raw.get("likely_eval", None) if isinstance(_attacks_raw, dict) else None
-                _thresholds_raw = _attacks_raw.get("thresholds", None) if isinstance(_attacks_raw, dict) else None
-                if hasattr(_thresholds_raw, '__dict__'):
-                    _thresholds_raw = _thresholds_raw.__dict__
-                attack_thresholds = dict(_thresholds_raw) if isinstance(_thresholds_raw, dict) else None
-                attack_timing_params = {
-                    k: _attacks_raw.get(k, None)
-                    for k in (
-                        "unblock_min_hold_rounds", "unblock_required_normal_streak",
-                        "no_attack_timeout", "long_attack_duration", "short_attack_duration",
-                    )
-                    if isinstance(_attacks_raw, dict) and _attacks_raw.get(k, None) is not None
-                } if isinstance(_attacks_raw, dict) else {}
-                comm_params = {}
-                if isinstance(_comm_raw, dict):
-                    for strategy_key in ("uaq", "federated_sync", "policy_exchange", "experience_sharing"):
-                        sub = _comm_raw.get(strategy_key, None)
-                        if hasattr(sub, '__dict__'):
-                            sub = sub.__dict__
-                        if isinstance(sub, dict) and sub:
-                            comm_params[strategy_key] = dict(sub)
-                    if _comm_raw.get("use_coordinator", None) is not None:
-                        comm_params["use_coordinator"] = _comm_raw.get("use_coordinator")
-                # Convert Params object to dict to access net_params values
-                net_params_dict = net_params.__dict__ if hasattr(net_params, '__dict__') else net_params
-                # Use helper for backward compatibility: try num_iots first, then num_iot
-                network_config = f"{_get_net_param(net_params_dict, 'num_switches', 0)}_{_get_net_param(net_params_dict, 'num_hosts', 0)}_{_get_net_param(net_params_dict, 'num_iots',  'num_iot',0)}"
-                agents = config_yaml.get("agents", [])
-                agent_names = [
-                    agent.get("name", "")
-                    for agent in agents
-                    if agent.get("enabled", False)
-                    and not agent.get("skip_learn", True)
-                    and not agent.get("name", "").startswith(ALGO_SUPERVISED)
-                ]
-                agent_algo_map = {
-                    agent.get("name"): agent.get("algorithm", "")
-                    for agent in agents
-                    if agent.get("enabled", False)
-                    and not agent.get("skip_learn", True)
-                    and not agent.get("name", "").startswith(ALGO_SUPERVISED)
-                }
-                agent_load_map = {
-                    agent.get("name"): _build_load_source_info(agent.get("load", False), agent.get("load_dir", ""))
-                    for agent in agents
-                    if agent.get("enabled", False)
-                    and not agent.get("skip_learn", True)
-                    and not agent.get("name", "").startswith(ALGO_SUPERVISED)
-                }
-                if not agent_names:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "No enabled learning agents found in config")
-                    continue
-
-                data_gym_type = {
-                    "network_config": network_config,
-                    "datetime": str_date,
-                    "training_episodes": training_episodes,
-                    "max_steps": max_steps,
-                    "test_episodes": test_episodes,
-                    "n_bins": n_bins,
-                    "comm_strategy": comm_strategy,
-                    "comm_strategies": comm_strategies,
-                    "apply_drop_rules": apply_drop_rules,
-                    "include_percentage_variations": include_percentage_variations,
-                    "use_reward_scaling": use_reward_scaling,
-                    "random_seed": random_seed,
-                    "attack_likely": attack_likely,
-                    "attack_likely_train": attack_likely_train,
-                    "attack_likely_eval": attack_likely_eval,
-                    "attack_thresholds": attack_thresholds,
-                    "attack_timing_params": attack_timing_params,
-                    "comm_params": comm_params,
-                }
-
-                agents_ok, agents_reason, agents_summary = _collect_agents_data(
-                    dir_path=dir_path,
-                    agent_names=agent_names,
-                    data_file_in_agent_folder=data_file_in_agent_folder,
-                    print_training_chart=print_training_chart,
-                    expected_files_in_agent_folder_print_training_chart_enabled=expected_files_in_agent_folder_print_training_chart_enabled,
-                    gym_type_in_config=gym_type_in_config,
-                    training_episodes=training_episodes,
-                    max_steps=max_steps,
-                )
-                if not agents_ok:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, agents_reason or "Agent artifacts are incomplete")
-                    continue
-
-                data_gym_type["training_episodes"] = agents_summary["training_episodes"]
-                data_gym_type["max_steps"] = agents_summary["max_steps"]
-                data_gym_type["mean_accuracy"] = agents_summary["mean_accuracy"]
-                data_gym_type["min_accuracy"] = agents_summary["min_accuracy"]
-                data_gym_type["name_min_accuracy"] = agents_summary["name_min_accuracy"]
-                data_gym_type["max_accuracy"] = agents_summary["max_accuracy"]
-                data_gym_type["name_max_accuracy"] = agents_summary["name_max_accuracy"]
-                for agent_d in agents_summary["agents_data"]:
-                    agent_d["algorithm"] = agent_algo_map.get(agent_d["agent_name"], "")
-                    load_info = agent_load_map.get(agent_d["agent_name"], {})
-                    agent_d["load"] = load_info.get("load", False)
-                    agent_d["load_dir"] = load_info.get("load_dir", "")
-                    agent_d["load_source_gym_type"] = load_info.get("source_gym_type", "")
-                    agent_d["load_source_path"] = load_info.get("source_path", "")
-                data_gym_type["agents_data"] = agents_summary["agents_data"]
-
-                candidate_test_dirs = _get_candidate_test_dirs(dir_path, test_dir)
-                if not candidate_test_dirs:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "Missing test directory: expected TEST or TEST_<algorithm>")
-                    continue
-
-                merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores, test_durations = _collect_test_results(
-                    candidate_test_dirs=candidate_test_dirs,
-                    dir_path=dir_path,
-                    test_dir=test_dir,
-                    gym_type_in_config=gym_type_in_config,
-                    agent_names=agent_names,
-                    apply_drop_rules=data_gym_type['apply_drop_rules']
-                )
-                if not merged_test_scores:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, "No valid test scores found in test.json files")
-                    continue
-
-                for agent_d in data_gym_type["agents_data"]:
-                    agent_d["test_duration_seconds"] = test_durations.get(agent_d["agent_name"])
-
-                if detected_test_episodes:
-                    test_episodes = max(detected_test_episodes)
-                min_score, name_min_score, max_score, name_max_score, mean_score = _compute_test_score_stats(
-                    test_scores=merged_test_scores,
-                    gym_type_in_config=gym_type_in_config,
-                    test_episodes=test_episodes,
-                )
-
-                name_max_winner, name_min_winner = _compute_winner_stats(merged_composite_scores)
-
-                data_gym_type["test_scores"] = merged_test_scores
-                data_gym_type["test_episodes"] = test_episodes
-                data_gym_type["mean_score"] = mean_score
-                data_gym_type["min_score"] = min_score
-                data_gym_type["name_min_score"] = name_min_score
-                data_gym_type["name_max_score"] = name_max_score
-                data_gym_type["max_score"] = max_score
-                data_gym_type["test_charts"] = test_charts
-                data_gym_type["mitigation_summary"] = mitigation_summary
-                data_gym_type["composite_scores"] = merged_composite_scores
-                data_gym_type["name_max_winner"] = name_max_winner
-                data_gym_type["name_min_winner"] = name_min_winner
-
-                missing_expected_file = _find_missing_expected_file(dir_path, expected_files)
-                if missing_expected_file is not None:
-                    _add_incomplete(incomplete_datas_gym_type, str_date, relative_path, f"Missing experiment file: {missing_expected_file}")
-                    continue
-
-                # _ensure_qtable_coverage_dynamic_actions_preview(current_config, dir_path)
-
-                # Collect all root-level PNG files (preserving expected_files order first)
-                all_root_pngs = [f for f in expected_files if f.lower().endswith(".png")]
-                for fname in sorted(os.listdir(dir_path)):
-                    if fname.lower().endswith(".png") and fname not in all_root_pngs:
-                        all_root_pngs.append(fname)
-                data_gym_type["files"] = all_root_pngs
-                data_gym_type["path"] = relative_path
-                datas_gym_type.append(data_gym_type)
+                new_entries[relative_path] = {"signature": signature, "kind": kind, "payload": payload}
+                if kind == "complete":
+                    datas_gym_type.append(payload)
+                else:
+                    incomplete_datas_gym_type.append(payload)
 
             results_dir_list.append({"gym_type": gym_type, "data": datas_gym_type, "incomplete_data": incomplete_datas_gym_type})
 
-    information(f"[BUILD_RESULTS] Found {len(results_dir_list)} gym types with {sum(len(item['data']) for item in results_dir_list)} complete results")
+        # Entries of deleted runs are dropped simply by not being carried over.
+        if new_entries != old_entries:
+            _save_results_cache(cache_path, code_stamp, new_entries)
+
+    information(f"[BUILD_RESULTS] Found {len(results_dir_list)} gym types with {sum(len(item['data']) for item in results_dir_list)} complete results ({n_scanned} run dirs re-scanned, rest from cache)")
     return results_dir_list
 
 
-def _read_run_config_yaml(run_dir):
-    """Return (env_params, agents, random_seed) from config.yaml one level above the agent dir, or ({}, [], None)."""
+def _scan_result_dir(training_directory, gym_type, d, dir_path):
+    """Build the results-list entry for one run directory.
+
+    Returns ("complete", data) or ("incomplete", {"datetime", "path", "reason"}).
+    """
+    expected_files = _RESULT_EXPECTED_FILES
+    data_file_in_agent_folder = _RESULT_AGENT_DATA_FILE
+    test_dir = _RESULT_TEST_DIR
+    expected_files_in_agent_folder_print_training_chart_enabled = _RESULT_AGENT_TRAINING_CHARTS
+    str_date = d.split("_")[0]
+    relative_path = dir_path.replace(f"{training_directory}/", "")
+
     try:
-        cfg_path = os.path.join(run_dir, "..", "config.yaml")
-        cfg_path = os.path.normpath(cfg_path)
-        if os.path.isfile(cfg_path):
-            with open(cfg_path) as f:
-                raw = yaml.safe_load(f) or {}
-            return raw.get("env_params", {}), raw.get("agents", []), raw.get("random_seed", None)
-    except Exception:
-        pass
-    return {}, [], None
+        datetime.datetime.strptime(str_date, "%Y%m%d-%H%M%S")
+    except ValueError:
+        return "incomplete", _incomplete_entry(str_date, relative_path, "Invalid datetime format in directory name")
+    try:
+        _, config_yaml = read_config_file(os.path.join(dir_path, "config.yaml"))
+    except FileNotFoundError:
+        return "incomplete", _incomplete_entry(str_date, relative_path, "Missing config.yaml")
+    env_params = config_yaml.get("env_params", None)
+    if env_params is None:
+        return "incomplete", _incomplete_entry(str_date, relative_path, "Missing env_params in config.yaml")
+
+    gym_type_in_config = env_params.get("gym_type", "")
+    if gym_type_in_config != gym_type:
+        return "incomplete", _incomplete_entry(str_date, relative_path, f"Gym type mismatch: expected {gym_type}, found {gym_type_in_config}")
+
+    print_training_chart = env_params.get("print_training_chart", False)
+    net_params = env_params.get("net_params", None)
+    if net_params is None:
+        return "incomplete", _incomplete_entry(str_date, relative_path, "Missing net_params in config.yaml")
+
+    training_episodes = env_params.get("episodes", 0)
+    max_steps = env_params.get("max_steps", 0)
+    test_episodes = env_params.get("test_episodes", 0)
+    n_bins = env_params.get("n_bins", None)
+    _comm_raw = env_params.get("communication", {}) or {}
+    if hasattr(_comm_raw, '__dict__'):
+        _comm_raw = _comm_raw.__dict__
+    _cs = _comm_raw.get("strategy", None) if isinstance(_comm_raw, dict) else None
+    comm_strategy = None if (not _cs or _cs == "none") else _cs
+    _css = _comm_raw.get("strategies", None) if isinstance(_comm_raw, dict) else None
+    comm_strategies = list(_css) if _css else []
+    _attacks_raw = env_params.get("attacks", {}) or {}
+    if hasattr(_attacks_raw, '__dict__'):
+        _attacks_raw = _attacks_raw.__dict__
+    apply_drop_rules = _attacks_raw.get("apply_drop_rules", None) if isinstance(_attacks_raw, dict) else None
+    include_percentage_variations = _attacks_raw.get("include_percentage_variations", None) if isinstance(_attacks_raw, dict) else None
+    use_reward_scaling = _attacks_raw.get("use_reward_scaling", None) if isinstance(_attacks_raw, dict) else None
+    random_seed = config_yaml.get("random_seed", None)
+    attack_likely = _attacks_raw.get("likely", None) if isinstance(_attacks_raw, dict) else None
+    attack_likely_train = _attacks_raw.get("likely_train", None) if isinstance(_attacks_raw, dict) else None
+    attack_likely_eval = _attacks_raw.get("likely_eval", None) if isinstance(_attacks_raw, dict) else None
+    _thresholds_raw = _attacks_raw.get("thresholds", None) if isinstance(_attacks_raw, dict) else None
+    if hasattr(_thresholds_raw, '__dict__'):
+        _thresholds_raw = _thresholds_raw.__dict__
+    attack_thresholds = dict(_thresholds_raw) if isinstance(_thresholds_raw, dict) else None
+    attack_timing_params = {
+        k: _attacks_raw.get(k, None)
+        for k in (
+            "unblock_min_hold_rounds", "unblock_required_normal_streak",
+            "no_attack_timeout", "long_attack_duration", "short_attack_duration",
+        )
+        if isinstance(_attacks_raw, dict) and _attacks_raw.get(k, None) is not None
+    } if isinstance(_attacks_raw, dict) else {}
+    comm_params = {}
+    if isinstance(_comm_raw, dict):
+        for strategy_key in ("uaq", "federated_sync", "policy_exchange", "experience_sharing"):
+            sub = _comm_raw.get(strategy_key, None)
+            if hasattr(sub, '__dict__'):
+                sub = sub.__dict__
+            if isinstance(sub, dict) and sub:
+                comm_params[strategy_key] = dict(sub)
+        if _comm_raw.get("use_coordinator", None) is not None:
+            comm_params["use_coordinator"] = _comm_raw.get("use_coordinator")
+    # Convert Params object to dict to access net_params values
+    net_params_dict = net_params.__dict__ if hasattr(net_params, '__dict__') else net_params
+    # Use helper for backward compatibility: try num_iots first, then num_iot
+    network_config = f"{_get_net_param(net_params_dict, 'num_switches', 0)}_{_get_net_param(net_params_dict, 'num_hosts', 0)}_{_get_net_param(net_params_dict, 'num_iots',  'num_iot',0)}"
+    agents = config_yaml.get("agents", [])
+    # Agents actually eligible for a *training* pass -- excludes skip_learn
+    # (evaluation-only, e.g. a transfer/generalization run loading a saved
+    # model) since those never write the per-agent training folder that
+    # _collect_agents_data checks for.
+    agent_names_trainable = [
+        agent.get("name", "")
+        for agent in agents
+        if agent.get("enabled", False)
+        and not agent.get("skip_learn", True)
+        and not agent.get("name", "").startswith(ALGO_SUPERVISED)
+    ]
+    # All enabled, non-supervised agents -- including skip_learn ones, which
+    # still produce a TEST_<agent>/test.json and must count towards
+    # completeness (a run where every agent is skip_learn is a legitimate
+    # evaluation-only run, not "no agents").
+    agent_names = [
+        agent.get("name", "")
+        for agent in agents
+        if agent.get("enabled", False)
+        and not agent.get("name", "").startswith(ALGO_SUPERVISED)
+    ]
+    agent_algo_map = {
+        agent.get("name"): agent.get("algorithm", "")
+        for agent in agents
+        if agent.get("enabled", False)
+        and not agent.get("name", "").startswith(ALGO_SUPERVISED)
+    }
+    agent_load_map = {
+        agent.get("name"): _build_load_source_info(agent.get("load", False), agent.get("load_dir", ""))
+        for agent in agents
+        if agent.get("enabled", False)
+        and not agent.get("name", "").startswith(ALGO_SUPERVISED)
+    }
+    if not agent_names:
+        return "incomplete", _incomplete_entry(str_date, relative_path, "No enabled learning agents found in config")
+
+    data_gym_type = {
+        "network_config": network_config,
+        "datetime": str_date,
+        "training_episodes": training_episodes,
+        "max_steps": max_steps,
+        "test_episodes": test_episodes,
+        "n_bins": n_bins,
+        "comm_strategy": comm_strategy,
+        "comm_strategies": comm_strategies,
+        "apply_drop_rules": apply_drop_rules,
+        "include_percentage_variations": include_percentage_variations,
+        "use_reward_scaling": use_reward_scaling,
+        "random_seed": random_seed,
+        "attack_likely": attack_likely,
+        "attack_likely_train": attack_likely_train,
+        "attack_likely_eval": attack_likely_eval,
+        "attack_thresholds": attack_thresholds,
+        "attack_timing_params": attack_timing_params,
+        "comm_params": comm_params,
+    }
+
+    if agent_names_trainable:
+        agents_ok, agents_reason, agents_summary = _collect_agents_data(
+            dir_path=dir_path,
+            agent_names=agent_names_trainable,
+            data_file_in_agent_folder=data_file_in_agent_folder,
+            print_training_chart=print_training_chart,
+            expected_files_in_agent_folder_print_training_chart_enabled=expected_files_in_agent_folder_print_training_chart_enabled,
+            gym_type_in_config=gym_type_in_config,
+            training_episodes=training_episodes,
+            max_steps=max_steps,
+        )
+    else:
+        # Every enabled agent is skip_learn: an evaluation-only run (e.g. a
+        # transfer/generalization config loading a saved model). There is no
+        # per-agent training folder to check -- completeness is decided below,
+        # purely from the TEST_<agent>/test.json files. Still list one entry
+        # per agent (name only, no training accuracy) so the results panel,
+        # which always expects at least one agents_data row, has something to
+        # show instead of an empty list.
+        agents_ok, agents_reason, agents_summary = True, "", {
+            "agents_data": [
+                {
+                    "agent_name": name,
+                    "accuracy": 0,
+                    "charts": [],
+                    "print_training_chart": False,
+                    "training_duration_seconds": None,
+                }
+                for name in agent_names
+            ],
+            "mean_accuracy": 0,
+            "min_accuracy": 0,
+            "name_min_accuracy": "",
+            "max_accuracy": 0,
+            "name_max_accuracy": "",
+            "training_episodes": training_episodes,
+            "max_steps": max_steps,
+        }
+    if not agents_ok:
+        return "incomplete", _incomplete_entry(str_date, relative_path, agents_reason or "Agent artifacts are incomplete")
+
+    data_gym_type["training_episodes"] = agents_summary["training_episodes"]
+    data_gym_type["max_steps"] = agents_summary["max_steps"]
+    data_gym_type["mean_accuracy"] = agents_summary["mean_accuracy"]
+    data_gym_type["min_accuracy"] = agents_summary["min_accuracy"]
+    data_gym_type["name_min_accuracy"] = agents_summary["name_min_accuracy"]
+    data_gym_type["max_accuracy"] = agents_summary["max_accuracy"]
+    data_gym_type["name_max_accuracy"] = agents_summary["name_max_accuracy"]
+    for agent_d in agents_summary["agents_data"]:
+        agent_d["algorithm"] = agent_algo_map.get(agent_d["agent_name"], "")
+        load_info = agent_load_map.get(agent_d["agent_name"], {})
+        agent_d["load"] = load_info.get("load", False)
+        agent_d["load_dir"] = load_info.get("load_dir", "")
+        agent_d["load_source_gym_type"] = load_info.get("source_gym_type", "")
+        agent_d["load_source_path"] = load_info.get("source_path", "")
+    data_gym_type["agents_data"] = agents_summary["agents_data"]
+
+    candidate_test_dirs = _get_candidate_test_dirs(dir_path, test_dir)
+    if not candidate_test_dirs:
+        return "incomplete", _incomplete_entry(str_date, relative_path, "Missing test directory: expected TEST or TEST_<algorithm>")
+
+    merged_test_scores, test_charts, detected_test_episodes, mitigation_summary, merged_composite_scores, test_durations = _collect_test_results(
+        candidate_test_dirs=candidate_test_dirs,
+        dir_path=dir_path,
+        test_dir=test_dir,
+        gym_type_in_config=gym_type_in_config,
+        agent_names=agent_names,
+        apply_drop_rules=data_gym_type['apply_drop_rules']
+    )
+    if not merged_test_scores:
+        return "incomplete", _incomplete_entry(str_date, relative_path, "No valid test scores found in test.json files")
+
+    for agent_d in data_gym_type["agents_data"]:
+        agent_d["test_duration_seconds"] = test_durations.get(agent_d["agent_name"])
+
+    if detected_test_episodes:
+        test_episodes = max(detected_test_episodes)
+    min_score, name_min_score, max_score, name_max_score, mean_score = _compute_test_score_stats(
+        test_scores=merged_test_scores,
+        gym_type_in_config=gym_type_in_config,
+        test_episodes=test_episodes,
+    )
+
+    name_max_winner, name_min_winner = _compute_winner_stats(merged_composite_scores)
+
+    data_gym_type["test_scores"] = merged_test_scores
+    data_gym_type["test_episodes"] = test_episodes
+    data_gym_type["mean_score"] = mean_score
+    data_gym_type["min_score"] = min_score
+    data_gym_type["name_min_score"] = name_min_score
+    data_gym_type["name_max_score"] = name_max_score
+    data_gym_type["max_score"] = max_score
+    data_gym_type["test_charts"] = test_charts
+    data_gym_type["mitigation_summary"] = mitigation_summary
+    data_gym_type["composite_scores"] = merged_composite_scores
+    data_gym_type["name_max_winner"] = name_max_winner
+    data_gym_type["name_min_winner"] = name_min_winner
+
+    # metrics_comparison.png / radar_chart.png come from the cross-agent
+    # training comparison -- an evaluation-only run (every enabled agent
+    # skip_learn, e.g. a transfer/generalization config) never builds it,
+    # so only statuses.json is required there.
+    expected_files_for_run = expected_files if agent_names_trainable else ["statuses.json"]
+    missing_expected_file = _find_missing_expected_file(dir_path, expected_files_for_run)
+    if missing_expected_file is not None:
+        return "incomplete", _incomplete_entry(str_date, relative_path, f"Missing experiment file: {missing_expected_file}")
+
+    # _ensure_qtable_coverage_dynamic_actions_preview(current_config, dir_path)
+
+    # Collect all root-level PNG files (preserving expected_files order first)
+    all_root_pngs = [f for f in expected_files if f.lower().endswith(".png")]
+    for fname in sorted(os.listdir(dir_path)):
+        if fname.lower().endswith(".png") and fname not in all_root_pngs:
+            all_root_pngs.append(fname)
+    data_gym_type["files"] = all_root_pngs
+    data_gym_type["path"] = relative_path
+    return "complete", data_gym_type
 
 
 def _extract_advanced_run_params(env_params, random_seed=None):
@@ -1109,7 +1312,7 @@ def _extract_advanced_run_params(env_params, random_seed=None):
     communication parameters not otherwise surfaced in the results list or
     load-dir picker. `env_params` and its nested sections are expected to be
     plain dicts, as returned by yaml.safe_load (used consistently by both
-    build_results_dir_list's config_yaml and _read_run_config_yaml).
+    build_results_dir_list's config_yaml and _extract_load_dir_config_fields).
     """
     env_params = env_params or {}
     attacks_raw = env_params.get("attacks", {}) or {}
@@ -1180,40 +1383,76 @@ def build_load_dir_list(current_config, gym_type, network_config, agent_name):
                 if os.path.isdir(os.path.join(directory, d))
             ])
 
-    for d in dir_list:
-        for da in os.listdir(d):
-            path = os.path.join(d, da)
-            if da == agent_name and os.path.isdir(path):
-                if not os.path.isfile(f"{path}/{agent_name}.{extension}") or not os.path.isfile(f"{path}/data.json"):
-                    continue
-                try:
-                    data = read_data_file(f"{path}/data.json")
-                    complete_path = path.replace(f"{training_directory}/", "") + f"/{agent_name}.{extension}"
-                    raw_accuracy = data.get("train_metrics", {}).get("accuracy", []) if data else []
-                    acc_val = float(np.mean(raw_accuracy)) if raw_accuracy else 0.0
-                    if np.isnan(acc_val) or np.isinf(acc_val):
-                        acc_val = 0.0
-                    env_p, agents_cfg, run_random_seed = _read_run_config_yaml(path)
-                    agent_cfg = next((a for a in agents_cfg if a.get("name") == agent_name), {})
-                    _lc = env_p.get("communication", {}) or {}
-                    _lcs = _lc.get("strategy") if isinstance(_lc, dict) else None
-                    _lcss = _lc.get("strategies") if isinstance(_lc, dict) else None
-                    load_dir_list.append({
-                        "accuracy": acc_val,
-                        "datetime": path.split('/')[2].split('_')[0],
-                        "path": complete_path,
-                        "n_bins": env_p.get("n_bins"),
-                        "episodes": env_p.get("episodes"),
-                        "algorithm": agent_cfg.get("algorithm"),
-                        "comm_strategy": None if (not _lcs or _lcs == "none") else _lcs,
-                        "comm_strategies": list(_lcss) if _lcss else [],
-                        **_extract_advanced_run_params(env_p, run_random_seed),
-                    })
-                except Exception as exc:
-                    error(f"Error reading data.json for {path}: {exc}")
-                    continue
+    with _SummaryCache(training_directory, "load_dirs") as cache:
+        for d in dir_list:
+            for da in os.listdir(d):
+                path = os.path.join(d, da)
+                if da == agent_name and os.path.isdir(path):
+                    if not os.path.isfile(f"{path}/{agent_name}.{extension}") or not os.path.isfile(f"{path}/data.json"):
+                        continue
+                    try:
+                        acc_val = cache.get(f"{path}/data.json", _extract_load_dir_accuracy)
+                        if acc_val is None:
+                            raise ValueError("unreadable data.json")
+                        complete_path = path.replace(f"{training_directory}/", "") + f"/{agent_name}.{extension}"
+                        cfg_path = os.path.normpath(os.path.join(path, "..", "config.yaml"))
+                        config_fields = None
+                        if os.path.isfile(cfg_path):
+                            config_fields = cache.get(
+                                cfg_path,
+                                lambda p: _extract_load_dir_config_fields(p, agent_name),
+                                key_suffix=f"#{agent_name}",
+                            )
+                        if config_fields is None:
+                            config_fields = _load_dir_config_fields({}, [], None, agent_name)
+                        load_dir_list.append({
+                            "accuracy": acc_val,
+                            "datetime": path.split('/')[2].split('_')[0],
+                            "path": complete_path,
+                            **config_fields,
+                        })
+                    except Exception as exc:
+                        error(f"Error reading data.json for {path}: {exc}")
+                        continue
 
     return load_dir_list
+
+
+def _extract_load_dir_accuracy(data_path):
+    try:
+        data = read_data_file(data_path)
+    except Exception:
+        return None
+    raw_accuracy = data.get("train_metrics", {}).get("accuracy", []) if data else []
+    acc_val = float(np.mean(raw_accuracy)) if raw_accuracy else 0.0
+    if np.isnan(acc_val) or np.isinf(acc_val):
+        acc_val = 0.0
+    return acc_val
+
+
+def _load_dir_config_fields(env_p, agents_cfg, run_random_seed, agent_name):
+    agent_cfg = next((a for a in agents_cfg if a.get("name") == agent_name), {})
+    _lc = env_p.get("communication", {}) or {}
+    _lcs = _lc.get("strategy") if isinstance(_lc, dict) else None
+    _lcss = _lc.get("strategies") if isinstance(_lc, dict) else None
+    return {
+        "n_bins": env_p.get("n_bins"),
+        "episodes": env_p.get("episodes"),
+        "algorithm": agent_cfg.get("algorithm"),
+        "comm_strategy": None if (not _lcs or _lcs == "none") else _lcs,
+        "comm_strategies": list(_lcss) if _lcss else [],
+        **_extract_advanced_run_params(env_p, run_random_seed),
+    }
+
+
+def _extract_load_dir_config_fields(cfg_path, agent_name):
+    # A read error returns None (not cached); the caller falls back to empty values.
+    try:
+        with open(cfg_path) as f:
+            raw = yaml.safe_load(f) or {}
+    except Exception:
+        return None
+    return _load_dir_config_fields(raw.get("env_params", {}), raw.get("agents", []), raw.get("random_seed", None), agent_name)
 
 
 def _candidate_gym_type_directories(training_directory, gym_type):
@@ -1317,16 +1556,22 @@ def _dataset_summary(dataset_data):
     for row in dataset_data:
         if not isinstance(row, dict):
             continue
-        status = str(row.get("status", ""))
-        statuses.append(status)
+        # One network-level label per row (attacks, marl_pz, classification) or
+        # one per host (attacks_ho: status/id are lists). A row is attack-like
+        # when any of its labels is, so the count stays in steps like "entries".
+        row_statuses = row.get("status", "")
+        row_statuses = row_statuses if isinstance(row_statuses, list) else [row_statuses]
+        row_ids = row.get("id", None)
+        row_ids = row_ids if isinstance(row_ids, list) else [row_ids]
+        row_statuses = [str(s) for s in row_statuses]
+        statuses.extend(row_statuses)
         pkt = row.get("packets", 0)
         try:
             packets.append(float(pkt))
         except (TypeError, ValueError):
             pass
 
-        status_id = row.get("id", None)
-        if status in {"under_attack", "attacking", "attack"} or status_id in {1, 2}:
+        if any(s in {"under_attack", "attacking", "attack"} for s in row_statuses) or any(i in (1, 2) for i in row_ids):
             attack_like += 1
 
     return {
@@ -1849,6 +2094,11 @@ def build_result_comm_stats_preview(current_config, result_path):
     }, 200
 
 
+def _extract_dataset_summary(dataset_path):
+    dataset_data = _safe_load_json_file(dataset_path)
+    return None if dataset_data is None else _dataset_summary(dataset_data)
+
+
 def build_dataset_list(current_config, gym_type, network_config):
     training_directory = current_config.get("training_directory", None)
     if not training_directory or not os.path.isdir(training_directory):
@@ -1856,26 +2106,31 @@ def build_dataset_list(current_config, gym_type, network_config):
 
     dataset_rows = []
     training_base_abs = _training_base_abs_path(current_config)
-    for run_dir in _iter_scenario_run_dirs(training_directory, gym_type, network_config):
-        run_name = os.path.basename(run_dir)
-        run_dt = run_name.split("_")[0]
+    with _SummaryCache(training_directory, "datasets") as cache:
+        for run_dir in _iter_scenario_run_dirs(training_directory, gym_type, network_config):
+            run_name = os.path.basename(run_dir)
+            run_dt = run_name.split("_")[0]
 
-        for file_name in os.listdir(run_dir):
-            if not (file_name.startswith("statuses") and file_name.endswith(".json")):
-                continue
-            dataset_path = os.path.join(run_dir, file_name)
-            dataset_data = _safe_load_json_file(dataset_path)
-            summary = _dataset_summary(dataset_data)
-            dataset_abs_path = os.path.abspath(dataset_path)
+            for file_name in os.listdir(run_dir):
+                if not (file_name.startswith("statuses") and file_name.endswith(".json")):
+                    continue
+                dataset_path = os.path.join(run_dir, file_name)
+                try:
+                    summary = cache.get(dataset_path, _extract_dataset_summary)
+                except OSError:
+                    continue  # file removed while listing
+                if summary is None:
+                    summary = _dataset_summary(None)
+                dataset_abs_path = os.path.abspath(dataset_path)
 
-            dataset_rows.append({
-                "datetime": run_dt,
-                "run": run_name,
-                "file": file_name,
-                "path": dataset_abs_path,
-                "relative_path": os.path.relpath(dataset_abs_path, training_base_abs).replace("\\", "/"),
-                "summary": summary,
-            })
+                dataset_rows.append({
+                    "datetime": run_dt,
+                    "run": run_name,
+                    "file": file_name,
+                    "path": dataset_abs_path,
+                    "relative_path": os.path.relpath(dataset_abs_path, training_base_abs).replace("\\", "/"),
+                    "summary": summary,
+                })
 
     dataset_rows.sort(key=lambda row: row.get("datetime", ""), reverse=True)
     return dataset_rows
@@ -1937,6 +2192,16 @@ def _extract_scenario_statistics_without_hosts(data):
     return filtered
 
 
+def _extract_scenario_row_data(scenario_file):
+    scenario_data = _safe_load_json_file(scenario_file)
+    if scenario_data is None:
+        return None
+    return {
+        "summary": _extract_scenario_summary(scenario_data),
+        "statistics": _extract_scenario_statistics_without_hosts(scenario_data),
+    }
+
+
 def build_scenario_list(current_config, gym_type, network_config):
     configured_training_directory = current_config.get("training_directory", "_training")
     training_directory = _training_base_abs_path(current_config)
@@ -1944,22 +2209,31 @@ def build_scenario_list(current_config, gym_type, network_config):
         return []
 
     scenario_rows = []
-    for run_dir in _iter_scenario_run_dirs(training_directory, gym_type, network_config):
-        scenario_file = os.path.join(run_dir, "scenario.json")
-        if not os.path.isfile(scenario_file):
-            continue
+    with _SummaryCache(training_directory, "scenarios") as cache:
+        for run_dir in _iter_scenario_run_dirs(training_directory, gym_type, network_config):
+            scenario_file = os.path.join(run_dir, "scenario.json")
+            if not os.path.isfile(scenario_file):
+                continue
 
-        run_name = os.path.basename(run_dir)
-        run_dt = run_name.split("_")[0]
-        scenario_data = _safe_load_json_file(scenario_file)
-        scenario_rel_path = os.path.relpath(scenario_file, training_directory)
-        scenario_rows.append({
-            "datetime": run_dt,
-            "run": run_name,
-            "path": os.path.join(configured_training_directory, scenario_rel_path).replace("\\", "/"),
-            "summary": _extract_scenario_summary(scenario_data),
-            "statistics": _extract_scenario_statistics_without_hosts(scenario_data),
-        })
+            run_name = os.path.basename(run_dir)
+            run_dt = run_name.split("_")[0]
+            try:
+                extracted = cache.get(scenario_file, _extract_scenario_row_data)
+            except OSError:
+                continue  # file removed while listing
+            if extracted is None:
+                extracted = {
+                    "summary": _extract_scenario_summary(None),
+                    "statistics": _extract_scenario_statistics_without_hosts(None),
+                }
+            scenario_rel_path = os.path.relpath(scenario_file, training_directory)
+            scenario_rows.append({
+                "datetime": run_dt,
+                "run": run_name,
+                "path": os.path.join(configured_training_directory, scenario_rel_path).replace("\\", "/"),
+                "summary": extracted["summary"],
+                "statistics": extracted["statistics"],
+            })
 
     scenario_rows.sort(key=lambda row: row.get("datetime", ""), reverse=True)
     return scenario_rows

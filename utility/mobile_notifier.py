@@ -200,6 +200,85 @@ def _header_safe(text):
     return text.encode("ascii", "replace").decode("ascii")
 
 
+def build_run_params_summary(config):
+    """Compact one-block digest of the main experiment settings.
+
+    ``config`` is the ``Params`` object built by ``utility.params.read_config_file``
+    (nested attribute access, absent fields simply skipped). Returns "" when
+    ``config`` is ``None`` or nothing useful could be read from it, so the caller
+    can decide what to append.
+    """
+    if config is None:
+        return ""
+    try:
+        ep = getattr(config, 'env_params', None)
+        parts = []
+
+        gym_type = getattr(ep, 'gym_type', None) if ep is not None else None
+        seed = getattr(config, 'random_seed', None)
+        head = []
+        if gym_type:
+            head.append(str(gym_type))
+        if seed is not None:
+            head.append(f"seed {seed}")
+        if head:
+            parts.append("scenario: " + ", ".join(head))
+
+        comm = getattr(ep, 'communication', None) if ep is not None else None
+        if comm is not None:
+            strategy = getattr(comm, 'strategy', None)
+            strategies = getattr(comm, 'strategies', None)
+            use_coord = getattr(comm, 'use_coordinator', None)
+            comm_bits = []
+            if strategy:
+                comm_bits.append(str(strategy))
+            elif strategies:
+                comm_bits.append("+".join(str(s) for s in strategies))
+            if use_coord:
+                comm_bits.append("coordinator")
+            if comm_bits:
+                parts.append("comm: " + " / ".join(comm_bits))
+
+        net = getattr(ep, 'net_params', None) if ep is not None else None
+        if net is not None:
+            num_hosts = getattr(net, 'num_hosts', None)
+            num_iots = getattr(net, 'num_iots', None)
+            if num_hosts is not None:
+                topo = f"{num_hosts} hosts"
+                if num_iots:
+                    topo += f" + {num_iots} iot"
+                parts.append("topology: " + topo)
+
+        if ep is not None:
+            episodes = getattr(ep, 'episodes', None)
+            test_episodes = getattr(ep, 'test_episodes', None)
+            max_steps = getattr(ep, 'max_steps', None)
+            ep_bits = []
+            if episodes is not None:
+                ep_bits.append(f"train {episodes} ep")
+            if test_episodes is not None:
+                ep_bits.append(f"test {test_episodes} ep")
+            if max_steps is not None:
+                ep_bits.append(f"{max_steps} steps/ep")
+            if ep_bits:
+                parts.append("episodes: " + ", ".join(ep_bits))
+
+        agents = getattr(config, 'agents', None) or []
+        algos = []
+        for agent in agents:
+            if not getattr(agent, 'enabled', True):
+                continue
+            algo = getattr(agent, 'algorithm', None)
+            name = getattr(agent, 'name', None)
+            algos.append(f"{algo}({name})" if algo and name else str(algo or name or '?'))
+        if algos:
+            parts.append("agents: " + ", ".join(algos))
+
+        return "Params:\n" + "\n".join(parts) if parts else ""
+    except Exception:
+        return ""
+
+
 def build_run_summary():
     """Compact per-agent accuracy / f1 line-up from the cached run summaries.
 

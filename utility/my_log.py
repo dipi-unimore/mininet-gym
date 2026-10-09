@@ -264,13 +264,16 @@ def stop_buffer_flush():
         _flush_thread.join(timeout=5)
         log_message("info", "Buffer flush thread stopped", author="notify_client")
 
-def _push_mobile_run_finished(message=None):
+def _push_mobile_run_finished(message=None, config=None):
     """Best-effort mobile push when an experiment run completes. Never raises."""
     try:
-        from utility.mobile_notifier import notify, build_run_summary, is_enabled
+        from utility.mobile_notifier import notify, build_run_summary, build_run_params_summary, is_enabled
         if not is_enabled():
             return
         body = message or "Experiment run completed."
+        params = build_run_params_summary(config)
+        if params:
+            body = f"{body}\n\n{params}"
         summary = build_run_summary()
         if summary:
             body = f"{body}\n\n{summary}"
@@ -335,7 +338,7 @@ def notify_client(level=None, agent_name=None, message=None,
     if (level == SystemLevels.STATUS and status == SystemStatus.FINISHED
             and mode in (SystemModes.TRAINING, SystemModes.PLOTTING)
             and agent_name is None):
-        _push_mobile_run_finished(message)
+        _push_mobile_run_finished(message, config)
 
     # I messaggi di STATUS vengono sempre inviati immediatamente
     if level == SystemLevels.STATUS and mode is not None and _client_status_notifier_func:

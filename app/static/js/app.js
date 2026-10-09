@@ -107,19 +107,89 @@ function getTrainingStateFromStorage() {
 // Training page. Mirrors pollCalibrationStatus's self-rescheduling setTimeout
 // style. global:false keeps the 2 s poll out of the ajaxStart/Stop overlay.
 let batchPollTimer = null;
+let lastBatchActive = false; // edge-detect active -> !active to refresh the folder picker
+let batchStarting = false;   // true from the Start Batch click until the first /batch_status reply
+let lastBatchRunKey = null;  // 'started_at|index' of the experiment the dashboard is showing (null = unknown, e.g. just loaded)
+let lastCaptionKey = null;   // run dir | seed | communication of the config shown in the training caption
+
+// During a batch the caption badges (comm strategy, run folder, seed, ...) must
+// describe the experiment actually running, not the config the page loaded.
+// run_batch.py puts each experiment's config in state['current_config'] (served
+// by /get_config), and main.start_experiment adds its run folder a few seconds
+// after the batch index changes -- so poll it with the batch status and
+// re-render only when the running experiment changed.
+function refreshRunningConfigCaption() {
+    $.ajax({
+        url: '/get_config',
+        type: 'GET',
+        global: false,
+        success: function (cfg) {
+            if (!cfg || !cfg.env_params) return;
+            const key = [
+                cfg.training_execution_directory || '',
+                cfg.random_seed,
+                JSON.stringify(cfg.env_params.communication || {}),
+            ].join('|');
+            if (key === lastCaptionKey) return;
+            lastCaptionKey = key;
+            currentConfig = cfg;
+            if (typeof renderTrainingCaption === 'function') renderTrainingCaption();
+        },
+        error: function () { /* endpoint unavailable — keep the current caption */ }
+    });
+}
 
 function renderBatchProgress(b) {
     const banner = $('#batch-progress-banner');
     if (!banner.length) return;
+    const active = !!(b && b.active);
+
+    // Whatever this reply says (already running, or already finished if the
+    // folder had nothing left to do), the Start Batch click has now visibly
+    // taken effect -- drop the spinner shown while we were waiting for it.
+    if (batchStarting) {
+        batchStarting = false;
+        hideLoadingOverlay('batch');
+    }
+
+    if (lastBatchActive && !active && typeof loadBatchDirs === 'function') {
+        loadBatchDirs(); // batch just finished -- counts changed, refresh the picker
+    }
+    lastBatchActive = active;
+
+    // A batch runs its experiments back to back without the Start Training click
+    // that normally resets the dashboard, so charts, agent tabs ('Finished'
+    // badges) and the cached session data of the previous experiment would stay
+    // on screen. Reset when the batch moves to the next experiment. Only on a
+    // change we have seen: right after a page load lastBatchRunKey is null and
+    // the restored data belongs to the experiment that is still running.
+    // The key includes the batch start time, so the first experiment of a new
+    // batch (index back to 1) also resets what the previous batch left.
+    if (active && b.index) {
+        const runKey = `${b.started_at || ''}|${b.index}`;
+        if (lastBatchRunKey !== null && runKey !== lastBatchRunKey
+                && typeof resetTrainingDashboardForNewRun === 'function') {
+            resetTrainingDashboardForNewRun();
+            if (typeof showCharts === 'function') showCharts();
+        }
+        lastBatchRunKey = runKey;
+    }
+
+    // The Batch Runner panel (folder picker + Start Batch) must stay hidden
+    // whenever *anything* is running — a batch, or a manually-started training
+    // run/calibration (updateBatchPanelVisibility, ui_helpers.js, also checks
+    // configLocked so the panel reacts to /start_training too, not just batches).
+    if (typeof updateBatchPanelVisibility === 'function') updateBatchPanelVisibility();
+
     const results = (b && b.results) || [];
-    if (!b || (!b.active && results.length === 0)) {
+    if (!b || (!active && results.length === 0)) {
         banner.addClass('hidden').removeClass('flex');
         return;
     }
     const done = results.filter(r => r.status === 'done').length;
     const failed = results.filter(r => r.status === 'failed').length;
     let msg;
-    if (b.active) {
+    if (active) {
         const pos = (b.index && b.total) ? `${b.index}/${b.total}` : '';
         const name = (b.current_file || '').replace(/\.(ya?ml)$/i, '');
         msg = `Batch ${pos} — ${name || '…'} · ${b.current_status || 'running'}`;
@@ -141,6 +211,7 @@ function pollBatchStatus() {
         success: function (b) {
             renderBatchProgress(b);
             if (b && b.active) {
+                refreshRunningConfigCaption();
                 batchPollTimer = setTimeout(pollBatchStatus, 2000);
             } else if (b && b.results && b.results.length) {
                 batchPollTimer = setTimeout(function () {
@@ -149,6 +220,43 @@ function pollBatchStatus() {
             }
         },
         error: function () { /* endpoint unavailable — ignore */ }
+    });
+}
+
+// ── Batch Runner panel: pick a staged config folder, launch a batch ───
+function renderBatchDirSummary(d) {
+    $('#batch-dir-summary').text(d ? `${d.total} config(s) total — ${d.to_run} would run now.` : '');
+}
+
+function loadBatchDirs(selectPath) {
+    const $select = $('#batch-dir-select');
+    if (!$select.length) return;
+    $.ajax({
+        url: '/list_batch_dirs',
+        type: 'GET',
+        global: false,
+        success: function (resp) {
+            const dirs = (resp && resp.dirs) || [];
+            $select.empty();
+            if (!dirs.length) {
+                $select.append($('<option>').val('').text('(no staged config folders found)'));
+                $('#start-batch-btn').prop('disabled', true);
+                renderBatchDirSummary(null);
+                return;
+            }
+            $('#start-batch-btn').prop('disabled', false);
+            dirs.forEach(function (d) {
+                const label = `${d.path} — ${d.to_run} to run, ${d.done} done` +
+                    (d.running_or_failed ? `, ${d.running_or_failed} stuck` : '');
+                $select.append($('<option>').val(d.path).text(label).data('dir', d));
+            });
+            if (selectPath) $select.val(selectPath);
+            renderBatchDirSummary($select.find(':selected').data('dir'));
+        },
+        error: function () {
+            $select.empty().append($('<option>').val('').text('(could not load folder list)'));
+            renderBatchDirSummary(null);
+        }
     });
 }
 
@@ -263,6 +371,7 @@ $(document).ready(async function () {
 
     // Start polling the batch runner's progress (no-op unless a batch is active)
     pollBatchStatus();
+    loadBatchDirs();
 
     // Initial render of the configuration
     renderConfig();
@@ -416,6 +525,59 @@ $(document).ready(async function () {
                 const response = xhr.responseJSON || { message: xhr.statusText };
                 showStatus('Error stopping training: ' + response.message, 'error');
                 setStatus(SYSTEM_STATUS.ERROR, 'Error stopping training');
+            }
+        });
+    });
+
+    // --- Batch Runner panel (Training page) ---
+    $('#refresh-batch-dirs-btn').click(function () {
+        loadBatchDirs($('#batch-dir-select').val());
+    });
+
+    $('#batch-dir-select').on('change', function () {
+        renderBatchDirSummary($(this).find(':selected').data('dir'));
+    });
+
+    $('#start-batch-btn').click(function () {
+        const dir = $('#batch-dir-select').val();
+        if (!dir) {
+            showStatus('Pick a config folder first.', 'error');
+            return;
+        }
+        $(this).prop('disabled', true);
+        batchStarting = true;
+        showLoadingOverlay('batch', 'Starting batch…');
+        // Safety net: if /batch_status is ever unreachable, don't leave the
+        // spinner up forever — renderBatchProgress() normally clears it as soon
+        // as the first reply comes back (batchStarting flag, above).
+        setTimeout(function () {
+            if (batchStarting) {
+                batchStarting = false;
+                hideLoadingOverlay('batch');
+            }
+        }, 10000);
+
+        $.ajax({
+            url: '/start_batch',
+            type: 'POST',
+            contentType: 'application/json',
+            global: false, // keep the generic ajaxStart/Stop overlay from stomping our "Starting batch…" message
+            data: JSON.stringify({
+                config_dir: dir,
+                force: $('#batch-force-checkbox').prop('checked'),
+                retry: $('#batch-retry-checkbox').prop('checked'),
+                sync_after: $('#batch-sync-checkbox').prop('checked'),
+            }),
+            success: function (response) {
+                showStatus(response.message || 'Batch starting…', 'success');
+                pollBatchStatus();
+            },
+            error: function (xhr) {
+                batchStarting = false;
+                hideLoadingOverlay('batch');
+                const response = xhr.responseJSON || { message: xhr.statusText };
+                showStatus('Could not start batch: ' + response.message, 'error');
+                $('#start-batch-btn').prop('disabled', false);
             }
         });
     });

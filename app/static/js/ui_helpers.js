@@ -356,6 +356,23 @@ function setConfigLocked(locked) {
     page.find('input, select, textarea').prop('disabled', locked);
     page.find(CONFIG_MUTATING_BUTTON_SELECTOR).prop('disabled', locked);
     $('#config-locked-banner').toggleClass('hidden', !locked).toggleClass('flex', locked);
+    updateBatchPanelVisibility();
+}
+
+// The Batch Runner panel (folder picker + Start Batch button, app/templates/index.html)
+// must be fully hidden whenever anything is already running server-side — a manual
+// training run (configLocked, driven by setStatus() above) or a batch itself
+// (lastBatchActive, set by renderBatchProgress() in app.js from /batch_status polling).
+// Both call this after updating their own state, so a plain page reload lands here too
+// (checkAndRecoverTrainingState -> setStatus -> setConfigLocked, and the first
+// pollBatchStatus tick) without needing any extra wiring.
+function updateBatchPanelVisibility() {
+    const batchActive = typeof lastBatchActive !== 'undefined' && lastBatchActive;
+    const hide = configLocked || batchActive;
+    $('#batch-runner-panel').toggleClass('hidden', hide);
+    if (!hide) {
+        $('#start-batch-btn').prop('disabled', false);
+    }
 }
 
 // ====================================================================\
@@ -413,6 +430,9 @@ async function navigateTo(page) {
         $('#training-page').removeClass('hidden');
         updateNavigationButtons('training');
         renderTrainingCaption();
+
+        // Refresh the Batch Runner folder picker's to-run/done counts
+        if (typeof loadBatchDirs === 'function') loadBatchDirs();
 
         // Initialize WS only when on the training page
         initializeWebSocket();
@@ -2931,6 +2951,14 @@ function _renderKVPairs(data, activeEl, inactiveEl) {
 
 // Function called when navigating from Config to Training page
 function updateConfigurationInMemory() {
+    // While a training run or a batch is active the server-side config is the one
+    // of the running experiment (a batch sets it for every experiment it starts).
+    // Pushing this page's form back would overwrite it with whatever the page
+    // loaded earlier, and every later page load would then show that stale config.
+    const batchActive = typeof lastBatchActive !== 'undefined' && lastBatchActive;
+    if (configLocked || batchActive) {
+        return;
+    }
     const configToUpdate = collectConfigFromUI();
     currentConfig = configToUpdate; // Update local config after collecting
 

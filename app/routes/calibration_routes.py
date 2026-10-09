@@ -56,6 +56,9 @@ def create_calibration_blueprint(state):
                             "message": "Cannot calibrate while training is running."}), 409
         if state.get('calibration_thread') is not None and state['calibration_thread'].is_alive():
             return jsonify({"status": "error", "message": "Calibration already running."}), 409
+        if isinstance(state.get('batch'), dict) and state['batch'].get('active'):
+            return jsonify({"status": "error",
+                            "message": "Cannot calibrate while a batch is running."}), 409
 
         payload = request.get_json(silent=True) or {}
         config = state.get('current_config') or {}

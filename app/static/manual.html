@@ -1224,8 +1224,10 @@ python3 utility/manage_configs.py --config-root config --training-dir _training<
   runs you can open the web UI and watch the current experiment live — charts, log,
   status — plus a <strong>batch-progress banner</strong> on the Training page
   (<em>"Batch 3/20 — &lt;config&gt; · running (2 done, 0 failed)"</em>), fed by
-  <code>GET /batch_status</code>. Pause / stop of the <em>current</em> experiment still work
-  through the normal Training controls.
+  <code>GET /batch_status</code>. <strong>Pause</strong> pauses the current experiment as
+  usual; <strong>Stop</strong> ends the current run and halts the whole batch (same as
+  <kbd>Ctrl-C</kbd> in the terminal) — the config being run is left un-stamped so a
+  re-launch picks it up again.
 </p>
 <div class="man-warn">
   Must run as <strong>root</strong> (for Mininet), like <code>main.py</code>. "Success" is
@@ -1245,6 +1247,7 @@ sudo python3 utility/run_batch.py config/marl_pz/tier2 --retry --sync-after</cod
     <tr><td><code>--sync-after</code></td><td>Run <code>manage_configs.py</code> after the batch to reconcile every marker with <code>_training/</code>.</td></tr>
     <tr><td><code>--training-dir &lt;dir&gt;</code></td><td>Override the training results root used for the completeness check.</td></tr>
     <tr><td><code>--port &lt;n&gt;</code></td><td>Web UI port (default: the config's <code>web_server_port</code>).</td></tr>
+    <tr><td><code>--exit-after</code></td><td>Exit once the batch finishes instead of staying up (see below). Useful for cron / unattended launches.</td></tr>
   </tbody>
 </table>
 <div class="man-tip">
@@ -1253,6 +1256,32 @@ sudo python3 utility/run_batch.py config/marl_pz/tier2 --retry --sync-after</cod
   off. Combine with mobile push notifications above to run a whole campaign without
   babysitting it.
 </div>
+<p>
+  <strong>The app stays up after the batch.</strong> Once every config has run (or the batch
+  was stopped), the process does <em>not</em> exit — it falls back to the same idle,
+  ready-for-interactive-use state a fresh <code>sudo python3 main.py</code> leaves you in:
+  the web server keeps serving, <code>config/default.yaml</code> is reloaded into the
+  Configuration page, and <strong>Start Training</strong> works normally again.
+  <kbd>Ctrl-C</kbd> now exits the process as usual (during the batch itself, the first
+  <kbd>Ctrl-C</kbd> instead finishes the current experiment cleanly and halts the batch —
+  see the transition table above). Pass <code>--exit-after</code> to get the old
+  exit-when-done behavior instead.
+</p>
+
+<h4>Launching a batch from the web UI</h4>
+<p>
+  You don't need a terminal at all: the Training page has a <strong>Batch Runner</strong>
+  panel — a dropdown of every staged folder under <code>config/</code> (with live
+  to-run / done / stuck counts), the same <code>--force</code> / <code>--retry</code> /
+  <code>--sync-after</code> checkboxes, and a <strong>Start Batch</strong> button. It calls
+  the exact same code as the CLI (<code>run_batch()</code>), just in a background thread of
+  the already-running app — so nothing above changes, it's just another way to launch it.
+  The panel is replaced by the progress banner while a batch (CLI- or UI-launched) is
+  active, and reappears with refreshed counts once it finishes. <strong>Start Training</strong>
+  and <strong>Calibrate Thresholds</strong> both refuse to start while a batch is running,
+  and the top-level <code>config/</code> folder is never offered (it holds
+  <code>default.yaml</code>).
+</p>
 
 <hr>
 

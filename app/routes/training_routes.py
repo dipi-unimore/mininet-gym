@@ -29,6 +29,10 @@ def create_training_blueprint(state):
             return jsonify({"status": SystemStatus.ERROR,
                             "message": "Cannot start training while threshold calibration is running."}), 409
 
+        if isinstance(state.get('batch'), dict) and state['batch'].get('active'):
+            return jsonify({"status": SystemStatus.ERROR,
+                            "message": "Cannot start training while a batch is running. Stop the batch first."}), 409
+
         if state.get('main_ref') is None:
             return jsonify({"status": SystemStatus.ERROR, "message": "The main function has not been referenced"}), 500
 
@@ -52,6 +56,10 @@ def create_training_blueprint(state):
 
     @bp.route('/stop_training', methods=['POST'])
     def stop_training():
+        # If a batch (utility/run_batch.py) is driving experiments, Stop means
+        # "stop the whole batch", not just this one run — run_batch checks this.
+        if isinstance(state.get('batch'), dict) and state['batch'].get('active'):
+            state['batch']['abort'] = True
         if state.get('training_thread') is not None and state['training_thread'].is_alive():
             state['stop_event'].set()
             state['training_thread'].join()
